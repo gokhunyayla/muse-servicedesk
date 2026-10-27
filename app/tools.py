@@ -388,6 +388,16 @@ def search_knowledge(ctx: Ctx, query: str) -> dict:
             "note": "" if results else "No SOP covers this; say so to the employee and proceed on general expertise."}
 
 
+@tool("Search the reference policies and procedures (documents the desk uploaded: HR/IT policies, vendor manuals, "
+      "compliance rules). Returns the exact passages; rely only on their wording and cite [REF:doc#n]. Use it when "
+      "a request touches policy, entitlement, approval rules or a documented procedure.", ALL, query=STR)
+def search_references(ctx: Ctx, query: str) -> dict:
+    from app import references
+    results = references.search(ctx.agent, query, db=ctx.db)
+    return {"ok": True, "results": results, "matched": bool(results),
+            "note": "" if results else "No reference document covers this; do not state policy you cannot quote."}
+
+
 @tool("Propose a new SOP for your tier when you solved something no SOP covered: symptom → checks → fix steps "
       "with the exact tools you used → when to hand off. It becomes a draft an admin publishes.",
       ALL, title=STR, content=STR)

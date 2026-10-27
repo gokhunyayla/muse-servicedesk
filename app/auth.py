@@ -627,12 +627,32 @@ def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = 
 <div class="row end" style="margin-top:8px">{acts}</div></div>"""
     chips = "".join(f'<a class="tab {"on" if tier == t else ""}" href="/knowledge?tier={t}&q={_esc(q)}">{t}</a>' for t in ("", "L1", "L2", "L3", "L4", "shared")).replace('href="/knowledge?tier=&', 'href="/knowledge?tier=&').replace('>​</a>', '>All</a>')
     chips = chips.replace(f'<a class="tab {"on" if tier == "" else ""}" href="/knowledge?tier=&q={_esc(q)}"></a>', f'<a class="tab {"on" if tier == "" else ""}" href="/knowledge?q={_esc(q)}">All</a>')
+    from app import references
+    refs = references.listing()
+    def refcard(d):
+        kb = f"{d['size']/1024:.0f} KB"
+        return f"""<div class="draft"><div class="dh"><span class="tag">{d['scope']}</span><b>{_esc(d['title'])}</b><small>{_esc(d['filename'])} · {kb} · {d['chunks']} passages · {_esc(d['uploaded_by'])} · {d['created_at'][:10]}</small></div>
+{('<p class="muted" style="margin:6px 0 0">' + _esc(d['description']) + '</p>') if d['description'] else ''}
+<div class="row end" style="margin-top:8px"><a class="btn" href="/references/search?q=&tier={d['scope'] if d['scope']!='shared' else 'L1'}" style="display:none"></a>{('<button class="btn" onclick="removeRef(' + str(d['id']) + ')">Remove</button>') if admin else ''}</div></div>"""
+    ref_section = f"""<h3>Reference policies &amp; procedures ({len(refs)})</h3>
+<p class="muted">Documents people upload for the agents to quote from: HR/IT policies, compliance rules, vendor procedures. PDF, DOCX, Markdown or text. Agents cite passages as [REF:doc#n] and never state a policy they cannot quote.</p>
+<div class="pagehead" style="margin-bottom:10px"><div class="tl"><input class="search" id="refq" placeholder="Try a search as an agent would…" style="width:300px" onkeydown="if(event.key==='Enter')refSearch()"><button class="btn" onclick="refSearch()">Search</button></div><button class="btn primary slim" onclick="openModal('refModal')">+ Upload document</button></div>
+<div id="refOut"></div>
+{''.join(refcard(d) for d in refs) or '<p class="muted">No reference documents yet.</p>'}
+<div class="modal" id="refModal"><div class="box"><h3>Upload a reference document</h3>
+<form method="post" action="/references" enctype="multipart/form-data" onsubmit="document.getElementById('upBtn').disabled=true;document.getElementById('upBtn').textContent='Uploading…'">
+<label>File (PDF, DOCX, Markdown, text — max 25 MB)</label><input type="file" name="file" accept=".pdf,.docx,.md,.markdown,.txt" required>
+<label>Title</label><input name="title" placeholder="e.g. Information Security Policy v3">
+<label>Scope</label><select name="scope"><option value="shared">shared · every agent</option><option value="L1">L1</option><option value="L2">L2</option><option value="L3">L3</option><option value="L4">L4</option></select>
+<label>Description (optional)</label><input name="description" placeholder="What is this for, who owns it">
+<div class="row end"><button type="button" class="btn" onclick="closeModal('refModal')">Cancel</button><button class="btn primary slim" id="upBtn" type="submit">Upload</button></div></form></div></div>"""
     body = f"""<div class="pagehead"><p class="muted">Procedures the agents follow. Every agent searches its own pool and <b>shared</b>; other pools are reachable too. Agents' and the Supervisor's proposals wait here as drafts until an admin publishes them.</p>
 <button class="btn primary slim" onclick="openModal('sopModal');newSop()">+ Add SOP</button></div>
 {('<h3>Drafts awaiting review (' + str(len(drafts)) + ')</h3>' + ''.join(card(r, True) for r in drafts)) if drafts else ''}
 <h3>Knowledge base</h3><div class="tl" style="margin-bottom:10px"><div class="tabs" style="margin:0;border:0">{chips}</div>
 <form method="get" action="/knowledge" style="display:inline"><input type="hidden" name="tier" value="{_esc(tier)}"><input class="search" name="q" value="{_esc(q)}" placeholder="Search…" style="width:240px"></form></div>
 {''.join(card(r) for r in live) or '<p class="muted">Nothing here yet.</p>'}
+{ref_section}
 <div class="modal" id="sopModal"><div class="box" style="width:min(720px,100%)"><h3 id="sopTitle">Add a SOP</h3>
 <label>Tier</label><select id="sTier"><option value="L1">L1 · first contact</option><option value="L2">L2 · devices &amp; network</option><option value="L3">L3 · servers &amp; security</option><option value="L4">L4 · vendors &amp; logistics</option><option value="shared">shared · every agent</option></select>
 <label>Title</label><input id="sTitle" placeholder="Symptom or request, e.g. VPN cannot connect from home">
@@ -646,6 +666,10 @@ async function saveSop(){{const tier=document.getElementById('sTier').value,titl
  const r=editing?await fetch('/sops/'+editing,{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{title,content,tier}})}})
                 :await fetch('/sops',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{tier,title,content}})}});
  if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
+async function removeRef(id){{if(!confirm('Remove this document from the knowledge base?'))return;const r=await fetch('/references/'+id,{{method:'DELETE'}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
+async function refSearch(){{const q=document.getElementById('refq').value.trim();if(!q)return;const r=await (await fetch('/references/search?q='+encodeURIComponent(q))).json();
+ document.getElementById('refOut').innerHTML=r.length?r.map(x=>`<div class="draft"><div class="dh"><span class="tag">REF:${{x.ref}}</span><b>${{esc(x.document)}}</b><small>${{x.heading?esc(x.heading)+' · ':''}}${{x.page?'page '+x.page:''}}</small></div><pre>${{esc(x.text)}}</pre></div>`).join(''):'<p class="muted">No passage matches.</p>';}}
+function esc(x){{return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
 async function setStatus(k,status){{const r=await fetch('/sops/'+k+'/status',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{status}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
 </script>"""
     return _page("Knowledge", body, wide=True, user=user, active="knowledge")

@@ -313,6 +313,48 @@ def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
                 for r in db.query(SupervisorRun).order_by(SupervisorRun.id.desc()).limit(min(limit, 100))]
 
 
+@app.post("/references")
+async def upload_reference(request: Request, title: str = Form(""), scope: str = Form("shared"), description: str = Form(""),
+                           file: UploadFile = File(...), user=Depends(current_user)) -> dict:
+    """A desk user uploads a reference policy/procedure (PDF, DOCX, Markdown, text)."""
+    from app import references
+    check_origin(request)
+    data = await file.read()
+    try:
+        with session() as db:
+            doc = references.add(title or file.filename, file.filename or "document", data, by=user.email, scope=scope,
+                                 description=description, mime=file.content_type or "", db=db)
+            audit(db, user.email, "reference.upload", target=doc.id, detail=f"{doc.title} ({doc.chunks} passages, {scope})")
+            return {"id": doc.id, "title": doc.title, "chunks": doc.chunks, "scope": doc.scope}
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/references")
+def list_references(user=Depends(current_user)) -> list[dict]:
+    from app import references
+    return references.listing()
+
+
+@app.delete("/references/{doc_id}")
+def delete_reference(doc_id: int, request: Request, user=Depends(current_user)) -> dict:
+    from app import references
+    if user.role != "admin":
+        raise HTTPException(403, "admin only")
+    check_origin(request)
+    with session() as db:
+        if not references.remove(doc_id, by=user.email, db=db):
+            raise HTTPException(404)
+        audit(db, user.email, "reference.remove", target=doc_id)
+    return {"id": doc_id, "status": "removed"}
+
+
+@app.get("/references/search")
+def search_references_api(q: str, tier: str = "L1", user=Depends(current_user)) -> list[dict]:
+    from app import references
+    return references.search(tier, q)
+
+
 @app.get("/sops")
 def list_sops(status: str | None = None, user=Depends(current_user)) -> list[dict]:
     from app import knowledge

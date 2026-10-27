@@ -246,3 +246,32 @@ class SopVersion(Base):
     content: Mapped[str] = mapped_column(Text)
     saved_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     saved_by: Mapped[str] = mapped_column(String(255), default="")
+
+
+class RefDoc(Base):
+    """A reference policy / procedure uploaded by a desk user (PDF, DOCX, Markdown, text)."""
+    __tablename__ = "ref_docs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(255))
+    filename: Mapped[str] = mapped_column(String(255))
+    mime: Mapped[str] = mapped_column(String(120), default="")
+    size: Mapped[int] = mapped_column(default=0)
+    scope: Mapped[str] = mapped_column(String(8), default="shared")     # shared | L1..L4
+    description: Mapped[str] = mapped_column(Text, default="")
+    uploaded_by: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    chunks: Mapped[int] = mapped_column(default=0)
+    status: Mapped[str] = mapped_column(String(16), default="active")   # active | removed
+
+
+class RefChunk(Base):
+    """A passage of a reference document; what search returns and agents cite as [REF:doc#n]."""
+    __tablename__ = "ref_chunks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    doc_id: Mapped[int] = mapped_column(ForeignKey("ref_docs.id"))
+    idx: Mapped[int] = mapped_column()
+    page: Mapped[int | None] = mapped_column(nullable=True)
+    heading: Mapped[str] = mapped_column(String(255), default="")
+    text: Mapped[str] = mapped_column(Text)
