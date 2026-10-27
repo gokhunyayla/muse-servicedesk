@@ -313,6 +313,67 @@ def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
                 for r in db.query(SupervisorRun).order_by(SupervisorRun.id.desc()).limit(min(limit, 100))]
 
 
+# ---- Desk Chat -------------------------------------------------------------------------------
+
+@app.get("/chat/threads")
+def chat_threads(user=Depends(current_user)) -> list[dict]:
+    from app.db import ChatThread
+    with session() as db:
+        return [{"id": t.id, "title": t.title, "updated_at": t.updated_at.isoformat()}
+                for t in db.query(ChatThread).filter(ChatThread.user_id == user.id).order_by(ChatThread.updated_at.desc()).limit(50)]
+
+
+@app.post("/chat/threads")
+def chat_new_thread(request: Request, user=Depends(current_user)) -> dict:
+    from app.db import ChatThread
+    check_origin(request)
+    with session() as db:
+        t = ChatThread(user_id=user.id)
+        db.add(t)
+        db.flush()
+        return {"id": t.id, "title": t.title}
+
+
+@app.get("/chat/threads/{thread_id}")
+def chat_messages(thread_id: int, user=Depends(current_user)) -> list[dict]:
+    from app.db import ChatMessage, ChatThread
+    with session() as db:
+        t = db.get(ChatThread, thread_id)
+        if t is None or t.user_id != user.id:
+            raise HTTPException(404)
+        return [{"id": m.id, "at": m.at.isoformat(), "role": m.role, "content": m.content, "actions": m.actions}
+                for m in db.query(ChatMessage).filter(ChatMessage.thread_id == thread_id).order_by(ChatMessage.id)]
+
+
+class ChatIn(BaseModel):
+    text: str
+
+
+@app.post("/chat/threads/{thread_id}")
+def chat_say(thread_id: int, m: ChatIn, request: Request, user=Depends(current_user)) -> dict:
+    from app import chat
+    check_origin(request)
+    if not m.text.strip():
+        raise HTTPException(422, "empty message")
+    try:
+        return chat.ask(user, thread_id, m.text.strip())
+    except PermissionError:
+        raise HTTPException(404)
+
+
+@app.delete("/chat/threads/{thread_id}")
+def chat_delete(thread_id: int, request: Request, user=Depends(current_user)) -> dict:
+    from app.db import ChatMessage, ChatThread
+    check_origin(request)
+    with session() as db:
+        t = db.get(ChatThread, thread_id)
+        if t is None or t.user_id != user.id:
+            raise HTTPException(404)
+        db.query(ChatMessage).filter(ChatMessage.thread_id == thread_id).delete()
+        db.delete(t)
+    return {"id": thread_id, "deleted": True}
+
+
 @app.post("/references")
 async def upload_reference(request: Request, title: str = Form(""), scope: str = Form("shared"), description: str = Form(""),
                            kind: str = Form("policy"), enforcement: str = Form("strict"),

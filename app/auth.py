@@ -599,6 +599,60 @@ async def settings_supervisor(request: Request, admin: User = Depends(admin_user
     return RedirectResponse("/settings?tab=supervisor&info=Supervisor+settings+saved", 303)
 
 
+@router.get("/chat", response_class=HTMLResponse)
+def chat_page(user: User = Depends(current_user)) -> str:
+    """Talk to the desk's brain: status, who holds what, act with your authority."""
+    from app.auth import RAIL_CSS, rail
+    head = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Desk Chat · Muse ServiceDesk</title>'
+            f'<meta name="viewport" content="width=device-width,initial-scale=1"><style>{CSS}{CHAT_CSS}</style></head>')
+    return rf"""{head}<body class="app">{rail(user, "chat")}<div class="page chatpage">
+<aside class="threads"><div class="th-head"><b>Desk Chat</b><button class="btn primary slim" onclick="newThread()">+ New</button></div><div id="threads"></div></aside>
+<section class="conv"><div id="msgs" class="msgs"><div class="hello"><h2>Ask the desk</h2><p class="muted">I know every ticket, who holds what, SLA risk, approvals, drafts and the Supervisor's work — and I can act for you.</p>
+<div class="sugg"><button onclick="say('What is the desk working on right now?')">What is the desk working on right now?</button><button onclick="say('Which tickets are at risk of breaching SLA and what should I do?')">Which tickets are at SLA risk?</button><button onclick="say('Is there anything waiting for my decision?')">Anything waiting for me?</button><button onclick="say('Şu an açık biletleri ve sahiplerini özetle')">Açık biletleri özetle</button></div></div></div>
+<form class="composer" onsubmit="send(event)"><textarea id="box" rows="2" placeholder="Ask anything about the desk, or tell me what to do… (Enter to send, Shift+Enter for a new line)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){{event.preventDefault();send(event)}}"></textarea><button class="btn primary" id="sendBtn" type="submit">Send</button></form></section></div>
+{JS}<script>
+let cur=null;const $=s=>document.querySelector(s);const esc=x=>String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function md(t){{let h=esc(t);h=h.replace(/\[([^\]]+)\]\((\/[^)\s]*)\)/g,'<a href="$2">$1</a>').replace(/(^|[\s(])#(\d+)(?![\w-])/g,'$1<a href="/tickets?id=$2">#$2</a>')
+ .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+ const lines=h.split('\n');let out='',inList=false;for(const l of lines){{const m=/^\s*[-*•]\s+(.*)$/.exec(l);if(m){{if(!inList){{out+='<ul>';inList=true}}out+='<li>'+m[1]+'</li>';}}else{{if(inList){{out+='</ul>';inList=false}}if(/^\s*\d+[.)]\s+/.test(l))out+='<div>'+l+'</div>';else if(l.trim()==='')out+='<div class="gap"></div>';else out+='<div>'+l+'</div>';}}}}if(inList)out+='</ul>';return out;}}
+async function loadThreads(){{const ts=await (await fetch('/chat/threads')).json();$('#threads').innerHTML=ts.map(t=>`<a class="thread ${{cur===t.id?'on':''}}" href="#" onclick="openThread(${{t.id}});return false">${{esc(t.title)}}<small>${{new Date(t.updated_at).toLocaleString([], {{dateStyle:'short',timeStyle:'short'}})}}</small><span class="x" onclick="event.preventDefault();event.stopPropagation();delThread(${{t.id}})" title="Delete">×</span></a>`).join('')||'<small class="muted" style="padding:8px;display:block">No conversations yet.</small>';}}
+async function newThread(){{const t=await (await fetch('/chat/threads',{{method:'POST'}})).json();cur=t.id;await loadThreads();$('#msgs').innerHTML='';$('#box').focus();}}
+async function openThread(id){{cur=id;const ms=await (await fetch('/chat/threads/'+id)).json();$('#msgs').innerHTML=ms.map(render).join('');$('#msgs').scrollTop=1e9;loadThreads();}}
+async function delThread(id){{if(!confirm('Delete this conversation?'))return;await fetch('/chat/threads/'+id,{{method:'DELETE'}});if(cur===id){{cur=null;$('#msgs').innerHTML='';}}loadThreads();}}
+function render(m){{const acts=(m.actions||[]).length?`<div class="acts">${{m.actions.map(a=>`<span class="chip ${{a.ok?'':'err'}}">${{esc(a.tool)}}${{a.args&&a.args.ticket_id?' #'+a.args.ticket_id:''}}</span>`).join('')}}</div>`:'';
+ return `<div class="m ${{m.role}}"><div class="bubble">${{m.role==='assistant'?md(m.content):esc(m.content)}}${{acts}}</div></div>`;}}
+function say(t){{$('#box').value=t;send();}}
+async function send(ev){{if(ev)ev.preventDefault();const text=$('#box').value.trim();if(!text)return;if(!cur)await newThread();
+ $('#msgs').insertAdjacentHTML('beforeend',render({{role:'user',content:text}}));$('#box').value='';$('#sendBtn').disabled=true;
+ $('#msgs').insertAdjacentHTML('beforeend','<div class="m assistant" id="typing"><div class="bubble muted">thinking with Muse Wonder…</div></div>');$('#msgs').scrollTop=1e9;
+ try{{const r=await (await fetch('/chat/threads/'+cur,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{text}})}})).json();
+  document.getElementById('typing').remove();$('#msgs').insertAdjacentHTML('beforeend',render({{role:'assistant',content:r.answer||r.detail||'(no answer)',actions:r.actions||[]}}));}}
+ catch(e){{document.getElementById('typing').remove();$('#msgs').insertAdjacentHTML('beforeend',render({{role:'assistant',content:'Failed: '+e}}));}}
+ $('#sendBtn').disabled=false;$('#msgs').scrollTop=1e9;loadThreads();}}
+loadThreads();
+</script></body></html>"""
+
+
+CHAT_CSS = """
+.chatpage{display:grid;grid-template-columns:260px 1fr;height:100vh}
+.threads{border-right:1px solid var(--line);background:var(--card);display:flex;flex-direction:column;min-height:0}
+.th-head{display:flex;justify-content:space-between;align-items:center;padding:12px 12px 8px}.th-head .btn{margin:0}
+#threads{overflow:auto;padding:0 8px 8px}.thread{display:block;padding:8px 10px;border-radius:8px;color:var(--fg);text-decoration:none;font-size:13px;position:relative;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thread small{display:block;color:var(--muted);font-size:11px}.thread:hover{background:var(--bg)}.thread.on{background:rgba(8,102,255,.14)}
+.thread .x{position:absolute;right:8px;top:8px;color:var(--muted);display:none}.thread:hover .x{display:inline}
+.conv{display:flex;flex-direction:column;min-height:0}.msgs{flex:1;overflow:auto;padding:20px 24px;display:flex;flex-direction:column;gap:12px}
+.hello{max-width:640px;margin:40px auto;text-align:center}.hello h2{margin:0 0 6px}.sugg{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+.sugg button{font:inherit;font-size:13px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}.sugg button:hover{background:var(--bg)}
+.m{display:flex}.m.user{justify-content:flex-end}.bubble{max-width:760px;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.m.user .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}.m.assistant .bubble{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.bubble ul{margin:4px 0 4px 18px;padding:0}.bubble .gap{height:6px}.bubble a{color:var(--accent);text-decoration:none;font-weight:600}.bubble code{font-size:12px;background:var(--bg);padding:1px 5px;border-radius:4px}
+.acts{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}.chip{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}.chip.err{color:var(--bad);border-color:var(--bad)}
+.composer{display:flex;gap:8px;padding:12px 24px 16px;border-top:1px solid var(--line);background:var(--card)}.composer textarea{flex:1;font:inherit;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);resize:none}
+.composer .btn{margin:0;width:auto}
+@media(max-width:900px){.chatpage{grid-template-columns:1fr;height:auto}.threads{max-height:160px}.msgs{min-height:50vh}}
+"""
+
+
 @router.get("/knowledge", response_class=HTMLResponse)
 def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = "") -> str:
     """The knowledge base: browse and edit SOPs per tier; drafts from agents and the Supervisor wait here."""
@@ -766,6 +820,7 @@ def _alert(error: str, info: str) -> str:
 
 
 ICONS = {
+    "chat": '<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6.5A8 8 0 0 1 13 4a8 8 0 0 1 8 8z"/><path d="M9 11h6M9 14h4"/></svg>',
     "dash": '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
     "tickets": '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg>',
     "users": '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>',
@@ -893,7 +948,7 @@ def rail(user: User | None, active: str = "") -> str:
     def item(key, href, label):
         return (f'<a class="nav {"on" if active == key else ""}" href="{href}" title="{label}" aria-label="{label}">'
                 f'{ICONS[key]}<span>{label}</span></a>')
-    nav = item("dash", "/", "Dashboard") + item("tickets", "/tickets", "Tickets") + item("knowledge", "/knowledge", "Knowledge")
+    nav = item("chat", "/chat", "Desk Chat") + item("dash", "/", "Dashboard") + item("tickets", "/tickets", "Tickets") + item("knowledge", "/knowledge", "Knowledge")
     if admin:
         nav += item("users", "/users", "Desk users") + item("audit", "/audit", "Audit log")
     return (f'<aside class="rail"><a class="logo" href="/" title="Muse ServiceDesk">{LOGO}</a><nav>{nav}</nav>'

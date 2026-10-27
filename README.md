@@ -47,6 +47,10 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   It also watches SLA: tickets at or past the admin-set at-risk share of a target (Settings → SLA) get the least
   drastic fix that moves the clock — nudge the employee, remind the approver, reassign to another tier, or
   escalate to a human.
+* **Desk Chat.** A conversation with the desk's brain for desk users (`/chat`): what is the desk working on, who
+  holds what, what is at SLA risk, what waits for me — with links into the console — and actions with the
+  user's authority (assign to me, reply to the employee, change status, approve, run the Supervisor, publish a
+  draft), every one audited.
 * **Reports.** Daily, weekly and monthly reports (Settings → Reports: recipients, schedule, SMTP): numbers from the
   ticket store, a narrative by Muse Wonder, delivered as HTML e-mail; history and "send test" in the console.
 * **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
@@ -66,6 +70,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 | Locating objects in camera frames (sticky note, monitor) | SAM 3.1 | `app/vision.py`, `app/camera.py` |
 | Supervisor: reviews the desk, merges emerging problems, researches gaps on the web and drafts SOPs, asks humans for what is missing | Muse Wonder 1.0 | `app/supervisor.py` |
 | Daily / weekly / monthly management reports (narrative over the desk's numbers, e-mailed) | Muse Wonder 1.0 | `app/reports.py` |
+| Desk Chat: desk users talk to the desk's brain — status, who holds what, SLA risk — and act with their authority | Muse Wonder 1.0 | `app/chat.py` |
 
 ## Scenarios covered (all run against the real models)
 
@@ -93,7 +98,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # database URL, port, time zone — no API keys here
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 80 offline tests with a scripted model
+.venv/bin/python -m pytest      # 83 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.
@@ -152,6 +157,7 @@ app/camera.py       compliance watcher               app/proactive.py  inventory
 app/scheduler.py    follow-ups, reminders, outbound  app/whatsapp.py   Cloud API channel
 app/supervisor.py   desk-manager agent (problems, research, SOP drafts, human asks)
 app/reports.py      daily/weekly/monthly e-mail reports (Muse Wonder narrative)
+app/chat.py         Desk Chat: the desk's brain for desk users (status + actions)
 app/sla.py          timing & SLA from the trail      app/auth.py       console sign-in, users, settings, knowledge
 app/dashboard.py    manager dashboard                app/main.py       HTTP API
 tests/              scenario tests over a scripted model

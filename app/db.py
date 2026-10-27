@@ -277,3 +277,25 @@ class RefChunk(Base):
     page: Mapped[int | None] = mapped_column(nullable=True)
     heading: Mapped[str] = mapped_column(String(255), default="")
     text: Mapped[str] = mapped_column(Text)
+
+
+class ChatThread(Base):
+    """A desk user's conversation with the desk brain."""
+    __tablename__ = "chat_threads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str] = mapped_column(String(255), default="New conversation")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("chat_threads.id"))
+    at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    role: Mapped[str] = mapped_column(String(16))          # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    actions: Mapped[list] = mapped_column(JSON, default=list)   # tool calls made while answering
