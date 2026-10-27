@@ -157,7 +157,7 @@ main{display:grid;gap:16px;padding:12px 16px 16px}main.dash{grid-template-column
 .item .r small{color:var(--muted);font-size:11px;white-space:nowrap}.item .pill{font-size:11px;padding:1px 7px}.item input{margin-top:3px}
 .dcols{grid-template-columns:1fr 260px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
-.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.kpi{padding:10px;border:1px solid var(--line);border-radius:8px}
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.kpis.six{grid-template-columns:repeat(6,1fr)}@media(max-width:900px){.kpis.six{grid-template-columns:repeat(3,1fr)}}.kpi{padding:10px;border:1px solid var(--line);border-radius:8px}
 
 .kpi b{display:block;font-size:22px}.kpi span{color:var(--muted);font-size:12px}
 .scroll{overflow-x:auto}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -215,7 +215,8 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <section class="card"><div class="kpis" id="kpis"></div></section>
 <section class="card"><h3 style="margin-top:0">Top issues</h3><div id="issues"></div></section>
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
-<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor</h3><div class="actions"><a class="btn" href="/knowledge">Knowledge</a><a class="btn" href="/settings?tab=supervisor">Settings</a></div></div><div id="sup" class="muted" style="margin-top:8px">—</div></section>
+<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor <small id="supMode"></small></h3><div class="actions"><a class="btn" href="/knowledge">Knowledge</a><a class="btn" href="/settings?tab=supervisor">Settings</a><button class="btn primary" id="runBtn" onclick="runSupervisor()">Run now</button></div></div>
+<div class="kpis six" id="supKpis" style="margin-top:10px"></div><div id="sup" class="muted" style="margin-top:10px">—</div></section>
 </main>
 <main class="tix only-tickets">
 <section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
@@ -275,6 +276,8 @@ async function load(){
   $('#issues').innerHTML=s.top_issues.map(([k,v])=>`<div>${esc(k)} <small>${v}</small><div class="bar"><i style="width:${v/max*100}%"></i></div></div>`).join('')||'<small>No tickets in this period.</small>';
   const tc=s.tool_calls_by_tier||{};$('#tiers').innerHTML=['L1','L2','L3','L4'].map(t=>`<span class="pill open">${t}: ${tc[t]||0} tool calls</span>`).join('');
   const h=s.handoffs||{};$('#handoffs').innerHTML=Object.keys(h).length?Object.entries(h).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · '):'none';
+  try{const ss=await (await fetch('/supervisor/stats?period='+period)).json();$('#supMode').textContent=ss.mode==='auto'?'· automatic':'· manual';
+   $('#supKpis').innerHTML=[['Runs',ss.runs],['Problems merged',ss.problems],['SOPs drafted',ss.sops_drafted],['SOPs published',ss.sops_published],['Human asks',ss.human_asks],['Research calls',ss.research]].map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');}catch(e){}
   try{const runs=await (await fetch('/supervisor/runs?limit=3')).json();
    $('#sup').innerHTML=runs.length?runs.map(r=>`<div class="suprun"><b>${fmt(r.started_at)}</b> <small>${r.trigger}</small>${r.error?` <span class="pill escalated">error</span>`:''}
     <div>${esc(r.summary||r.error||'running…')}</div><small>${(r.findings&&r.findings.clusters||[]).length} clusters · ${(r.findings&&r.findings.signals||[]).length} failure signals · ${(r.actions||[]).length} actions${(r.actions||[]).length?': '+r.actions.map(a=>a.tool).join(', '):''}</small></div>`).join(''):'No runs yet. The scheduler runs it on the cadence set in Settings.';}catch(e){}
@@ -351,6 +354,8 @@ async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id))
  $('#trail').innerHTML=renderTimeline(t.events);$('#composer').style.display='';
  document.querySelectorAll('.item').forEach(r=>r.classList.toggle('on',+r.dataset.id===t.id));
  if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#detail').scrollIntoView({behavior:'smooth'});}}
+async function runSupervisor(){const b=$('#runBtn');b.disabled=true;b.textContent='Running…';$('#sup').textContent='The Supervisor is reviewing the desk (Muse Wonder)…';
+ try{await fetch('/supervisor/run',{method:'POST'});}catch(e){}b.disabled=false;b.textContent='Run now';load();}
 async function sendReply(ev){ev.preventDefault();const text=$('#replyText').value.trim();if(!text||!cur)return;
  await fetch('/tickets/'+cur+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});$('#replyText').value='';show(cur);}
 async function setStatus(id,status){if(status==='resolved'){closeTicket(id);return;}

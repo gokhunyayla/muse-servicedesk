@@ -241,6 +241,16 @@ def supervisor_run_now(request: Request, user=Depends(current_user)) -> dict:
     return {"id": r.id, "summary": r.summary, "actions": r.actions, "findings": r.findings, "error": r.error}
 
 
+@app.get("/supervisor/stats")
+def supervisor_stats(period: str | None = None, user=Depends(current_user)) -> dict:
+    from app import supervisor
+    from app.dashboard import period_start
+    st = supervisor.stats(period_start(period))
+    st["last_run"] = st["last_run"].isoformat() if st["last_run"] else None
+    st["mode"] = supervisor.config().get("mode", "manual")
+    return st
+
+
 @app.get("/supervisor/runs")
 def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
     from app.db import SupervisorRun

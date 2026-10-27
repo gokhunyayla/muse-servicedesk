@@ -481,8 +481,9 @@ def settings_page(user: User = Depends(current_user), tab: str = "sla", info: st
         body = f"""<p class="muted">The Supervisor reviews every open ticket on a schedule: merges emerging problems, finds where the
 agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or asks a human for exactly what is missing.</p>
 <form method="post" action="/settings/supervisor">
-{chk('enabled', 'Enabled', 'Run on the schedule below')}
-{num('every_minutes', 'Run every', 'Cadence of the review pass')}
+<div class="srow"><div><b>Mode</b><small>Manual: runs only when you press Run now. Auto: runs on the cadence below.</small></div>
+<select name="mode" style="width:160px" {"" if admin else "disabled"}><option value="manual" {"selected" if c.get("mode","manual")=="manual" else ""}>Manual</option><option value="auto" {"selected" if c.get("mode")=="auto" else ""}>Automatic</option></select></div>
+{num('every_minutes', 'Run every', 'Cadence of the review pass (automatic mode)')}
 {num('window_hours', 'Problem window', 'Look back this far for similar tickets', 'h')}
 {num('cluster_min', 'Problem threshold', 'Similar tickets from different employees that make a problem record', 'tickets')}
 {num('stuck_minutes', 'Stuck after', 'Open ticket with no activity for this long counts as failing')}
@@ -518,7 +519,7 @@ async def settings_supervisor(request: Request, admin: User = Depends(admin_user
             value[k] = max(1, int(form.get(k, DEFAULT_SUPERVISOR[k])))
         except (TypeError, ValueError):
             pass
-    value["enabled"] = form.get("enabled") == "1"
+    value["mode"] = "auto" if form.get("mode") == "auto" else "manual"
     value["auto_publish_sops"] = form.get("auto_publish_sops") == "1"
     value["search_provider"] = form.get("search_provider") if form.get("search_provider") in ("ddg", "tavily") else "ddg"
     put_setting("supervisor", value)

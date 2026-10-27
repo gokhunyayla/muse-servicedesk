@@ -31,7 +31,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   them first (`search_knowledge`) and write new ones when they solve something uncovered (`write_sop`).
 * **General, not scripted.** There is no per-scenario code. The scenarios below are acceptance tests over
   the same tools, SOPs and lifecycle; a problem nobody anticipated goes through the same path.
-* **Supervisor.** A desk-manager agent runs on a schedule (Settings → Supervisor): clusters open tickets into
+* **Supervisor.** A desk-manager agent runs on a schedule (Settings → Supervisor; manual by default, automatic on a cadence if enabled): clusters open tickets into
   problem records, detects where the tier agents fail (stuck, escalated, SLA breach, tool errors, low ratings),
   researches the gap on the web and writes a draft SOP that an admin publishes at `/knowledge`, or opens a
   `[Supervisor]` ticket asking a human for exactly what is missing (access, purchase, policy, on-site work).

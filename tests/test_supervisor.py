@@ -93,5 +93,8 @@ def test_nothing_to_do_and_cadence():
     r = supervisor.run("manual")
     assert "Nothing to do" in r.summary and r.actions == []
     assert supervisor.due(r) is False                       # just ran
-    put_setting("supervisor", {**supervisor.DEFAULT_SUPERVISOR, "enabled": False})
-    assert supervisor.due(None) is False
+    assert supervisor.due(None) is False                    # default mode is manual: never due on its own
+    put_setting("supervisor", {**supervisor.DEFAULT_SUPERVISOR, "mode": "auto"})
+    assert supervisor.due(None) is True
+    st = supervisor.stats()
+    assert st["runs"] == 1 and st["problems"] == 0

@@ -24,8 +24,8 @@ from app.tools import STR, Ctx, run_tool, tool, tools_for
 logger = logging.getLogger(__name__)
 SUP = ("SUP",)
 DEFAULT_SUPERVISOR = {
-    "enabled": True,
-    "every_minutes": 10,        # cadence (Settings → Supervisor)
+    "mode": "manual",           # manual (Run now only) | auto (on the cadence below)
+    "every_minutes": 10,        # cadence when mode is auto (Settings → Supervisor)
     "window_hours": 24,         # how far back to look for emerging problems
     "cluster_min": 3,           # similar open tickets that make a problem
     "stuck_minutes": 60,        # open ticket with no activity for this long = stuck
@@ -335,8 +335,33 @@ def _agent_loop(db, prompt: str, actions: list[dict]) -> str:
 
 def due(last: SupervisorRun | None, cfg: dict | None = None) -> bool:
     cfg = cfg or config()
-    if not cfg.get("enabled", True):
+    if cfg.get("mode", "manual") != "auto":
         return False
     if last is None or last.finished_at is None:
         return last is None
     return _now() - last.finished_at >= timedelta(minutes=int(cfg["every_minutes"]))
+
+
+def stats(since=None) -> dict:
+    """What the Supervisor did in a period: runs, problems merged, SOPs drafted/published, human asks, notes."""
+    with session() as db:
+        q = db.query(SupervisorRun)
+        if since:
+            q = q.filter(SupervisorRun.started_at >= since)
+        runs = q.all()
+        c = Counter()
+        for r in runs:
+            for a in r.actions or []:
+                if a.get("ok"):
+                    c[a["tool"]] += 1
+            c["errors"] += bool(r.error)
+        dq = db.query(SopDraft)
+        if since:
+            dq = dq.filter(SopDraft.created_at >= since)
+        drafts = dq.all()
+        return {"runs": len(runs), "problems": c["create_problem"], "sops_drafted": len(drafts),
+                "sops_published": sum(d.status == "published" for d in drafts),
+                "sops_pending": sum(d.status == "pending" for d in drafts),
+                "human_asks": c["open_human_ticket"], "notes": c["note_ticket"],
+                "research": c["web_search"] + c["fetch_page"], "errors": c["errors"],
+                "last_run": max((r.started_at for r in runs), default=None)}
