@@ -93,3 +93,66 @@ def for_thread(thread_id: int) -> dict:
     s = summary(scope_kind="chat", scope_id=thread_id)
     return {"calls": s["calls"], "total_tokens": s["total_tokens"], "max_prompt_tokens": s["max_prompt_tokens"],
             "avg_latency_ms": s["avg_latency_ms"], "context_windows": s["context_windows"]}
+
+
+def calls(since=None, limit: int = 500, scope_kind: str | None = None, model: str | None = None) -> list[dict]:
+    with session() as db:
+        q = db.query(LlmCall).order_by(LlmCall.id.desc())
+        if since:
+            q = q.filter(LlmCall.at >= since)
+        if scope_kind:
+            q = q.filter(LlmCall.scope == scope_kind)
+        if model:
+            q = q.filter(LlmCall.model == model)
+        return [{"id": r.id, "at": r.at.isoformat(), "model": r.model, "scope": r.scope, "scope_id": r.scope_id, "actor": r.actor,
+                 "prompt_tokens": r.prompt_tokens, "completion_tokens": r.completion_tokens, "total_tokens": r.total_tokens,
+                 "latency_ms": r.latency_ms, "tool_calls": r.tool_calls, "ok": r.ok} for r in q.limit(min(limit, 5000))]
+
+
+def daily(since=None) -> list[dict]:
+    """Per day (desk time zone): calls, tokens, average latency, errors."""
+    import os
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(os.getenv("DESK_TZ", "Europe/Istanbul"))
+    from datetime import UTC
+    with session() as db:
+        q = db.query(LlmCall)
+        if since:
+            q = q.filter(LlmCall.at >= since)
+        rows = q.all()
+    days: dict = {}
+    for r in rows:
+        d = r.at.replace(tzinfo=UTC).astimezone(tz).strftime("%Y-%m-%d")
+        x = days.setdefault(d, {"day": d, "calls": 0, "tokens": 0, "latency_ms": 0, "errors": 0})
+        x["calls"] += 1
+        x["tokens"] += r.total_tokens
+        x["latency_ms"] += r.latency_ms
+        x["errors"] += 0 if r.ok else 1
+    out = sorted(days.values(), key=lambda x: x["day"])
+    for x in out:
+        x["avg_latency_ms"] = round(x["latency_ms"] / x["calls"]) if x["calls"] else 0
+        del x["latency_ms"]
+    return out
+
+
+def tool_performance(since=None) -> list[dict]:
+    """Per tool: calls, failures and which tiers use it — from the ticket trails."""
+    from app.db import Event
+    with session() as db:
+        q = db.query(Event).filter(Event.kind == "tool_result")
+        if since:
+            q = q.filter(Event.at >= since)
+        stats: dict = {}
+        for e in q.all():
+            s = stats.setdefault(e.content, {"tool": e.content, "calls": 0, "failures": 0, "tiers": Counter()})
+            s["calls"] += 1
+            if isinstance(e.data, dict) and e.data.get("ok") is False:
+                s["failures"] += 1
+            s["tiers"][e.actor] += 1
+    out = []
+    for s in stats.values():
+        out.append({"tool": s["tool"], "calls": s["calls"], "failures": s["failures"],
+                    "failure_rate": round(100 * s["failures"] / s["calls"], 1) if s["calls"] else 0,
+                    "tiers": dict(s["tiers"])})
+    out.sort(key=lambda x: -x["calls"])
+    return out

@@ -754,6 +754,34 @@ CHAT_CSS = """
 """
 
 
+@router.get("/ai", response_class=HTMLResponse)
+def ai_page(user: User = Depends(current_user)) -> str:
+    """AI activity: every model call with date/time, per-day totals, and tool performance."""
+    body = rf"""<div class="pagehead"><p class="muted">Every Meta Model API call the desk made — when, which model, for what, how many tokens, how long — plus what the agents' tools did.</p>
+<div class="tl"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
+<select id="scopeSel" style="width:150px"><option value="">All scopes</option><option value="ticket">Tickets</option><option value="chat">Desk Chat</option><option value="supervisor">Supervisor</option><option value="report">Reports</option></select>
+<a class="btn" id="csv" href="/ai/calls.csv?period=all">Download CSV</a></div></div>
+<h3>Per day</h3><div id="daily" class="daily"></div>
+<h3>Tool performance</h3><div class="scroll"><table><thead><tr><th>Tool</th><th>Calls</th><th>Failures</th><th>Failure rate</th><th>Used by</th></tr></thead><tbody id="tools"></tbody></table></div>
+<h3>Calls <small class="muted" id="count"></small></h3><div class="scroll"><table><thead><tr><th>When</th><th>Model</th><th>For</th><th>Agent</th><th>In</th><th>Out</th><th>Total</th><th>Latency</th><th>Tools</th><th></th></tr></thead><tbody id="calls"></tbody></table></div>
+<script>
+let period='all',scope='';const $=s=>document.querySelector(s);const esc=x=>String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const tok=n=>{{n=+n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1000?(n/1000).toFixed(1)+'k':String(n);}};
+document.querySelectorAll('#period button').forEach(b=>b.onclick=()=>{{period=b.dataset.p;document.querySelectorAll('#period button').forEach(x=>x.classList.toggle('on',x===b));load();}});
+$('#scopeSel').onchange=()=>{{scope=$('#scopeSel').value;load();}};
+function link(r){{if(r.scope==='ticket'&&r.scope_id)return `<a href="/tickets?id=${{r.scope_id}}">ticket #${{r.scope_id}}</a>`;if(r.scope==='chat'&&r.scope_id)return `<a href="/chat">chat #${{r.scope_id}}</a>`;if(r.scope==='supervisor')return `<a href="/">Supervisor run ${{r.scope_id||''}}</a>`;if(r.scope==='report')return `<a href="/settings?tab=reports">report</a>`;return esc(r.scope||'—');}}
+async function load(){{$('#csv').href='/ai/calls.csv?period='+period;
+ const [d,t,c]=await Promise.all([fetch('/ai/daily?period='+period).then(r=>r.json()),fetch('/ai/tools?period='+period).then(r=>r.json()),fetch('/ai/calls?period='+period+(scope?'&scope='+scope:'')).then(r=>r.json())]);
+ const max=Math.max(1,...d.map(x=>x.tokens));
+ $('#daily').innerHTML=d.length?d.map(x=>`<div class="drow"><span class="dd">${{x.day}}</span><div class="bar"><i style="width:${{Math.round(100*x.tokens/max)}}%"></i></div><small>${{x.calls}} calls · ${{tok(x.tokens)}} tok · ${{(x.avg_latency_ms/1000).toFixed(1)}} s${{x.errors?' · <span class=bad>'+x.errors+' errors</span>':''}}</small></div>`).join(''):'<small class="muted">No calls in this period.</small>';
+ $('#tools').innerHTML=t.map(x=>`<tr><td><code>${{esc(x.tool)}}</code></td><td>${{x.calls}}</td><td>${{x.failures}}</td><td class="${{x.failure_rate>20?'bad':''}}">${{x.failure_rate}}%</td><td class="muted">${{Object.entries(x.tiers).map(([k,v])=>k+' '+v).join(', ')}}</td></tr>`).join('')||'<tr><td colspan=5 class=muted>none</td></tr>';
+ $('#count').textContent=c.length+' shown';
+ $('#calls').innerHTML=c.map(r=>`<tr class="${{r.ok?'':'bad'}}"><td class="mono">${{new Date(r.at+'Z').toLocaleString([], {{dateStyle:'short',timeStyle:'medium'}})}}</td><td>${{esc(r.model)}}</td><td>${{link(r)}}</td><td>${{esc(r.actor)}}</td><td>${{tok(r.prompt_tokens)}}</td><td>${{tok(r.completion_tokens)}}</td><td><b>${{tok(r.total_tokens)}}</b></td><td>${{(r.latency_ms/1000).toFixed(2)}} s</td><td>${{r.tool_calls}}</td><td>${{r.ok?'':'<span class="tag disabled">error</span>'}}</td></tr>`).join('')||'<tr><td colspan=10 class=muted>none</td></tr>';}}
+load();
+</script>"""
+    return _page("AI activity", body, wide=True, user=user, active="dash")
+
+
 @router.get("/knowledge", response_class=HTMLResponse)
 def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = "") -> str:
     """The knowledge base: browse and edit SOPs per tier; drafts from agents and the Supervisor wait here."""
@@ -1029,6 +1057,10 @@ td.act{text-align:right;width:40px}.kebab{border:1px solid transparent;backgroun
 .draft pre{white-space:pre-wrap;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto}.draft summary{cursor:pointer;color:var(--accent);font-size:13px}
 .pools{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}@media(max-width:800px){.pools{grid-template-columns:1fr 1fr}}.pool h4{margin:0 0 6px}.pool ul{margin:0;padding-left:18px;font-size:13px}
 .seg2{display:flex;gap:14px}.seg2 .check{margin:0}
+.daily{display:flex;flex-direction:column;gap:6px;margin:6px 0 4px}.drow{display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;font-size:13px}.drow .dd{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.drow .bar{height:10px;background:var(--bg);border:1px solid var(--line);border-radius:5px;overflow:hidden}.drow .bar i{display:block;height:100%;background:var(--accent)}.drow small{color:var(--muted);white-space:nowrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}.seg button{font:inherit;font-size:12px;padding:6px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}.seg button.on{background:var(--accent);color:#fff}
+.tl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tl .btn{margin:0}.bad{color:var(--bad)}tr.bad td{color:var(--bad)}
 .min{display:flex;align-items:center;gap:6px}.min input{width:110px;text-align:right}.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px}.kv dt{color:var(--muted)}.kv dd{margin:0}
 .modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(480px,100%)}.modal h3{margin:0 0 6px}
 """ + RAIL_CSS

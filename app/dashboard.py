@@ -225,7 +225,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 <section class="card"><div class="kpis" id="kpis"></div></section>
 <section class="card"><h3 style="margin-top:0">Top issues</h3><div id="issues"></div></section>
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
-<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">AI usage <small class="muted">Meta Model API</small></h3><a class="btn" href="/settings?tab=models">Models</a></div>
+<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">AI usage <small class="muted">Meta Model API</small></h3><a class="btn" href="/ai">Details</a></div>
 <div class="kpis six" id="aiKpis" style="margin-top:10px"></div><div id="aiModels" class="muted" style="margin-top:8px"></div></section>
 <section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">SLA at risk</h3><a class="btn" href="/settings?tab=sla">Targets</a></div><div id="risk" class="risk">—</div></section>
 <section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor <small id="supMode"></small></h3><div class="actions"><button class="btn primary" id="runBtn" onclick="runSupervisor()">Run now</button></div></div>

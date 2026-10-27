@@ -43,3 +43,20 @@ def test_dashboard_usage_endpoint_and_context_setting(desk):
     r = desk.post("/settings/context", data={"muse-spark-1.3": "64000", "muse-wonder-1.0": "200000"}, follow_redirects=False)
     assert r.status_code == 303 and usage.context_windows()["muse-wonder-1.0"] == 200000
     assert "Context windows" in desk.get("/settings?tab=models").text
+
+
+def test_ai_activity_endpoints_and_page(desk):
+    set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "run_endpoint_script", {"hostname": "TR-LT-101", "script": "rm-rf"})]),
+                         Reply(tool_calls=[ToolCall("c2", "search_knowledge", {"query": "vpn"})]), Reply(text="ok")]))
+    desk.post("/messages", json={"requester": "+905551110001", "text": "vpn"})
+    calls = desk.get("/ai/calls?period=today").json()
+    assert len(calls) == 3 and calls[0]["scope"] == "ticket" and calls[0]["at"] and calls[-1]["tool_calls"] == 1
+    assert desk.get("/ai/calls?period=today&scope=chat").json() == []
+    day = desk.get("/ai/daily?period=all").json()
+    assert len(day) == 1 and day[0]["calls"] == 3 and day[0]["tokens"] > 0
+    tools = {t["tool"]: t for t in desk.get("/ai/tools").json()}
+    assert tools["run_endpoint_script"]["failures"] == 1 and tools["run_endpoint_script"]["failure_rate"] == 100.0
+    assert tools["search_knowledge"]["tiers"] == {"L1": 1}
+    csv = desk.get("/ai/calls.csv?period=all").text.splitlines()
+    assert csv[0].startswith("id,at,model") and len(csv) == 4
+    assert "AI activity" in desk.get("/ai").text

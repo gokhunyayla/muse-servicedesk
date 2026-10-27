@@ -50,7 +50,9 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 * **AI usage accounting.** Every Meta Model API call is recorded with tokens, latency and what it served (ticket,
   chat thread, Supervisor run, report). Desk Chat shows tokens, time and context share under each answer; the
   dashboard has an AI usage card per period (calls, tokens by model, latency, tokens per ticket); each ticket shows
-  its AI cost; context windows are set under Settings → Models.
+  its AI cost; context windows are set under Settings → Models. `/ai` lists every call with date and time (model,
+  what it served, tokens in/out, latency, tool calls, errors), per-day totals, tool performance (calls, failure rate,
+  by tier) and a CSV export.
 * **Desk Chat.** A conversation with the desk's brain for desk users (`/chat`): what is the desk working on, who
   holds what, what is at SLA risk, what waits for me — with links into the console — and actions with the
   user's authority (assign to me, reply to the employee, change status, approve, run the Supervisor, publish a
@@ -106,7 +108,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # database URL, port, time zone — no API keys here
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 90 offline tests with a scripted model
+.venv/bin/python -m pytest      # 91 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.

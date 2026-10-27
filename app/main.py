@@ -267,6 +267,43 @@ def ai_usage(period: str | None = None, user=Depends(current_user)) -> dict:
     return usage.summary(period_start(period))
 
 
+@app.get("/ai/calls")
+def ai_calls(period: str | None = None, scope: str | None = None, model: str | None = None, limit: int = 500, user=Depends(current_user)) -> list[dict]:
+    from app import usage
+    from app.dashboard import period_start
+    return usage.calls(period_start(period), limit=limit, scope_kind=scope, model=model)
+
+
+@app.get("/ai/daily")
+def ai_daily(period: str | None = None, user=Depends(current_user)) -> list[dict]:
+    from app import usage
+    from app.dashboard import period_start
+    return usage.daily(period_start(period))
+
+
+@app.get("/ai/tools")
+def ai_tools(period: str | None = None, user=Depends(current_user)) -> list[dict]:
+    from app import usage
+    from app.dashboard import period_start
+    return usage.tool_performance(period_start(period))
+
+
+@app.get("/ai/calls.csv")
+def ai_calls_csv(period: str | None = None, user=Depends(current_user)):
+    import csv
+    import io
+    from fastapi.responses import PlainTextResponse
+    from app import usage
+    from app.dashboard import period_start
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    cols = ["id", "at", "model", "scope", "scope_id", "actor", "prompt_tokens", "completion_tokens", "total_tokens", "latency_ms", "tool_calls", "ok"]
+    w.writerow(cols)
+    for r in usage.calls(period_start(period), limit=5000):
+        w.writerow([r[c] for c in cols])
+    return PlainTextResponse(buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=ai-calls.csv"})
+
+
 @app.get("/chat/threads/{thread_id}/usage")
 def chat_thread_usage(thread_id: int, user=Depends(current_user)) -> dict:
     from app import usage
