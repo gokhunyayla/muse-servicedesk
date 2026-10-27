@@ -456,6 +456,8 @@ ICONS = {
 RAIL_CSS = """
 /* icon rail */
 body.app{display:flex;min-height:100vh}.page{flex:1;min-width:0}
+.rail .logo{width:40px;height:40px;border-radius:11px;background:var(--accent);display:grid;place-items:center;flex:none;text-decoration:none}
+.rail .logo svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .rail{position:sticky;top:0;height:100vh;width:64px;flex:none;background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:6px;z-index:10}
 .rail nav{display:flex;flex-direction:column;gap:4px;margin-top:14px;width:100%;align-items:center}
 .rail .nav{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;color:var(--muted);text-decoration:none;position:relative;border:0;background:transparent;cursor:pointer;padding:0}
