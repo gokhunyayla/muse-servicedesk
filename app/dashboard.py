@@ -150,7 +150,8 @@ main{display:grid;gap:16px;padding:12px 16px 16px}main.dash{grid-template-column
 [data-mode=dashboard] .only-tickets{display:none!important}[data-mode=tickets] .only-dash{display:none!important}
 .tl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.search{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);min-width:220px}
 .list{padding:10px}.list .thead{padding:4px 6px 8px}.items{max-height:76vh;overflow:auto;display:flex;flex-direction:column}
-.item{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:start;padding:9px 8px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
+.item{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;padding:9px 8px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
+.item input{display:none}.items.selecting .item{grid-template-columns:22px 1fr auto}.items.selecting .item input{display:block}
 .item:hover{background:var(--bg)}.item.on{background:rgba(8,102,255,.14)}.item .t{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .item .m{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.item .r{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
 .item .r small{color:var(--muted);font-size:11px;white-space:nowrap}.item .pill{font-size:11px;padding:1px 7px}.item input{margin-top:3px}
@@ -216,7 +217,7 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
 </main>
 <main class="tix only-tickets">
-<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn primary" id="mergeBtn" disabled onclick="openMerge()">Merge</button></div></div>
+<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
 <div class="items" id="tickets"></div></section>
 <section class="card detail" id="detail"><div class="thead"><h3 id="ttitle">Ticket</h3><div class="actions" id="tactions"></div></div>
 <div class="dcols"><div><div id="trail" class="timeline"><small>Select a ticket to see its conversation and what the agents did.</small></div>
@@ -283,14 +284,15 @@ async function load(){
  }
  $('#upd').textContent='updated '+new Date().toLocaleTimeString();
 }
-const sel=new Set();
+const sel=new Set();let selecting=false;
+function toggleSelect(){selecting=!selecting;if(!selecting)sel.clear();$('#tickets').classList.toggle('selecting',selecting);$('#selectBtn').textContent=selecting?'Cancel':'Select';$('#mergeBtn').style.display=selecting?'':'none';updateSel();load();}
 function toggle(id,on){on?sel.add(id):sel.delete(id);updateSel();}
-function updateSel(){$('#mergeBtn').disabled=sel.size<2;$('#selinfo').textContent=sel.size?sel.size+' selected':'';}
+function updateSel(){$('#mergeBtn').disabled=sel.size<2;$('#selinfo').textContent=selecting&&sel.size?sel.size+' selected':'';}
 function closeModal(id){$('#'+id).classList.remove('on');}
 function openMerge(){$('#mergeList').textContent='Tickets: '+[...sel].sort((a,b)=>a-b).map(i=>'#'+i).join(', ');$('#mergeModal').classList.add('on');$('#mTitle').focus();}
 async function doMerge(){const title=$('#mTitle').value.trim();if(!title)return $('#mTitle').focus();
  const r=await fetch('/problems',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_ids:[...sel],title,update:$('#mUpdate').value.trim(),owner:$('#mOwner').value})});
- const j=await r.json();closeModal('mergeModal');sel.clear();$('#mTitle').value='';$('#mUpdate').value='';await load();if(j.problem_id)show(j.problem_id);}
+ const j=await r.json();closeModal('mergeModal');sel.clear();selecting=false;$('#tickets').classList.remove('selecting');$('#selectBtn').textContent='Select';$('#mergeBtn').style.display='none';$('#mTitle').value='';$('#mUpdate').value='';await load();if(j.problem_id)show(j.problem_id);}
 function openAssign(id){$('#aTitle').textContent='Assign #'+id;$('#assignModal').dataset.id=id;$('#assignModal').classList.add('on');
  $('#aOwner').onchange=()=>{$('#aWho').style.display=$('#aOwner').value==='human'?'':'none'};$('#aOwner').onchange();}
 async function doAssign(){const id=$('#assignModal').dataset.id;$('#aGo').disabled=true;$('#aGo').textContent='Assigning…';
