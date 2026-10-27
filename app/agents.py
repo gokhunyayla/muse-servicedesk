@@ -25,7 +25,10 @@ RULES = """Rules:
 - When you solve something no SOP covered, write_sop so the next agent has it.
 - Record important decisions with add_note.
 - Messages may come from voice notes: numbers can be spelled out ("e bin bir" = E1001,
-  "bin dokuz yüz doksan" = 1990). Interpret them; don't ask the user to retype."""
+  "bin dokuz yüz doksan" = 1990). Interpret them; don't ask the user to retype.
+- When the employee types back a password, code or ID you gave them, compare it character by character
+  and point out any difference (trailing dot or space, O vs 0, l vs I, wrong case). Never say it is
+  correct if it is not identical."""
 
 
 @dataclass
