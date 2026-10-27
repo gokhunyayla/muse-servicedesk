@@ -20,7 +20,9 @@ from app.security import check_origin, cookie_secure, rate_limit
 logger = logging.getLogger(__name__)
 router = APIRouter()
 COOKIE = "sd_session"
-SESSION_DAYS = 7
+SESSION_DAYS = 1          # a plain sign-in
+REMEMBER_DAYS = 30        # "keep me signed in"
+EYE = '<svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>'
 RESET_MINUTES = 30
 
 
@@ -72,11 +74,10 @@ def admin_user(user: User = Depends(current_user)) -> User:
     return user
 
 
-def _sign_in(db, user: User, response: Response) -> None:
+def _sign_in(db, user: User, response: Response, days: int = SESSION_DAYS) -> None:
     token = secrets.token_urlsafe(32)
-    db.add(Session(token=token, user_id=user.id, expires_at=_now() + timedelta(days=SESSION_DAYS)))
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=cookie_secure(),
-                        max_age=SESSION_DAYS * 86400)
+    db.add(Session(token=token, user_id=user.id, expires_at=_now() + timedelta(days=days)))
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=cookie_secure(), max_age=days * 86400)
 
 
 # ---- e-mail ----------------------------------------------------------------------------------
@@ -105,14 +106,15 @@ def setup_page(error: str = "") -> str:
     if not needs_setup():
         return RedirectResponse("/login", 303)   # type: ignore[return-value]
     return _page("Create the first admin", f"""
+<p class="lead">No desk users exist yet. Create the first administrator — they invite everyone else.</p>
 <form method="post" action="/setup">
-<p class="muted">No desk users exist yet. Create the first administrator; they can add everyone else at Users.</p>
-<label>Name</label><input name="name" required autofocus>
-<label>E-mail</label><input name="email" type="email" required>
-<label>Password</label><input name="password" type="password" minlength="8" required>
-<label>Repeat</label><input name="password2" type="password" minlength="8" required>
+<label for="name">Name</label><input id="name" name="name" autocomplete="name" required autofocus>
+<label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" required>
+<label for="pw">Password <small>(at least 8 characters)</small></label><div class="pw"><input id="pw" name="password" type="password" minlength="8" autocomplete="new-password" required>
+<button type="button" class="eye" onclick="togglePw('pw',this)" aria-label="Show password">{EYE}</button></div>
+<label for="pw2">Repeat password</label><input id="pw2" name="password2" type="password" minlength="8" autocomplete="new-password" required>
 {_alert(error, "")}
-<button class="btn primary" type="submit">Create admin and sign in</button></form>""")
+<button class="btn primary" type="submit">Create admin and sign in</button></form>""", shell="auth")
 
 
 @router.post("/setup")
@@ -139,16 +141,18 @@ def login_page(request: Request, error: str = "", info: str = "") -> str:
     if _user_from_request(request):
         return RedirectResponse("/", 303)   # type: ignore[return-value]
     return _page("Sign in", f"""
+<p class="lead">Welcome back. Sign in to the service desk console.</p>
 <form method="post" action="/login">
-<label>E-mail</label><input name="email" type="email" required autofocus>
-<label>Password</label><input name="password" type="password" required>
+<label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" required autofocus>
+<label for="pw">Password</label><div class="pw"><input id="pw" name="password" type="password" autocomplete="current-password" required>
+<button type="button" class="eye" onclick="togglePw('pw',this)" aria-label="Show password">{EYE}</button></div>
+<div class="row between"><label class="check"><input type="checkbox" name="remember" value="1"> Keep me signed in</label><a href="/forgot">Forgot password?</a></div>
 {_alert(error, info)}
-<button class="btn primary" type="submit">Sign in</button>
-<p class="links"><a href="/forgot">Forgot your password?</a></p></form>""")
+<button class="btn primary" type="submit">Sign in</button></form>""", shell="auth")
 
 
 @router.post("/login")
-def login(request: Request, email: str = Form(...), password: str = Form(...)):
+def login(request: Request, email: str = Form(...), password: str = Form(...), remember: str = Form("")):
     check_origin(request)
     rate_limit(request, "login", limit=10, window_sec=300)
     with session() as db:
@@ -158,7 +162,7 @@ def login(request: Request, email: str = Form(...), password: str = Form(...)):
             return RedirectResponse("/login?error=Wrong+e-mail+or+password", 303)
         audit(db, u.email, "login.ok", ip=_ip(request))
         r = RedirectResponse("/", 303)
-        _sign_in(db, u, r)
+        _sign_in(db, u, r, days=REMEMBER_DAYS if remember else SESSION_DAYS)
         return r
 
 
@@ -181,12 +185,12 @@ def logout(request: Request):
 @router.get("/forgot", response_class=HTMLResponse)
 def forgot_page(info: str = "") -> str:
     return _page("Reset your password", f"""
+<p class="lead">Enter your e-mail. If it belongs to a desk user we send a reset link, valid {RESET_MINUTES} minutes.</p>
 <form method="post" action="/forgot">
-<p class="muted">Enter your e-mail; if it belongs to a desk user we send a reset link (valid {RESET_MINUTES} minutes).</p>
-<label>E-mail</label><input name="email" type="email" required autofocus>
+<label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" required autofocus>
 {_alert("", info)}
 <button class="btn primary" type="submit">Send reset link</button>
-<p class="links"><a href="/login">Back to sign in</a></p></form>""")
+<p class="links"><a href="/login">← Back to sign in</a></p></form>""", shell="auth")
 
 
 @router.post("/forgot")
@@ -209,11 +213,12 @@ def forgot(request: Request, email: str = Form(...)):
 @router.get("/reset", response_class=HTMLResponse)
 def reset_page(token: str = "", error: str = "") -> str:
     return _page("Choose a new password", f"""
-<form method="post" action="/reset"><input type="hidden" name="token" value="{token}">
-<label>New password</label><input name="password" type="password" minlength="8" required autofocus>
-<label>Repeat</label><input name="password2" type="password" minlength="8" required>
+<form method="post" action="/reset"><input type="hidden" name="token" value="{_esc(token)}">
+<label for="pw">New password <small>(at least 8 characters)</small></label><div class="pw"><input id="pw" name="password" type="password" minlength="8" autocomplete="new-password" required autofocus>
+<button type="button" class="eye" onclick="togglePw('pw',this)" aria-label="Show password">{EYE}</button></div>
+<label for="pw2">Repeat password</label><input id="pw2" name="password2" type="password" minlength="8" autocomplete="new-password" required>
 {_alert(error, "")}
-<button class="btn primary" type="submit">Save password</button></form>""")
+<button class="btn primary" type="submit">Save password</button></form>""", shell="auth")
 
 
 @router.post("/reset")
@@ -347,32 +352,55 @@ def _alert(error: str, info: str) -> str:
     return ""
 
 
-def _page(title: str, body: str, wide: bool = False, user: User | None = None) -> str:
+LOGO = '<svg viewBox="0 0 24 24"><path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>'
+
+CSS = """
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c1e21;--muted:#65676b;--line:#e4e6eb;--accent:#0866ff;--ok:#31a24c;--bad:#e41e3f}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}}
+:root[data-theme=dark]{--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}
+*{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+header{background:var(--card);padding:10px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.brand{display:flex;align-items:center;gap:10px}.logo{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center;flex:none}
+.logo svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+h1{font-size:16px;margin:0;line-height:1.1}h1 small{display:block;font-size:11px;font-weight:400;color:var(--muted)}
+main{max-width:960px;margin:32px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}h2{margin:0 0 12px;font-size:18px}h3{font-size:14px;margin:20px 0 8px}
+label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}label small{color:var(--muted)}
+input,select{width:100%;font:inherit;padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
+.btn{font:inherit;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-block;margin-top:14px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;width:100%;padding:10px 14px;font-weight:600}.grid .btn.primary{width:auto}td .btn{margin-top:0;padding:4px 9px;font-size:12px}
+.links{margin:14px 0 0;font-size:13px}.links a,.row a{color:var(--accent);text-decoration:none;font-size:13px}.muted{color:var(--muted);font-size:13px}
+.alert{padding:9px 11px;border-radius:8px;font-size:13px;margin-top:12px}.alert.bad{background:rgba(228,30,63,.12);color:var(--bad)}.alert.ok{background:rgba(49,162,76,.12);color:var(--ok)}
+table{width:100%;border-collapse:collapse;margin-top:8px}td,th{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500;font-size:12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}@media(max-width:700px){.grid{grid-template-columns:1fr}}
+/* auth shell: no header, centred card */
+body.auth{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(1200px 600px at 20% -10%,rgba(8,102,255,.12),transparent 60%),var(--bg)}
+.auth .card{width:min(420px,100%);padding:28px 28px 24px;box-shadow:0 10px 40px rgba(0,0,0,.08)}
+.auth .brand{flex-direction:column;align-items:flex-start;gap:12px;margin-bottom:18px}.auth .logo{width:44px;height:44px;border-radius:12px}.auth .logo svg{width:26px;height:26px}
+.auth h2{font-size:22px;margin:0}.auth .lead{color:var(--muted);margin:0 0 6px}
+.pw{position:relative}.pw input{padding-right:42px}.eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);cursor:pointer;width:32px;height:32px;border-radius:6px;display:grid;place-items:center}
+.eye svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.eye:hover{background:var(--bg)}
+.row{display:flex;align-items:center;gap:10px;margin-top:12px}.row.between{justify-content:space-between}
+.check{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;color:var(--fg)}.check input{width:auto;accent-color:var(--accent)}
+.foot{margin-top:18px;text-align:center;font-size:12px;color:var(--muted)}
+"""
+
+JS = """<script>
+try{var t=localStorage.getItem('theme');if(t&&t!=='system')document.documentElement.setAttribute('data-theme',t)}catch(e){}
+function togglePw(id,b){var i=document.getElementById(id);i.type=i.type==='password'?'text':'password';b.setAttribute('aria-label',i.type==='password'?'Show password':'Hide password');}
+</script>"""
+
+
+def _page(title: str, body: str, wide: bool = False, user: User | None = None, shell: str = "app") -> str:
+    head = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{_esc(title)} · Muse ServiceDesk</title>'
+            f'<meta name="viewport" content="width=device-width,initial-scale=1"><style>{CSS}</style></head>')
+    if shell == "auth":
+        return (f'{head}<body class="auth"><div class="card"><div class="brand"><div class="logo">{LOGO}</div>'
+                f'<h2>{_esc(title)}</h2></div>{body}'
+                f'<p class="foot">Muse ServiceDesk · service desk console</p></div>{JS}</body></html>')
     who = (f'<span class="muted">{_esc(user.name)} · {user.role}</span> <a class="btn" href="/logout">Sign out</a>'
            if user else "")
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{_esc(title)} · Muse ServiceDesk</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><style>
-:root{{--bg:#f6f7f9;--card:#fff;--fg:#1c1e21;--muted:#65676b;--line:#e4e6eb;--accent:#0866ff;--ok:#31a24c;--bad:#e41e3f}}
-@media(prefers-color-scheme:dark){{:root:not([data-theme=light]){{--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}}}}
-:root[data-theme=dark]{{--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}}
-*{{box-sizing:border-box}}html{{color-scheme:light dark}}body{{margin:0;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}}
-header{{background:var(--card);padding:10px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}}
-.brand{{display:flex;align-items:center;gap:10px}}.logo{{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center}}
-.logo svg{{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}}
-h1{{font-size:16px;margin:0;line-height:1.1}}h1 small{{display:block;font-size:11px;font-weight:400;color:var(--muted)}}
-main{{max-width:{'960px' if wide else '400px'};margin:32px auto;padding:0 16px}}
-.card{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}}h2{{margin:0 0 12px;font-size:18px}}h3{{font-size:14px;margin:20px 0 8px}}
-label{{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}}input,select{{width:100%;font:inherit;padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}}
-.btn{{font:inherit;font-size:13px;padding:7px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-block;margin-top:14px}}
-td .btn{{margin-top:0;padding:4px 9px;font-size:12px}}
-.btn.primary{{background:var(--accent);border-color:var(--accent);color:#fff;width:100%}}.grid .btn.primary{{width:auto}}
-.links{{margin:14px 0 0;font-size:13px}}.links a{{color:var(--accent);text-decoration:none}}.muted{{color:var(--muted);font-size:13px}}
-.alert{{padding:8px 10px;border-radius:6px;font-size:13px;margin-top:12px}}.alert.bad{{background:rgba(228,30,63,.12);color:var(--bad)}}.alert.ok{{background:rgba(49,162,76,.12);color:var(--ok)}}
-table{{width:100%;border-collapse:collapse;margin-top:8px}}td,th{{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}}th{{color:var(--muted);font-weight:500;font-size:12px}}
-.grid{{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}
-</style></head><body>
-<header><div class="brand"><div class="logo"><svg viewBox="0 0 24 24"><path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg></div>
-<h1>Muse ServiceDesk<small>Service desk console</small></h1></div><div>{who}</div></header>
-<main><div class="card"><h2>{_esc(title)}</h2>{body}</div></main>
-<script>try{{var t=localStorage.getItem('theme');if(t&&t!=='system')document.documentElement.setAttribute('data-theme',t)}}catch(e){{}}</script>
-</body></html>"""
+    return (f'{head}<body><header><div class="brand"><div class="logo">{LOGO}</div>'
+            f'<h1>Muse ServiceDesk<small>Service desk console</small></h1></div><div>{who}</div></header>'
+            f'<main><div class="card"><h2>{_esc(title)}</h2>{body}</div></main>{JS}</body></html>')
