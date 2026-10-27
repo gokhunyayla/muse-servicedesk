@@ -60,7 +60,7 @@ def timing(ticket, events) -> dict:
     for e in events:
         if first_response is None and e.kind == "message" and e.actor != "user":
             first_response = (e.at - start).total_seconds()
-        if paused and not (e.kind == "tool_result" and e.content == "request_confirmation"):
+        if paused and e.actor != "system" and not (e.kind == "tool_result" and e.content == "request_confirmation"):
             charge(e.at)                 # whatever happens next ends the wait (employee answered, approval, follow-up)
             paused = False
         if e.kind == "handoff":
