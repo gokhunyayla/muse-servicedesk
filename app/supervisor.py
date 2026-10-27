@@ -254,6 +254,21 @@ def bump_to_human(ctx: Ctx, ticket_id: int, summary: str) -> dict:
     return {"ok": True, "status": "escalated"}
 
 
+@tool("Reference passages (strict first) that apply to what was done on a ticket, with the ticket's actions, so you "
+      "can judge compliance.", SUP, ticket_id={"type": "integer"})
+def check_compliance(ctx: Ctx, ticket_id: int) -> dict:
+    from app import references
+    t = ctx.db.get(Ticket, int(ticket_id))
+    if t is None:
+        return {"ok": False, "error": "no such ticket"}
+    actions = [f"{e.actor}: {e.content} {json.dumps(e.data, ensure_ascii=False)[:160]}" for e in t.events if e.kind == "tool_call"]
+    query = " ".join([t.title] + [e.content for e in t.events if e.kind == "tool_call"])
+    hits = references.search(t.owner if t.owner in ("L1", "L2", "L3", "L4") else "L1", query, limit=6, db=ctx.db)
+    hits.sort(key=lambda h: h["enforcement"] != "strict")
+    return {"ok": True, "ticket": t.id, "actions": actions[-20:], "references": hits,
+            "note": "" if hits else "no reference passage applies"}
+
+
 @tool("Leave a note on a ticket (what you noticed, what you did).", SUP, ticket_id={"type": "integer"}, text=STR)
 def note_ticket(ctx: Ctx, ticket_id: int, text: str) -> dict:
     t = ctx.db.get(Ticket, int(ticket_id))
@@ -331,10 +346,15 @@ Your duties, in order:
    waiting on the employee → nudge_employee; waiting on an approval → remind_approver; the owning tier is
    stuck or wrong → reassign_ticket with precise instructions; nothing an agent can do → bump_to_human.
    Human-owned tickets at risk → open_human_ticket (or note_ticket if one is already open for it).
-5. ASK A HUMAN: for (b), open_human_ticket with exactly what is needed (access, purchase, policy decision,
+5. COMPLIANCE: the desk's reference documents (policies, guidelines, manuals; strict or flexible) bind the
+   agents. For tickets touched this run, check the actions taken against the references
+   (check_compliance returns the strict passages relevant to a ticket); where an action contradicts a STRICT
+   rule, note_ticket what was violated, propose_sop a correction if a procedure led there, and
+   open_human_ticket if harm needs a person to undo. Flexible deviations only need a note if no reason was recorded.
+6. ASK A HUMAN: for (b), open_human_ticket with exactly what is needed (access, purchase, policy decision,
    on-site action, vendor contact) and why, referencing the affected tickets. Don't open duplicates: if a
    [Supervisor] ticket for the same need is already open, note_ticket instead.
-6. Finish with a short summary in English, PLAIN TEXT (no markdown, no bullets, no backticks): first one
+7. Finish with a short summary in English, PLAIN TEXT (no markdown, no bullets, no backticks): first one
    sentence with the outcome, then 2-5 short sentences on what you noticed, did and deliberately skipped.
 
 Desk's own tools agents can use: {tools}

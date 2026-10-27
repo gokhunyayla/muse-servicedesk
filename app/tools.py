@@ -388,9 +388,11 @@ def search_knowledge(ctx: Ctx, query: str) -> dict:
             "note": "" if results else "No SOP covers this; say so to the employee and proceed on general expertise."}
 
 
-@tool("Search the reference policies and procedures (documents the desk uploaded: HR/IT policies, vendor manuals, "
-      "compliance rules). Returns the exact passages; rely only on their wording and cite [REF:doc#n]. Use it when "
-      "a request touches policy, entitlement, approval rules or a documented procedure.", ALL, query=STR)
+@tool("Search the reference policies and procedures the desk uploaded. Each passage carries kind (policy / "
+      "guideline / manual) and enforcement (strict = binding, even if the employee insists; flexible = default "
+      "you may deviate from with a reason). Rely only on the wording and cite [REF:doc#n]. Search BEFORE any "
+      "action with consequences (account, access, license, approval, scripts, data) and whenever a request "
+      "touches a rule, entitlement or deadline.", ALL, query=STR)
 def search_references(ctx: Ctx, query: str) -> dict:
     from app import references
     results = references.search(ctx.agent, query, db=ctx.db)

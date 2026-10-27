@@ -93,3 +93,20 @@ def test_agent_tool_and_console_upload(desk):
     assert "Reference policies" in desk.get("/knowledge").text
     assert desk.delete(f"/references/{r['id']}").json()["status"] == "removed"
     assert desk.get("/references").json() == []
+
+
+def test_kind_and_enforcement_travel_with_passages_and_supervisor_can_check(desk):
+    import app.supervisor  # noqa: F401  (registers the Supervisor's tools)
+    from app.tools import Ctx, run_tool
+    desk.post("/references", data={"title": "Access Policy", "scope": "shared", "kind": "policy", "enforcement": "strict"},
+              files={"file": ("policy.md", POLICY_MD.encode(), "text/markdown")})
+    desk.post("/references", data={"title": "Style guide", "scope": "shared", "kind": "guideline", "enforcement": "flexible"},
+              files={"file": ("style.md", b"# Tone\n\nPrefer short replies; loaner laptops may be issued for 14 days by default.", "text/markdown")})
+    hits = references.search("L1", "loaner laptop 14 days")
+    assert {h["enforcement"] for h in hits} == {"strict", "flexible"} and hits[0]["kind"] in ("policy", "guideline")
+    set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "assign_loaner", {"employee_no": "E1001"})]), Reply(text="verildi")]))
+    desk.post("/messages", json={"requester": "+905551110001", "text": "yedek laptop lazım"})
+    with session() as db:
+        out = run_tool(Ctx(db=db, ticket=None, agent="SUP"), "check_compliance", {"ticket_id": 1})
+    assert out["ok"] and out["actions"] and out["references"][0]["enforcement"] == "strict"
+    assert desk.get("/references").json()[0]["kind"] in ("policy", "guideline")

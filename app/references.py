@@ -82,19 +82,25 @@ def chunk(pages: list[tuple[int | None, str]]) -> list[dict]:
 
 # ---- storage -----------------------------------------------------------------------------------
 
+KINDS = ("policy", "guideline", "manual")
+ENFORCEMENT = ("strict", "flexible")
+
+
 def add(title: str, filename: str, data: bytes, by: str, scope: str = "shared", description: str = "",
-        mime: str = "", db=None) -> RefDoc:
+        mime: str = "", kind: str = "policy", enforcement: str = "strict", db=None) -> RefDoc:
     if len(data) > MAX_BYTES:
         raise ValueError("file too large (max 25 MB)")
     if scope not in ("shared", "L1", "L2", "L3", "L4"):
         raise ValueError("scope must be shared or L1..L4")
+    if kind not in KINDS or enforcement not in ENFORCEMENT:
+        raise ValueError("kind must be policy/guideline/manual and enforcement strict/flexible")
     pages = extract(filename, data)
     chunks = chunk(pages)
     if not chunks:
         raise ValueError("no readable text found in the file (scanned PDF? export it with text first)")
     with _db(db) as db:
         doc = RefDoc(title=title[:255] or filename, filename=filename[:255], mime=mime, size=len(data), scope=scope,
-                     description=description[:2000], uploaded_by=by, chunks=len(chunks))
+                     kind=kind, enforcement=enforcement, description=description[:2000], uploaded_by=by, chunks=len(chunks))
         db.add(doc)
         db.flush()
         for i, c in enumerate(chunks, 1):
@@ -117,7 +123,8 @@ def remove(doc_id: int, by: str, db=None) -> bool:
 
 def listing(db=None) -> list[dict]:
     with _db(db) as db:
-        return [{"id": d.id, "title": d.title, "filename": d.filename, "size": d.size, "scope": d.scope, "description": d.description,
+        return [{"id": d.id, "title": d.title, "filename": d.filename, "size": d.size, "scope": d.scope, "kind": d.kind,
+                 "enforcement": d.enforcement, "description": d.description,
                  "uploaded_by": d.uploaded_by, "created_at": d.created_at.isoformat(), "chunks": d.chunks}
                 for d in db.query(RefDoc).filter(RefDoc.status == "active").order_by(RefDoc.id.desc())]
 
@@ -139,5 +146,5 @@ def search(tier: str, query: str, limit: int = 4, db=None) -> list[dict]:
             if hits:
                 scored.append((hits, c, d))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [{"ref": f"{d.id}#{c.idx}", "document": d.title, "page": c.page, "heading": c.heading,
-                 "text": c.text, "scope": d.scope} for _, c, d in scored[:limit]]
+        return [{"ref": f"{d.id}#{c.idx}", "document": d.title, "kind": d.kind, "enforcement": d.enforcement,
+                 "page": c.page, "heading": c.heading, "text": c.text, "scope": d.scope} for _, c, d in scored[:limit]]

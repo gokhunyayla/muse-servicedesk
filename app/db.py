@@ -258,6 +258,8 @@ class RefDoc(Base):
     mime: Mapped[str] = mapped_column(String(120), default="")
     size: Mapped[int] = mapped_column(default=0)
     scope: Mapped[str] = mapped_column(String(8), default="shared")     # shared | L1..L4
+    kind: Mapped[str] = mapped_column(String(16), default="policy")     # policy | guideline | manual
+    enforcement: Mapped[str] = mapped_column(String(16), default="strict")   # strict | flexible
     description: Mapped[str] = mapped_column(Text, default="")
     uploaded_by: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

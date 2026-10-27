@@ -315,6 +315,7 @@ def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
 
 @app.post("/references")
 async def upload_reference(request: Request, title: str = Form(""), scope: str = Form("shared"), description: str = Form(""),
+                           kind: str = Form("policy"), enforcement: str = Form("strict"),
                            file: UploadFile = File(...), user=Depends(current_user)) -> dict:
     """A desk user uploads a reference policy/procedure (PDF, DOCX, Markdown, text)."""
     from app import references
@@ -323,8 +324,8 @@ async def upload_reference(request: Request, title: str = Form(""), scope: str =
     try:
         with session() as db:
             doc = references.add(title or file.filename, file.filename or "document", data, by=user.email, scope=scope,
-                                 description=description, mime=file.content_type or "", db=db)
-            audit(db, user.email, "reference.upload", target=doc.id, detail=f"{doc.title} ({doc.chunks} passages, {scope})")
+                                 description=description, mime=file.content_type or "", kind=kind, enforcement=enforcement, db=db)
+            audit(db, user.email, "reference.upload", target=doc.id, detail=f"{doc.title} ({doc.chunks} passages, {scope}, {kind}/{enforcement})")
             return {"id": doc.id, "title": doc.title, "chunks": doc.chunks, "scope": doc.scope}
     except ValueError as e:
         raise HTTPException(422, str(e))

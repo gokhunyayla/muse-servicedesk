@@ -33,8 +33,11 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   they say so instead of inventing a procedure. Agents and the Supervisor propose new SOPs as drafts; desk
   users add, edit (versioned) and retire SOPs and publish drafts at `/knowledge`.
 * **Reference policies & procedures.** Desk users upload PDF, DOCX, Markdown or text documents (HR/IT policies,
-  compliance rules, vendor manuals); the text is split into passages that agents search (`search_references`)
-  and must quote as `[REF:doc#n]` — no policy, limit or deadline is ever stated without a passage behind it.
+  compliance rules, vendor manuals) tagged as policy / guideline / manual and **strict** or **flexible**. The text
+  is split into passages that agents search (`search_references`) before any action with consequences and must
+  quote as `[REF:doc#n]`: a strict passage binds the agent even if the employee insists; a flexible one may be
+  deviated from with a recorded reason; nothing is ever stated without a passage behind it. The Supervisor
+  checks actions against strict rules (`check_compliance`).
 * **General, not scripted.** There is no per-scenario code. The scenarios below are acceptance tests over
   the same tools, SOPs and lifecycle; a problem nobody anticipated goes through the same path.
 * **Supervisor.** A desk-manager agent runs on a schedule (Settings → Supervisor; manual by default, automatic on a cadence if enabled): clusters open tickets into
@@ -90,7 +93,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # database URL, port, time zone — no API keys here
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 79 offline tests with a scripted model
+.venv/bin/python -m pytest      # 80 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.

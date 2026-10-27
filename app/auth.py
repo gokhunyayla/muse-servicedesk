@@ -631,11 +631,11 @@ def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = 
     refs = references.listing()
     def refcard(d):
         kb = f"{d['size']/1024:.0f} KB"
-        return f"""<div class="draft"><div class="dh"><span class="tag">{d['scope']}</span><b>{_esc(d['title'])}</b><small>{_esc(d['filename'])} · {kb} · {d['chunks']} passages · {_esc(d['uploaded_by'])} · {d['created_at'][:10]}</small></div>
+        return f"""<div class="draft"><div class="dh"><span class="tag">{d['scope']}</span><span class="tag {'disabled' if d['enforcement']=='strict' else 'active'}">{d['kind']} · {d['enforcement']}</span><b>{_esc(d['title'])}</b><small>{_esc(d['filename'])} · {kb} · {d['chunks']} passages · {_esc(d['uploaded_by'])} · {d['created_at'][:10]}</small></div>
 {('<p class="muted" style="margin:6px 0 0">' + _esc(d['description']) + '</p>') if d['description'] else ''}
 <div class="row end" style="margin-top:8px"><a class="btn" href="/references/search?q=&tier={d['scope'] if d['scope']!='shared' else 'L1'}" style="display:none"></a>{('<button class="btn" onclick="removeRef(' + str(d['id']) + ')">Remove</button>') if admin else ''}</div></div>"""
     ref_section = f"""<h3>Reference policies &amp; procedures ({len(refs)})</h3>
-<p class="muted">Documents people upload for the agents to quote from: HR/IT policies, compliance rules, vendor procedures. PDF, DOCX, Markdown or text. Agents cite passages as [REF:doc#n] and never state a policy they cannot quote.</p>
+<p class="muted">Documents people upload that the agents must follow and may quote: HR/IT policies, compliance rules, vendor procedures (PDF, DOCX, Markdown or text). <b>Strict</b> rules bind the agents even if an employee insists; <b>flexible</b> ones are the default they may deviate from with a recorded reason. Agents cite passages as [REF:doc#n] and never state a rule they cannot quote; the Supervisor checks actions against strict rules.</p>
 <div class="pagehead" style="margin-bottom:10px"><div class="tl"><input class="search" id="refq" placeholder="Try a search as an agent would…" style="width:300px" onkeydown="if(event.key==='Enter')refSearch()"><button class="btn" onclick="refSearch()">Search</button></div><button class="btn primary slim" onclick="openModal('refModal')">+ Upload document</button></div>
 <div id="refOut"></div>
 {''.join(refcard(d) for d in refs) or '<p class="muted">No reference documents yet.</p>'}
@@ -643,6 +643,8 @@ def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = 
 <form method="post" action="/references" enctype="multipart/form-data" onsubmit="document.getElementById('upBtn').disabled=true;document.getElementById('upBtn').textContent='Uploading…'">
 <label>File (PDF, DOCX, Markdown, text — max 25 MB)</label><input type="file" name="file" accept=".pdf,.docx,.md,.markdown,.txt" required>
 <label>Title</label><input name="title" placeholder="e.g. Information Security Policy v3">
+<div class="grid"><div><label>Kind</label><select name="kind"><option value="policy">Policy · rules the desk must follow</option><option value="guideline">Guideline · recommended practice</option><option value="manual">Manual · vendor / product procedure</option></select></div>
+<div><label>Enforcement</label><select name="enforcement"><option value="strict">Strict · binding, even if the employee insists</option><option value="flexible">Flexible · default, may deviate with a reason</option></select></div></div>
 <label>Scope</label><select name="scope"><option value="shared">shared · every agent</option><option value="L1">L1</option><option value="L2">L2</option><option value="L3">L3</option><option value="L4">L4</option></select>
 <label>Description (optional)</label><input name="description" placeholder="What is this for, who owns it">
 <div class="row end"><button type="button" class="btn" onclick="closeModal('refModal')">Cancel</button><button class="btn primary slim" id="upBtn" type="submit">Upload</button></div></form></div></div>"""
@@ -668,7 +670,7 @@ async function saveSop(){{const tier=document.getElementById('sTier').value,titl
  if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
 async function removeRef(id){{if(!confirm('Remove this document from the knowledge base?'))return;const r=await fetch('/references/'+id,{{method:'DELETE'}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
 async function refSearch(){{const q=document.getElementById('refq').value.trim();if(!q)return;const r=await (await fetch('/references/search?q='+encodeURIComponent(q))).json();
- document.getElementById('refOut').innerHTML=r.length?r.map(x=>`<div class="draft"><div class="dh"><span class="tag">REF:${{x.ref}}</span><b>${{esc(x.document)}}</b><small>${{x.heading?esc(x.heading)+' · ':''}}${{x.page?'page '+x.page:''}}</small></div><pre>${{esc(x.text)}}</pre></div>`).join(''):'<p class="muted">No passage matches.</p>';}}
+ document.getElementById('refOut').innerHTML=r.length?r.map(x=>`<div class="draft"><div class="dh"><span class="tag">REF:${{x.ref}}</span><span class="tag">${{x.kind}} · ${{x.enforcement}}</span><b>${{esc(x.document)}}</b><small>${{x.heading?esc(x.heading)+' · ':''}}${{x.page?'page '+x.page:''}}</small></div><pre>${{esc(x.text)}}</pre></div>`).join(''):'<p class="muted">No passage matches.</p>';}}
 function esc(x){{return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
 async function setStatus(k,status){{const r=await fetch('/sops/'+k+'/status',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{status}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
 </script>"""
