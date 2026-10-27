@@ -54,7 +54,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 3. Blue-screen photo → L4: warranty, vendor case, loaner laptop, courier label
 4. Missing / paid license — standard ones assigned, paid ones through manager approval
 5. SAP authorization — L3, role granted after approval, temporary access expiry scheduled
-6. Service desk console — queues, auto-resolution rate, satisfaction, top issues, live audit trail (English, responsive, system/light/dark theme)
+6. Service desk console — Dashboard (numbers: period, tier cards, KPIs, top issues, tier load, handoffs) and Tickets (filters, search, conversation timeline, reply, status, assign, merge into problem); sign-in, desk users, audit log; responsive, system/light/dark theme
 7. Vulnerability ("are we affected by php2shell?") — inventory scan, change + rollback plan, patch, verify, evidence
 8. Onboarding / 9. Offboarding — account, licenses, groups, sessions, loaner return
 10. Mass outage — similar tickets merged into one incident, single broadcast, closed together
