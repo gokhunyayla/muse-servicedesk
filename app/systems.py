@@ -183,6 +183,7 @@ SCRIPTS = {
     "perf-report":     {"desc": "CPU/memory/disk/startup report", "needs_consent": False},
     "driver-rollback": {"desc": "roll back the last updated driver (reboots)", "needs_consent": True},
     "disk-cleanup":    {"desc": "remove temp files and old updates", "needs_consent": True},
+    "lock-screen":     {"desc": "lock the workstation immediately", "needs_consent": False},
 }
 
 

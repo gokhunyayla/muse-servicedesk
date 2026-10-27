@@ -42,6 +42,8 @@ def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600
         while True:
             try:
                 run_due_followups()
+                from app.whatsapp import drain_outbound
+                drain_outbound()
                 if time.time() - last_proactive >= proactive_every_sec:
                     run_proactive_checks()
                     last_proactive = time.time()

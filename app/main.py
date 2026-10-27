@@ -7,6 +7,12 @@ from app.voice import transcribe
 
 app = FastAPI(title="Muse ServiceDesk")
 
+from app.dashboard import router as dashboard_router  # noqa: E402
+from app.whatsapp import router as whatsapp_router    # noqa: E402
+
+app.include_router(dashboard_router)
+app.include_router(whatsapp_router)
+
 
 class Incoming(BaseModel):
     requester: str

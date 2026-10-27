@@ -1,32 +1,104 @@
 # Muse ServiceDesk
 
-An autonomous, multi-tier IT service desk built on **Meta Model API** (Muse Spark 1.3) for the
-Meta Global AI Developer Hackathon 2026 — Indie Developer track, theme *Build for Your World*.
+An autonomous, multi-tier IT service desk built on **Meta Model API** for the Meta Global AI Developer
+Hackathon 2026 — Indie Developer track, theme *Build for Your World*.
 
-Employees describe a problem in plain Turkish; four agents (L1–L4) fix it end to end with real
-tool calls instead of handing out instructions.
+Employees message the desk over WhatsApp — text, a voice note, a photo of a blue screen, a short clip.
+Four agents (**L1–L4**) fix the problem end to end with real tool calls: reset the password, renew the VPN
+profile, open the vendor case and the courier pickup, patch the vulnerable server, quarantine the phishing
+mail — and close the ticket only after the employee confirms. A camera watcher adds visual compliance
+monitoring (credentials on a sticky note, unlocked screens). No human in the loop.
+
+> Built by an IT & Data Infrastructure manager who runs a real service desk in Türkiye — every scenario here
+> is a ticket we actually get.
 
 ## How it works
 
-- **A tier is its tools.** Each tool lists the tiers allowed to run it (`app/tools.py`); an agent
-  only sees and can only execute its own tools. Authority is enforced in code, not in prompts.
-- **Agents call each other.** Every agent gets `handoff_<tier>` tools (`app/agents.py`); the model
-  decides who to call, so L1 can go straight to L4.
-- **Full audit trail.** Every message, tool call, result and handoff is stored on the ticket (`app/db.py`).
-- **Simulated company systems** (`app/systems.py`) stand in for directory, VPN and endpoint
-  management, behind the same functions a real connector would provide.
+```
+WhatsApp / API ──► L1  talks to the employee, solves standard problems, hands off ──► ticket store (MariaDB)
+                    │   every tier is a tool of the others — no fixed order         full audit trail
+                    ├─ L2  device & network diagnosis, malware response (isolate → evidence → scan → release)
+                    ├─ L3  servers, SAP/directory permissions, CVE patching with snapshot, verify, rollback
+                    └─ L4  vendor service cases, loaners, courier shipments
+Camera watcher ──► compliance findings → tickets          Scheduler ──► reminders, follow-ups, proactive checks
+```
+
+* **A tier is its tools.** Every tool declares which tiers may run it (`app/tools.py`); an agent only sees
+  and can only execute its own. Authority lives in code, not in prompts.
+* **Agents find each other.** Each agent gets `handoff_<tier>` tools and the model picks the target
+  (`app/agents.py`). L1 can go straight to L4; L2 can pull in L3.
+* **Knowledge pools + learning loop.** Each tier has Markdown SOPs (`data/sops/<tier>/`). Agents search
+  them first (`search_knowledge`) and write new ones when they solve something uncovered (`write_sop`).
+* **General, not scripted.** There is no per-scenario code. The scenarios below are acceptance tests over
+  the same tools, SOPs and lifecycle; a problem nobody anticipated goes through the same path.
+* **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
+  approval over chat (`ONAY 12`), confirmation before closing, satisfaction rating, scheduled follow-ups,
+  incident linking for mass outages, proactive tickets from inventory checks.
+* **Simulated enterprise systems** (`app/systems.py`) stand in for Entra/M365, Defender, SAP, the vendor
+  portal and the courier, behind the same function shapes a real connector would expose.
+
+### Where Meta's models are used
+
+| Capability | Model | Where |
+|---|---|---|
+| Reasoning, tool calling, Turkish/English dialogue | Muse Spark 1.3 | all agents (`app/llm.py`) |
+| Production change planning (patch + rollback + verify) | Muse Wonder 1.0 | L3 (`heavy=True`) |
+| Voice notes → text (spoken numbers handled) | Muse Voice Transcribe | `app/voice.py` |
+| Photos, screenshots, video frames | Muse Spark vision | intake (`image_message`), `/video` |
+| Locating objects in camera frames (sticky note, monitor) | SAM 3.1 | `app/vision.py`, `app/camera.py` |
+
+## Scenarios covered (all run against the real models)
+
+1. VPN not connecting — profile renewed via endpoint tools
+2. Password reset by voice note — transcription, identity check, temporary password
+3. Blue-screen photo → L4: warranty, vendor case, loaner laptop, courier label
+4. Missing / paid license — standard ones assigned, paid ones through manager approval
+5. SAP authorization — L3, role granted after approval, temporary access expiry scheduled
+6. Manager dashboard — queues, auto-resolution rate, satisfaction, top issues, live audit trail
+7. Vulnerability ("are we affected by php2shell?") — inventory scan, change + rollback plan, patch, verify, evidence
+8. Onboarding / 9. Offboarding — account, licenses, groups, sessions, loaner return
+10. Mass outage — similar tickets merged into one incident, single broadcast, closed together
+11. Software request with manager approval over WhatsApp
+12. Short video / screen recording — frames sampled and read by the model
+13. Proactive maintenance — disk, patch age, warranty expiry open tickets before users notice
+14. Satisfaction rating + self-written SOPs (learning loop)
+15. Multilingual — replies in the employee's language
+16. Visual compliance — camera frame → credential note located by SAM → owner notified, sessions revoked, re-check
+17. Malware response — isolate, collect evidence, scan/quarantine, credential reset, release
+18. Phishing triage — verdict, tenant-wide quarantine, sender block, awareness note
 
 ## Run
 
 ```bash
-cp .env.example .env        # add META_API_KEY
+cp .env.example .env            # add META_API_KEY (and WhatsApp tokens when you have them)
 uv venv .venv && uv pip install -p .venv -r requirements.txt
-.venv/bin/python run.py     # http://localhost:1002/docs
-.venv/bin/python -m pytest  # offline tests with a scripted model
+.venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
+.venv/bin/python -m pytest      # 44 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.
+`ffmpeg` is used for voice-note and video conversion.
 
-## Built during the hackathon
+**WhatsApp:** expose port 1002 (e.g. `cloudflared tunnel --url http://localhost:1002`), set the webhook to
+`https://<tunnel>/webhook` with `WA_VERIFY_TOKEN`, subscribe to `messages`.
+
+**API without WhatsApp:** `POST /messages {requester, text}` · `POST /voice` · `POST /image` · `POST /video` ·
+`POST /camera/{camera_id}` · `POST /approvals/{id}` · `GET /tickets/{id}`.
+
+## Layout
+
+```
+run.py              entry point (API + scheduler)
+app/agents.py       agent loop, tier definitions, handoffs, approvals
+app/tools.py        LLM-callable tools with per-tier authority
+app/systems.py      simulated enterprise systems (directory, EDR, mail, CMDB, vendor, courier)
+app/knowledge.py    SOP pools + learning loop        data/sops/<tier>/*.md
+app/llm.py          Meta Model API client (+ scripted model for tests)
+app/voice.py        Muse Voice Transcribe            app/vision.py   SAM 3.1 + frame sampling
+app/camera.py       compliance watcher               app/proactive.py  inventory checks
+app/scheduler.py    follow-ups, reminders, outbound  app/whatsapp.py   Cloud API channel
+app/dashboard.py    manager dashboard                app/main.py       HTTP API
+tests/              scenario tests over a scripted model
+```
 
 All code in this repository was written during the event, starting Oct 27, 2026.
