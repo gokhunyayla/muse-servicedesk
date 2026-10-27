@@ -122,11 +122,17 @@ async def post_camera_frame(camera_id: str, image: UploadFile = File(...)) -> di
 
 
 @app.get("/tickets")
-def list_tickets(status: str | None = None) -> list[dict]:
+def list_tickets(status: str | None = None, owner: str | None = None, period: str | None = None) -> list[dict]:
+    from app.dashboard import period_start
     with session() as db:
         q = db.query(Ticket).order_by(Ticket.id.desc())
         if status:
             q = q.filter(Ticket.status == status)
+        if owner:
+            q = q.filter(Ticket.owner == owner)
+        since = period_start(period)
+        if since:
+            q = q.filter(Ticket.created_at >= since)
         return [{"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "rating": t.rating,
                  "created_at": t.created_at.isoformat()} for t in q.limit(100)]
 

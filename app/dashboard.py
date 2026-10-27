@@ -13,10 +13,32 @@ from app.db import Event, Ticket, _now, session
 router = APIRouter()
 
 
+def period_start(period: str | None):
+    """Start of today / this week / month / quarter / year (server local time); None = all time."""
+    now = _now()
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "today":
+        return day
+    if period == "week":
+        return day - timedelta(days=day.weekday())
+    if period == "month":
+        return day.replace(day=1)
+    if period == "quarter":
+        return day.replace(month=3 * ((day.month - 1) // 3) + 1, day=1)
+    if period == "year":
+        return day.replace(month=1, day=1)
+    return None
+
+
 @router.get("/stats")
-def stats() -> dict:
+def stats(period: str | None = None) -> dict:
     with session() as db:
-        tickets = db.query(Ticket).all()
+        since = period_start(period)
+        q = db.query(Ticket)
+        if since:
+            q = q.filter(Ticket.created_at >= since)
+        tickets = q.all()
+        ids = {t.id for t in tickets}
         by_status = Counter(t.status for t in tickets)
         resolved = [t for t in tickets if t.status == "resolved"]
         rated = [t.rating for t in resolved if t.rating]
@@ -24,8 +46,11 @@ def stats() -> dict:
         recent = [t for t in tickets if t.created_at >= since]
         handoffs = Counter()
         for e in db.query(Event).filter(Event.kind == "handoff"):
-            handoffs[e.content.split(":")[0].strip()] += 1
-        tool_calls = Counter(e.actor for e in db.query(Event).filter(Event.kind == "tool_call"))
+            if e.ticket_id in ids:
+                handoffs[e.content.split(":")[0].strip()] += 1
+        tool_calls = Counter(e.actor for e in db.query(Event).filter(Event.kind == "tool_call") if e.ticket_id in ids)
+        by_owner = Counter(t.owner for t in tickets)
+        open_by_owner = Counter(t.owner for t in tickets if t.status != "resolved")
         cats = Counter()
         for t in tickets:
             title = t.title.lower()
@@ -36,7 +61,8 @@ def stats() -> dict:
             "auto_resolution_rate": round(len(resolved) / len(tickets), 2) if tickets else 0,
             "avg_rating": round(sum(rated) / len(rated), 2) if rated else None, "ratings": len(rated),
             "top_issues": cats.most_common(6), "handoffs": dict(handoffs),
-            "tool_calls_by_tier": dict(tool_calls),
+            "tool_calls_by_tier": dict(tool_calls), "by_owner": dict(by_owner),
+            "open_by_owner": dict(open_by_owner), "period": period or "all",
         }
 
 
@@ -87,6 +113,14 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:inherit;cursor:pointer;font-size:12px}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
 .tiers{display:flex;flex-wrap:wrap;gap:6px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
+.seg button{font:inherit;font-size:12px;padding:6px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button.on{background:var(--accent);color:#fff}@media(max-width:600px){.seg button{padding:6px 7px}}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px 0}
+.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:12px}@media(max-width:900px){.cards{grid-template-columns:repeat(3,1fr)}}
+.tcard{padding:10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.tcard b{display:block;font-size:20px}.tcard span{color:var(--muted);font-size:12px}.tcard em{font-style:normal;font-size:11px;color:var(--muted)}
+.tcard.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.tcard:hover{background:var(--bg)}
 #trail{max-height:70vh;overflow:auto}.ev{padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px;overflow-wrap:anywhere}
 .ev b{color:var(--accent)}.ev.user b{color:var(--ok)}.ev.handoff b{color:var(--bad)}.ev code{font-size:12px;color:var(--muted);white-space:pre-wrap}
 </style></head><body>
@@ -95,10 +129,12 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 <h1>Muse ServiceDesk<small>Service desk console</small></h1></div>
 <div class="right"><span class="live"><i></i><span id="upd">live</span></span>
 <button class="ibtn" id="theme" title="Theme: system" aria-label="Toggle theme"></button></div></header>
+<div class="toolbar"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
+<small id="scope"></small></div>
 <main>
-<section class="card"><div class="kpis" id="kpis"></div><h3>Top issues</h3><div id="issues"></div>
+<section class="card"><div class="kpis" id="kpis"></div><div class="cards" id="cards"></div><h3>Top issues</h3><div id="issues"></div>
 <h3>Tier load</h3><div class="tiers" id="tiers"></div></section>
-<section class="card"><h3>Tickets</h3><div class="scroll"><table><thead><tr><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
+<section class="card"><h3 id="tt">Tickets</h3><div class="scroll"><table><thead><tr><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
 <section class="card" style="grid-column:1/-1"><h3 id="ttitle">Ticket trail</h3><div id="trail"><small>Select a ticket.</small></div></section>
 </main>
 <script>
@@ -115,9 +151,17 @@ function applyTheme(v){theme=v;try{localStorage.setItem('theme',v)}catch(e){}
  $('#theme').innerHTML=ICONS[v];$('#theme').title='Theme: '+v+' (click to change)';}
 (function(){let v='system';try{v=localStorage.getItem('theme')||'system'}catch(e){}applyTheme(ORDER.includes(v)?v:'system');
  $('#theme').onclick=()=>applyTheme(ORDER[(ORDER.indexOf(theme)+1)%3]);})();
+let period='all',owner='';
+document.querySelectorAll('#period button').forEach(b=>b.onclick=()=>{period=b.dataset.p;document.querySelectorAll('#period button').forEach(x=>x.classList.toggle('on',x===b));load();});
+function pick(o){owner=owner===o?'':o;load();}
+const TIERS=[['','All tickets'],['L1','L1 · first contact'],['L2','L2 · devices & network'],['L3','L3 · servers & security'],['L4','L4 · vendors & logistics'],['human','Human engineer']];
 async function load(){
- const s=await (await fetch('/stats')).json(), ts=await (await fetch('/tickets')).json();
- const st=s.by_status||{};
+ const qp='?period='+period, s=await (await fetch('/stats'+qp)).json(), ts=await (await fetch('/tickets'+qp+(owner?'&owner='+owner:''))).json();
+ const st=s.by_status||{}, bo=s.by_owner||{}, ob=s.open_by_owner||{};
+ $('#cards').innerHTML=TIERS.map(([k,label])=>{const n=k?(bo[k]||0):s.total,o=k?(ob[k]||0):(s.total-(st.resolved||0));
+  return `<button class="tcard ${owner===k?'on':''}" onclick="pick('${k}')"><b>${n}</b><span>${label}</span><br><em>${o} open</em></button>`}).join('');
+ $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');
+ $('#scope').textContent=(period==='all'?'all time':'this '+period.replace('today','day'))+' · '+s.total+' tickets';
  $('#kpis').innerHTML=[['Total',s.total],['Open',(st.open||0)+(st.waiting_user||0)+(st.waiting_approval||0)],['Escalated',st.escalated||0],
   ['Auto-resolved',Math.round(s.auto_resolution_rate*100)+'%'],['Satisfaction',s.avg_rating?s.avg_rating+' / 5':'—']]
   .map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');
