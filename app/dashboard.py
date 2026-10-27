@@ -15,20 +15,32 @@ router = APIRouter()
 
 
 def period_start(period: str | None):
-    """Start of today / this week / month / quarter / year (server local time); None = all time."""
-    now = _now()
-    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    """Start of today / this week / month / quarter / year in the desk's time zone (DESK_TZ, default
+    Europe/Istanbul), returned as naive UTC to compare with stored timestamps; None = all time."""
+    import os
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+    if period in (None, "", "all"):
+        return None
+    tz = ZoneInfo(os.getenv("DESK_TZ", "Europe/Istanbul"))
+    local = datetime.now(tz)
+    day = local.replace(hour=0, minute=0, second=0, microsecond=0)
     if period == "today":
-        return day
+        return _to_utc(day)
     if period == "week":
-        return day - timedelta(days=day.weekday())
+        return _to_utc(day - timedelta(days=day.weekday()))
     if period == "month":
-        return day.replace(day=1)
+        return _to_utc(day.replace(day=1))
     if period == "quarter":
-        return day.replace(month=3 * ((day.month - 1) // 3) + 1, day=1)
+        return _to_utc(day.replace(month=3 * ((day.month - 1) // 3) + 1, day=1))
     if period == "year":
-        return day.replace(month=1, day=1)
+        return _to_utc(day.replace(month=1, day=1))
     return None
+
+
+def _to_utc(local_dt):
+    from datetime import UTC
+    return local_dt.astimezone(UTC).replace(tzinfo=None)
 
 
 @router.get("/stats")
