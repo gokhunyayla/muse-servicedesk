@@ -37,9 +37,16 @@ def titles(tier: str) -> list[str]:
     return [body.splitlines()[0].lstrip("# ").strip() for _, body in _pool(tier) if body]
 
 
+_TR = str.maketrans("çğıöşüâîû", "cgiosuaiu")
+
+
+def _ascii(text: str) -> str:
+    return text.translate(_TR)
+
+
 def write(tier: str, title: str, content: str) -> str:
     """Add a SOP. Returns its id. Existing ids are never overwritten."""
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60] or "sop"
+    slug = re.sub(r"[^a-z0-9]+", "-", _ascii(title.lower())).strip("-")[:60] or "sop"
     d = SOP_DIR / tier
     d.mkdir(parents=True, exist_ok=True)
     n = len(list(d.glob("*.md"))) + 1
