@@ -334,6 +334,97 @@ def users_json(user: User = Depends(current_user)) -> list[dict]:
                 for u in db.query(User).filter(User.active.is_(True)).order_by(User.name)]
 
 
+# ---- profile ---------------------------------------------------------------------------------
+
+@router.get("/profile", response_class=HTMLResponse)
+def profile_page(user: User = Depends(current_user), info: str = "", error: str = "") -> str:
+    with session() as db:
+        u = db.get(User, user.id)
+        sessions = db.query(Session).filter(Session.user_id == u.id, Session.expires_at > _now()).count()
+    body = f"""
+<div class="cols">
+<section>
+<div class="avatar big">{_initials(u.name)}</div>
+<h3 style="margin-top:12px">{_esc(u.name)}</h3>
+<p class="muted">{_esc(u.email)} · {u.role} · member since {u.created_at:%d %b %Y} · {sessions} active session{'s' if sessions != 1 else ''}</p>
+<form method="post" action="/profile">
+<label for="name">Display name</label><input id="name" name="name" value="{_esc(u.name)}" required>
+<label>E-mail</label><input value="{_esc(u.email)}" disabled><small class="muted">Changing the e-mail is done by an admin.</small>
+{_alert('', info) if info and not info.startswith('Password') else ''}
+<button class="btn" type="submit">Save</button></form>
+</section>
+<aside class="side">
+<h3>Change password</h3>
+<form method="post" action="/profile/password">
+<label for="cur">Current password</label><input id="cur" name="current" type="password" autocomplete="current-password" required>
+<label for="pw">New password <small>(at least 8 characters)</small></label><div class="pw"><input id="pw" name="password" type="password" minlength="8" autocomplete="new-password" required>
+<button type="button" class="eye" onclick="togglePw('pw',this)" aria-label="Show password">{EYE}</button></div>
+<label for="pw2">Repeat new password</label><input id="pw2" name="password2" type="password" minlength="8" autocomplete="new-password" required>
+{_alert(error, info if info.startswith('Password') else '')}
+<button class="btn primary" type="submit">Update password</button>
+<p class="muted" style="margin-top:10px">Other sessions are signed out after a password change.</p></form>
+</aside></div>"""
+    return _page("Profile", body, wide=True, user=user)
+
+
+@router.post("/profile")
+def profile_save(request: Request, user: User = Depends(current_user), name: str = Form(...)):
+    check_origin(request)
+    with session() as db:
+        u = db.get(User, user.id)
+        u.name = name.strip()[:120] or u.name
+        audit(db, u.email, "profile.name", detail=u.name, ip=_ip(request))
+    return RedirectResponse("/profile?info=Saved", 303)
+
+
+@router.post("/profile/password")
+def profile_password(request: Request, user: User = Depends(current_user), current: str = Form(...),
+                     password: str = Form(...), password2: str = Form(...)):
+    check_origin(request)
+    rate_limit(request, "pwchange", limit=10, window_sec=900)
+    with session() as db:
+        u = db.get(User, user.id)
+        if not verify_password(current, u.password_hash):
+            audit(db, u.email, "password.change_failed", ip=_ip(request))
+            return RedirectResponse("/profile?error=Current+password+is+wrong", 303)
+        if password != password2:
+            return RedirectResponse("/profile?error=New+passwords+do+not+match", 303)
+        u.password_hash = hash_password(password)
+        audit(db, u.email, "password.changed", ip=_ip(request))
+        mine = request.cookies.get(COOKIE)
+        for s in db.query(Session).filter(Session.user_id == u.id):
+            if s.token != mine:
+                db.delete(s)
+    return RedirectResponse("/profile?info=Password+updated", 303)
+
+
+# ---- audit log (admin) -----------------------------------------------------------------------
+
+@router.get("/audit", response_class=HTMLResponse)
+def audit_page(admin: User = Depends(admin_user), limit: int = 200) -> str:
+    from app.db import Audit
+    with session() as db:
+        rows = "".join(f"<tr><td class='mono'>{r.at:%Y-%m-%d %H:%M:%S}</td><td>{_esc(r.user)}</td><td>{_esc(r.action)}</td>"
+                       f"<td>{_esc(r.target)}</td><td class='muted'>{_esc(r.detail[:120])}</td><td class='mono'>{_esc(r.ip)}</td></tr>"
+                       for r in db.query(Audit).order_by(Audit.id.desc()).limit(min(limit, 1000)))
+    return _page("Audit log", f"""<p class="muted">Everything desk users did in this console, newest first (UTC).</p>
+<div class="scroll"><table><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead><tbody>{rows}</tbody></table></div>""",
+                 wide=True, user=admin)
+
+
+@router.get("/audit.json")
+def audit_json(admin: User = Depends(admin_user), limit: int = 200) -> list[dict]:
+    from app.db import Audit
+    with session() as db:
+        return [{"at": r.at.isoformat(), "user": r.user, "action": r.action, "target": r.target, "detail": r.detail, "ip": r.ip}
+                for r in db.query(Audit).order_by(Audit.id.desc()).limit(min(limit, 1000))]
+
+
+def _initials(name: str) -> str:
+    parts = [p for p in name.split() if p]
+    return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+
 def _ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
@@ -384,11 +475,23 @@ body.auth{min-height:100vh;display:grid;place-items:center;padding:24px;backgrou
 .row{display:flex;align-items:center;gap:10px;margin-top:12px}.row.between{justify-content:space-between}
 .check{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;color:var(--fg)}.check input{width:auto;accent-color:var(--accent)}
 .foot{margin-top:18px;text-align:center;font-size:12px;color:var(--muted)}
+/* user menu */
+.menu{position:relative}.avatar{width:34px;height:34px;border-radius:50%;border:0;background:var(--accent);color:#fff;font:600 13px/1 inherit;cursor:pointer;display:grid;place-items:center;font-family:inherit}
+.avatar.big{width:64px;height:64px;font-size:22px}
+.dropdown{position:absolute;right:0;top:42px;min-width:230px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:6px;display:none;z-index:20}
+.dropdown.on{display:block}.dropdown a{display:block;padding:8px 10px;border-radius:6px;color:var(--fg);text-decoration:none;font-size:13px}.dropdown a:hover{background:var(--bg)}
+.dd-head{padding:8px 10px 10px}.dd-head b{display:block;font-size:13px}.dd-head small{color:var(--muted);font-size:12px}.dd-sep{height:1px;background:var(--line);margin:6px 0}
+.cols{display:grid;grid-template-columns:1fr 340px;gap:24px}@media(max-width:800px){.cols{grid-template-columns:1fr}}
+.side{border-left:1px solid var(--line);padding-left:24px}@media(max-width:800px){.side{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:8px}}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}.scroll{overflow-x:auto}a.logo{text-decoration:none}
 """
 
 JS = """<script>
 try{var t=localStorage.getItem('theme');if(t&&t!=='system')document.documentElement.setAttribute('data-theme',t)}catch(e){}
 function togglePw(id,b){var i=document.getElementById(id);i.type=i.type==='password'?'text':'password';b.setAttribute('aria-label',i.type==='password'?'Show password':'Hide password');}
+function toggleMenu(b){var m=document.getElementById('userMenu');var on=!m.classList.contains('on');m.classList.toggle('on',on);b.setAttribute('aria-expanded',on);}
+document.addEventListener('click',function(e){var m=document.getElementById('userMenu');if(m&&!e.target.closest('.menu'))m.classList.remove('on');});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'){var m=document.getElementById('userMenu');if(m)m.classList.remove('on');}});
 </script>"""
 
 
@@ -399,8 +502,20 @@ def _page(title: str, body: str, wide: bool = False, user: User | None = None, s
         return (f'{head}<body class="auth"><div class="card"><div class="brand"><div class="logo">{LOGO}</div>'
                 f'<h2>{_esc(title)}</h2></div>{body}'
                 f'<p class="foot">Muse ServiceDesk · service desk console</p></div>{JS}</body></html>')
-    who = (f'<span class="muted">{_esc(user.name)} · {user.role}</span> <a class="btn" href="/logout">Sign out</a>'
-           if user else "")
-    return (f'{head}<body><header><div class="brand"><div class="logo">{LOGO}</div>'
-            f'<h1>Muse ServiceDesk<small>Service desk console</small></h1></div><div>{who}</div></header>'
+    return (f'{head}<body><header><div class="brand"><a class="logo" href="/" title="Console">{LOGO}</a>'
+            f'<h1>Muse ServiceDesk<small>Service desk console</small></h1></div>{user_menu(user)}</header>'
             f'<main><div class="card"><h2>{_esc(title)}</h2>{body}</div></main>{JS}</body></html>')
+
+
+def user_menu(user: User | None) -> str:
+    """Avatar + dropdown shared by the console and the app pages."""
+    if user is None:
+        return ""
+    admin = user.role == "admin"
+    return (f'<div class="menu"><button class="avatar" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" '
+            f'onclick="toggleMenu(this)">{_initials(user.name)}</button>'
+            f'<div class="dropdown" id="userMenu" role="menu">'
+            f'<div class="dd-head"><b>{_esc(user.name)}</b><small>{_esc(user.email)} · {user.role}</small></div>'
+            f'<a href="/" role="menuitem">Console</a><a href="/profile" role="menuitem">Profile &amp; password</a>'
+            + (f'<a href="/users" role="menuitem">Desk users</a><a href="/audit" role="menuitem">Audit log</a>' if admin else "")
+            + f'<div class="dd-sep"></div><a href="/logout" role="menuitem">Sign out</a></div></div>')

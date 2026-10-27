@@ -157,3 +157,17 @@ def test_machine_endpoints_need_the_api_key_when_one_is_set(monkeypatch):
     set_llm(ScriptedLLM([Reply(text="ok")]))
     assert c.post("/messages", json={"requester": "+905551110001", "text": "x"}, headers={"X-API-Key": "k-123"}).status_code == 200
     assert c.get("/webhook", params={"hub.mode": "subscribe", "hub.verify_token": "muse-servicedesk", "hub.challenge": "1"}).status_code == 200
+
+
+def test_profile_name_and_password_change(desk):
+    r = desk.post("/profile", data={"name": "Desk Boss"}, follow_redirects=False)
+    assert r.status_code == 303 and desk.get("/me").json()["name"] == "Desk Boss"
+    bad = desk.post("/profile/password", data={"current": "wrong", "password": "brand-new-pw1", "password2": "brand-new-pw1"}, follow_redirects=False)
+    assert "error=Current" in bad.headers["location"]
+    ok = desk.post("/profile/password", data={"current": "secret-pass-1", "password": "brand-new-pw1", "password2": "brand-new-pw1"}, follow_redirects=False)
+    assert "info=Password" in ok.headers["location"] and desk.get("/me").status_code == 200   # own session kept
+    again = TestClient(app)
+    again.post("/login", data={"email": "admin@test", "password": "brand-new-pw1"}, follow_redirects=False)
+    assert again.get("/me").json()["name"] == "Desk Boss"
+    assert desk.get("/audit.json").json()[0]["action"] == "login.ok"
+    assert "Profile" in desk.get("/profile").text and "Audit log" in desk.get("/audit").text

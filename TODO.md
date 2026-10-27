@@ -20,7 +20,7 @@
 
 ## Should
 - [ ] SSO (OIDC — Microsoft Entra / Google) and passkeys for the console; TOTP as a fallback.
-- [ ] Session rotation on privilege change; audit log viewer in the console.
+- [ ] Session rotation on privilege change.
 - [ ] Localise fixed system texts (which-ticket question, close/auto-close notices, reminders) to the ticket's language.
 - [ ] Unsubscribe the legacy app from the test WhatsApp account; stop retrying outbound to numbers outside the test allow-list.
 - [ ] Dashboard: escalated queue view, per-tier latency, incident panel.
