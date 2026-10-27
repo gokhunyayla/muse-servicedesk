@@ -41,6 +41,8 @@ def _ends_wait(e) -> bool:
     do not end it."""
     if e.actor == "user" or e.actor.startswith("desk:"):
         return True
+    if e.actor == "supervisor":
+        return e.kind == "note" and "reassigned" in e.content
     if e.actor == "system":
         return False
     if e.kind in ("tool_call", "handoff"):
@@ -86,7 +88,8 @@ def timing(ticket, events) -> dict:
         elif e.kind == "tool_result" and e.content.startswith("handoff_") and stack:
             charge(e.at)
             active = stack.pop()
-        elif e.kind == "tool_result" and e.content == "request_confirmation":
+        elif (e.kind == "tool_result" and e.content == "request_confirmation") or \
+             (e.kind == "message" and e.actor == "supervisor"):
             charge(e.at)
             paused = True
         elif e.kind == "note" and e.actor.startswith("desk:") and "assigned to" in e.content:

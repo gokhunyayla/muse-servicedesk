@@ -216,7 +216,9 @@ def nudge_employee(ctx: Ctx, ticket_id: int, text: str) -> dict:
         return {"ok": False, "error": "requester has no phone"}
     ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
     log(ctx.db, t.id, "supervisor", "message", text)
-    return {"ok": True}
+    if t.status == "open":
+        t.status = "waiting_user"          # the desk is now waiting on the employee: the SLA clock pauses
+    return {"ok": True, "status": t.status}
 
 
 @tool("Remind the approver of a pending approval on this ticket (sends the ONAY/RET prompt again).", SUP,
