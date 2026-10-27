@@ -272,6 +272,8 @@ def ask(user, thread_id: int, text: str) -> dict:
         messages = [{"role": "system", "content": SYSTEM.format(name=user.name, role=user.role) + "\n\nAbout the person you are talking to (current):\n" + person_context(db, user)},
                     *_history(db, th.id)]
         answer = ""
+        from app import usage
+        _tok = usage._scope.set(("chat", th.id, "DESK"))
         try:
             for _ in range(MAX_STEPS):
                 reply = llm.chat(messages, specs, heavy=True)
@@ -290,7 +292,15 @@ def ask(user, thread_id: int, text: str) -> dict:
                 answer = "I ran out of steps while working on that; here is what I did: " + ", ".join(a["tool"] for a in actions)
         except ContentFiltered:
             answer = "The model declined that phrasing; could you say it differently?"
-        db.add(ChatMessage(thread_id=th.id, role="assistant", content=answer, actions=actions))
+        finally:
+            usage._scope.reset(_tok)
+        turn = usage.summary(scope_kind="chat", scope_id=th.id)
+        last = getattr(llm, "last_usage", None) or {}
+        msg_usage = {"calls": len(actions) + 1, "prompt_tokens": last.get("prompt_tokens", 0), "completion_tokens": last.get("completion_tokens", 0),
+                     "latency_ms": last.get("latency_ms", 0), "context_pct": last.get("context_pct"), "context_limit": last.get("context_limit"),
+                     "model": last.get("model", "")}
+        db.add(ChatMessage(thread_id=th.id, role="assistant", content=answer, actions=actions, usage=msg_usage))
         th.updated_at = _now()
         db.flush()
-        return {"thread_id": th.id, "answer": answer, "actions": actions}
+        return {"thread_id": th.id, "answer": answer, "actions": actions, "usage": msg_usage,
+                "thread_usage": {"calls": turn["calls"], "total_tokens": turn["total_tokens"]}}

@@ -54,11 +54,16 @@ class MetaLLM:
         return self._client
 
     def chat(self, messages: list[dict], tools: list[dict], heavy: bool = False) -> Reply:
+        import time
+
         from openai import BadRequestError
 
+        from app import usage
+        model = settings.meta_model_heavy if heavy else settings.meta_model
+        t0 = time.perf_counter()
         try:
             res = self.client.chat.completions.create(
-                model=settings.meta_model_heavy if heavy else settings.meta_model,
+                model=model,
                 messages=messages,
                 tools=tools or None,
                 # reasoning tokens count against this budget, so keep it generous
@@ -66,10 +71,14 @@ class MetaLLM:
                 extra_body={"reasoning_effort": settings.reasoning_effort},
             )
         except BadRequestError as e:
+            usage.record(model, 0, 0, int((time.perf_counter() - t0) * 1000), ok=False)
             if "content management policy" in str(e):
                 raise ContentFiltered(str(e)) from e
             raise
         msg = res.choices[0].message
+        u = getattr(res, "usage", None)
+        self.last_usage = usage.record(model, getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0,
+                                       int((time.perf_counter() - t0) * 1000), tool_calls=len(msg.tool_calls or []))
         calls = [
             ToolCall(id=c.id, name=c.function.name, arguments=json.loads(c.function.arguments or "{}"))
             for c in (msg.tool_calls or [])
@@ -88,6 +97,10 @@ class ScriptedLLM:
     def chat(self, messages: list[dict], tools: list[dict], heavy: bool = False) -> Reply:
         self.requests.append([dict(m) for m in messages])
         self.heavy_calls += heavy
+        from app import usage
+        approx = sum(len(str(m.get("content") or "")) for m in messages) // 4
+        self.last_usage = usage.record(settings.meta_model_heavy if heavy else settings.meta_model, approx, 40, 5,
+                                       tool_calls=len(self.replies[0].tool_calls) if self.replies and self.replies[0].tool_calls else 0)
         if not self.replies:
             return Reply(text="(script exhausted)")
         return self.replies.pop(0)

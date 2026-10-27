@@ -398,7 +398,9 @@ def run(trigger: str = "schedule") -> SupervisorRun:
                                        sops=json.dumps(sops, ensure_ascii=False), clusters=json.dumps(clusters, ensure_ascii=False),
                                        signals=json.dumps(signals, ensure_ascii=False), open_sup=open_sup,
                                        at_risk=json.dumps(risks, ensure_ascii=False), risk_pct=sla_targets().get("at_risk_pct", 80))
-                summary = _agent_loop(db, prompt, actions)
+                from app import usage
+                with usage.scope("supervisor", run_id, "SUP"):
+                    summary = _agent_loop(db, prompt, actions)
     except ContentFiltered:
         error = "model request blocked by content filter"
     except Exception as e:                      # a failing pass must never break the scheduler

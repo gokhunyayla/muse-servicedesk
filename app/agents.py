@@ -88,11 +88,16 @@ class Agent:
 
     def run(self, db, ticket: Ticket, message: str | list, history: list[dict] | None = None,
             depth: int = 0) -> str:
+        from app import usage
         llm = get_llm()
         ctx = Ctx(db=db, ticket=ticket, agent=self.tier)
         messages = [{"role": "system", "content": self.system_prompt(ticket, db)}, *(history or []),
                     {"role": "user", "content": message}]
         specs = self.tool_specs()
+        with usage.scope("ticket", ticket.id, self.tier):
+            return self._loop(db, ticket, ctx, llm, messages, specs, depth)
+
+    def _loop(self, db, ticket, ctx, llm, messages, specs, depth) -> str:
         for _ in range(MAX_STEPS):
             try:
                 reply = llm.chat(messages, specs, heavy=self.heavy)

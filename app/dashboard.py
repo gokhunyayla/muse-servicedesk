@@ -225,6 +225,8 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 <section class="card"><div class="kpis" id="kpis"></div></section>
 <section class="card"><h3 style="margin-top:0">Top issues</h3><div id="issues"></div></section>
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
+<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">AI usage <small class="muted">Meta Model API</small></h3><a class="btn" href="/settings?tab=models">Models</a></div>
+<div class="kpis six" id="aiKpis" style="margin-top:10px"></div><div id="aiModels" class="muted" style="margin-top:8px"></div></section>
 <section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">SLA at risk</h3><a class="btn" href="/settings?tab=sla">Targets</a></div><div id="risk" class="risk">—</div></section>
 <section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor <small id="supMode"></small></h3><div class="actions"><button class="btn primary" id="runBtn" onclick="runSupervisor()">Run now</button></div></div>
 <div class="kpis six" id="supKpis" style="margin-top:10px"></div><h4 class="sub">Recent runs</h4><div id="sup" class="runs">—</div></section>
@@ -289,6 +291,10 @@ async function load(){
   const h=s.handoffs||{};$('#handoffs').innerHTML=Object.keys(h).length?Object.entries(h).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · '):'none';
   try{const ss=await (await fetch('/supervisor/stats?period='+period)).json();$('#supMode').textContent=ss.mode==='auto'?'· automatic':'· manual';
    $('#supKpis').innerHTML=[['Runs',ss.runs],['Problems merged',ss.problems],['SOPs drafted',ss.sops_drafted],['SOPs published',ss.sops_published],['SLA actions',ss.sla_actions||0],['Human asks',ss.human_asks]].map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');}catch(e){}
+  try{const ai=await (await fetch('/ai/usage?period='+period)).json();
+   $('#aiKpis').innerHTML=[['Calls',ai.calls],['Tokens',fmtTok(ai.total_tokens)],['Prompt / completion',fmtTok(ai.prompt_tokens)+' / '+fmtTok(ai.completion_tokens)],['Avg latency',(ai.avg_latency_ms/1000).toFixed(1)+' s'],['Tokens per ticket',fmtTok(ai.tokens_per_ticket)],['Largest prompt',fmtTok(ai.max_prompt_tokens)+' ('+Math.round(100*ai.max_prompt_tokens/(ai.context_windows[Object.keys(ai.by_model)[0]]||128000))+'% ctx)']]
+    .map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');
+   $('#aiModels').innerHTML=Object.entries(ai.by_model).map(([m,v])=>`<span class="chip">${esc(m)}: ${v.calls} calls · ${fmtTok(v.total)} tok · ${(v.avg_latency_ms/1000).toFixed(1)} s</span>`).join(' ')+(Object.keys(ai.by_scope).length?' · by scope: '+Object.entries(ai.by_scope).map(([k,v])=>`${esc(k)} ${fmtTok(v)}`).join(', '):'');}catch(e){}
   try{const rk=await (await fetch('/sla/at-risk')).json();
    $('#risk').innerHTML=rk.length?rk.map(r=>`<a class="riskrow ${r.breached?'bad':'warn'}" href="/tickets?id=${r.ticket_id}"><span class="pct">${r.pct}%</span><span class="t">#${r.ticket_id} ${esc(r.title)}</span><span class="m">${esc(r.metric.replace('_',' '))} · ${dur(r.seconds)} / ${dur(r.limit_seconds)} · ${esc(r.owner)}</span>${pill(r.status)}</a>`).join(''):'<small>No ticket is near an SLA target.</small>';}catch(e){}
   try{const runs=await (await fetch('/supervisor/runs?limit=5')).json();
@@ -329,6 +335,7 @@ const openRuns=new Set();
 function paras(txt){const parts=String(txt).split(/\\s*(?=(?:#\\d+\\s*[\\[(—:-])|Deliberately skipped|Noticed|Did:|Skipped:)/).map(s=>s.trim()).filter(Boolean);
  return (parts.length>1?parts:String(txt).split(/(?<=[.!?])\\s+(?=[A-Z#])/)).map(s=>`<p>${esc(s)}</p>`).join('');}
 function plain(md){return String(md).replace(/\\*\\*/g,'').replace(/`/g,'').replace(/^\\s*[-*]\\s+/gm,'').replace(/\\s*\\n+\\s*/g,' ').trim();}
+function fmtTok(n){n=+n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1000?(n/1000).toFixed(1)+'k':String(n);}
 function ago(x){const s=(Date.now()-new Date(x))/1000;if(s<60)return 'now';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d';}
 function fmt(x){try{const d=new Date(x);return d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}catch(e){return x}}
 function tstamp(x){try{return new Date(x).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
@@ -373,7 +380,8 @@ async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id))
   ${t.linked&&t.linked.length?`<dt>Linked</dt><dd>${t.linked.map(i=>`<a href="#" onclick="show(${i});return false">#${i}</a>`).join(', ')}</dd>`:''}</dl>
   ${renderTiming(t.timing)}
   ${t.resolution?`<h4>Resolution</h4><div>${esc(t.resolution)}</div>`:''}
-  <h4>Activity</h4><div class="muted">${t.events.filter(e=>e.kind==='tool_call').length} tool calls · ${t.events.filter(e=>e.kind==='handoff').length} handoffs · ${t.events.filter(e=>e.kind==='message').length} messages</div>`;
+  <h4>Activity</h4><div class="muted">${t.events.filter(e=>e.kind==='tool_call').length} tool calls · ${t.events.filter(e=>e.kind==='handoff').length} handoffs · ${t.events.filter(e=>e.kind==='message').length} messages</div>
+  ${t.ai&&t.ai.calls?`<h4>AI usage</h4><div class="muted">${t.ai.calls} model calls · ${fmtTok(t.ai.total_tokens)} tokens · avg ${(t.ai.avg_latency_ms/1000).toFixed(1)} s${Object.keys(t.ai.by_actor||{}).length?' · '+Object.entries(t.ai.by_actor).map(([k,v])=>k+' '+fmtTok(v)).join(', '):''}</div>`:''}`;
  $('#trail').innerHTML=renderTimeline(t.events);$('#composer').style.display='';
  document.querySelectorAll('.item').forEach(r=>r.classList.toggle('on',+r.dataset.id===t.id));
  if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#detail').scrollIntoView({behavior:'smooth'});}}

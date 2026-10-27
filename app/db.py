@@ -300,6 +300,7 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(16))          # user | assistant
     content: Mapped[str] = mapped_column(Text)
     actions: Mapped[list] = mapped_column(JSON, default=list)   # tool calls made while answering
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)     # tokens / latency / context share of this turn
 
 
 class Connector(Base):
@@ -321,3 +322,21 @@ class Connector(Base):
     last_error: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class LlmCall(Base):
+    """One request to Meta Model API: what it cost in tokens and time, and on whose behalf."""
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    model: Mapped[str] = mapped_column(String(64))
+    scope: Mapped[str] = mapped_column(String(32), default="")      # ticket | chat | supervisor | report | other
+    scope_id: Mapped[int | None] = mapped_column(nullable=True)     # ticket id / thread id / run id
+    actor: Mapped[str] = mapped_column(String(32), default="")      # L1..L4, SUP, DESK, report
+    prompt_tokens: Mapped[int] = mapped_column(default=0)
+    completion_tokens: Mapped[int] = mapped_column(default=0)
+    total_tokens: Mapped[int] = mapped_column(default=0)
+    latency_ms: Mapped[int] = mapped_column(default=0)
+    tool_calls: Mapped[int] = mapped_column(default=0)
+    ok: Mapped[bool] = mapped_column(default=True)

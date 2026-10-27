@@ -602,11 +602,18 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
                     + (f'<label class="check" style="margin:0 0 0 8px"><input type="checkbox" name="clear_{name}" value="1" {dis}> clear</label>' if st["source"] == "console" else "")
                     + '</div></div>')
         if tab == "models":
+            from app.usage import context_windows
+            cw = context_windows()
             rows = secret_row("META_API_KEY", "From dev.meta.ai; used by every agent, voice, vision and SAM call")
             body = f"""<p class="muted">Keys live encrypted in the database and are managed here; <code>.env</code> is only a fallback for first run.</p>
 <form method="post" action="/settings/secrets?tab=models">{rows}
-<dl class="kv" style="margin-top:14px"><dt>Agents</dt><dd>{_esc(cfg.meta_model)}</dd><dt>Heavy (L3, Supervisor, reports)</dt><dd>{_esc(cfg.meta_model_heavy)}</dd><dt>Reasoning effort</dt><dd>{_esc(cfg.reasoning_effort)}</dd><dt>Base URL</dt><dd>{_esc(cfg.meta_base_url)}</dd></dl>
-{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>"""
+<dl class="kv" style="margin-top:14px"><dt>Agents</dt><dd>{_esc(cfg.meta_model)}</dd><dt>Heavy (L3, Supervisor, reports, Desk Chat)</dt><dd>{_esc(cfg.meta_model_heavy)}</dd><dt>Reasoning effort</dt><dd>{_esc(cfg.reasoning_effort)}</dd><dt>Base URL</dt><dd>{_esc(cfg.meta_base_url)}</dd></dl>
+{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
+<h3>Context windows</h3><p class="muted">Used to show how much of a model's context each prompt consumes (chat footer, AI usage card).</p>
+<form method="post" action="/settings/context">
+<div class="srow"><div><b>{_esc(cfg.meta_model)}</b><small>agents</small></div><div class="min"><input name="{_esc(cfg.meta_model)}" type="number" min="1000" step="1000" value="{cw.get(cfg.meta_model, 128000)}" {dis}> <span>tokens</span></div></div>
+<div class="srow"><div><b>{_esc(cfg.meta_model_heavy)}</b><small>heavy</small></div><div class="min"><input name="{_esc(cfg.meta_model_heavy)}" type="number" min="1000" step="1000" value="{cw.get(cfg.meta_model_heavy, 128000)}" {dis}> <span>tokens</span></div></div>
+{('<div class="row end"><button class="btn primary slim" type="submit">Save context windows</button></div>' if admin else '')}</form>"""
         else:
             rows = (secret_row("WA_PHONE_NUMBER_ID", "Meta for Developers → WhatsApp → API Setup") + secret_row("WA_ACCESS_TOKEN", "System-user token (never expires)")
                     + secret_row("WA_VERIFY_TOKEN", "Must match the webhook configuration at Meta") + secret_row("DEMO_MANAGER_PHONE", "Seeded managers E1002/E1003 answer approvals from this number")
@@ -647,7 +654,7 @@ def chat_page(user: User = Depends(current_user)) -> str:
             f'<meta name="viewport" content="width=device-width,initial-scale=1"><style>{CSS}{CHAT_CSS}</style></head>')
     return rf"""{head}<body class="app">{rail(user, "chat")}<div class="page chatpage">
 <aside class="threads"><div class="th-head"><b>Desk Chat</b><button class="btn primary slim" onclick="newThread()">+ New</button></div><div id="threads"></div></aside>
-<section class="conv"><div id="msgs" class="msgs"><div class="hello"><h2>Ask the desk</h2><p class="muted">I know every ticket, who holds what, SLA risk, approvals, drafts and the Supervisor's work — and I can act for you.</p>
+<section class="conv"><div class="conv-head"><small id="tu" class="muted"></small></div><div id="msgs" class="msgs"><div class="hello"><h2>Ask the desk</h2><p class="muted">I know every ticket, who holds what, SLA risk, approvals, drafts and the Supervisor's work — and I can act for you.</p>
 <div class="sugg"><button onclick="say('What is the desk working on right now?')">What is the desk working on right now?</button><button onclick="say('Which tickets are at risk of breaching SLA and what should I do?')">Which tickets are at SLA risk?</button><button onclick="say('Is there anything waiting for my decision?')">Anything waiting for me?</button><button onclick="say('Şu an açık biletleri ve sahiplerini özetle')">Açık biletleri özetle</button></div></div></div>
 <form class="composer" onsubmit="send(event)"><textarea id="box" rows="2" placeholder="Ask anything about the desk, or tell me what to do… (Enter to send, Shift+Enter for a new line)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){{event.preventDefault();send(event)}}"></textarea><button class="btn primary" id="sendBtn" type="submit">Send</button></form></section></div>
 {JS}<script>
@@ -657,16 +664,19 @@ function md(t){{let h=esc(t);h=h.replace(/\[([^\]]+)\]\((\/[^)\s]*)\)/g,'<a href
  const lines=h.split('\n');let out='',inList=false;for(const l of lines){{const m=/^\s*[-*•]\s+(.*)$/.exec(l);if(m){{if(!inList){{out+='<ul>';inList=true}}out+='<li>'+m[1]+'</li>';}}else{{if(inList){{out+='</ul>';inList=false}}if(/^\s*\d+[.)]\s+/.test(l))out+='<div>'+l+'</div>';else if(l.trim()==='')out+='<div class="gap"></div>';else out+='<div>'+l+'</div>';}}}}if(inList)out+='</ul>';return out;}}
 async function loadThreads(){{const ts=await (await fetch('/chat/threads')).json();$('#threads').innerHTML=ts.map(t=>`<a class="thread ${{cur===t.id?'on':''}}" href="#" onclick="openThread(${{t.id}});return false">${{esc(t.title)}}<small>${{new Date(t.updated_at).toLocaleString([], {{dateStyle:'short',timeStyle:'short'}})}}</small><span class="x" onclick="event.preventDefault();event.stopPropagation();delThread(${{t.id}})" title="Delete">×</span></a>`).join('')||'<small class="muted" style="padding:8px;display:block">No conversations yet.</small>';}}
 async function newThread(){{const t=await (await fetch('/chat/threads',{{method:'POST'}})).json();cur=t.id;await loadThreads();$('#msgs').innerHTML='';$('#box').focus();}}
-async function openThread(id){{cur=id;const ms=await (await fetch('/chat/threads/'+id)).json();$('#msgs').innerHTML=ms.map(render).join('');$('#msgs').scrollTop=1e9;loadThreads();}}
+async function openThread(id){{cur=id;const ms=await (await fetch('/chat/threads/'+id)).json();$('#msgs').innerHTML=ms.map(render).join('');$('#msgs').scrollTop=1e9;loadThreads();threadUsage();}}
 async function delThread(id){{if(!confirm('Delete this conversation?'))return;await fetch('/chat/threads/'+id,{{method:'DELETE'}});if(cur===id){{cur=null;$('#msgs').innerHTML='';}}loadThreads();}}
+function tok(n){{n=+n||0;return n>=1000?(n/1000).toFixed(1)+'k':String(n);}}
+function usageLine(u){{if(!u||!u.model)return '';return `<div class="usage">${{tok(u.prompt_tokens+u.completion_tokens)}} tokens (${{tok(u.prompt_tokens)}} in / ${{tok(u.completion_tokens)}} out) · ${{(u.latency_ms/1000).toFixed(1)}} s · context ${{u.context_pct!=null?u.context_pct+'% of '+tok(u.context_limit):'—'}} · ${{esc(u.model)}}</div>`;}}
 function render(m){{const acts=(m.actions||[]).length?`<div class="acts">${{m.actions.map(a=>`<span class="chip ${{a.ok?'':'err'}}">${{esc(a.tool)}}${{a.args&&a.args.ticket_id?' #'+a.args.ticket_id:''}}</span>`).join('')}}</div>`:'';
- return `<div class="m ${{m.role}}"><div class="bubble">${{m.role==='assistant'?md(m.content):esc(m.content)}}${{acts}}</div></div>`;}}
+ return `<div class="m ${{m.role}}"><div class="bubble">${{m.role==='assistant'?md(m.content):esc(m.content)}}${{acts}}${{m.role==='assistant'?usageLine(m.usage):''}}</div></div>`;}}
+async function threadUsage(){{if(!cur)return;try{{const u=await (await fetch('/chat/threads/'+cur+'/usage')).json();const el=document.getElementById('tu');if(el)el.textContent=u.calls?`${{u.calls}} calls · ${{tok(u.total_tokens)}} tokens · largest prompt ${{tok(u.max_prompt_tokens)}}`:'';}}catch(e){{}}}}
 function say(t){{$('#box').value=t;send();}}
 async function send(ev){{if(ev)ev.preventDefault();const text=$('#box').value.trim();if(!text)return;if(!cur)await newThread();
  $('#msgs').insertAdjacentHTML('beforeend',render({{role:'user',content:text}}));$('#box').value='';$('#sendBtn').disabled=true;
  $('#msgs').insertAdjacentHTML('beforeend','<div class="m assistant" id="typing"><div class="bubble muted">thinking with Muse Wonder…</div></div>');$('#msgs').scrollTop=1e9;
  try{{const r=await (await fetch('/chat/threads/'+cur,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{text}})}})).json();
-  document.getElementById('typing').remove();$('#msgs').insertAdjacentHTML('beforeend',render({{role:'assistant',content:r.answer||r.detail||'(no answer)',actions:r.actions||[]}}));}}
+  document.getElementById('typing').remove();$('#msgs').insertAdjacentHTML('beforeend',render({{role:'assistant',content:r.answer||r.detail||'(no answer)',actions:r.actions||[],usage:r.usage}}));threadUsage();}}
  catch(e){{document.getElementById('typing').remove();$('#msgs').insertAdjacentHTML('beforeend',render({{role:'assistant',content:'Failed: '+e}}));}}
  $('#sendBtn').disabled=false;$('#msgs').scrollTop=1e9;loadThreads();}}
 loadThreads();
@@ -701,8 +711,10 @@ function md(t){let h=esc(t);h=h.replace(/\[([^\]]+)\]\((\/[^)\s]*)\)/g,'<a href=
  let out='',inList=false;for(const l of h.split('\n')){const m=/^\s*[-*•]\s+(.*)$/.exec(l);if(m){if(!inList){out+='<ul>';inList=true}out+='<li>'+m[1]+'</li>';}else{if(inList){out+='</ul>';inList=false}out+=l.trim()===''?'<div style="height:5px"></div>':'<div>'+l+'</div>';}}if(inList)out+='</ul>';return out;}
 const $=id=>document.getElementById(id);let thread=null,busy=false;
 try{thread=+localStorage.getItem('cw.thread')||null;if(localStorage.getItem('cw.open')==='1')$('cw').classList.add('on');}catch(e){}
+const tok=n=>{n=+n||0;return n>=1000?(n/1000).toFixed(1)+'k':String(n);};
 function render(m){const acts=(m.actions||[]).length?`<div class="acts">${m.actions.map(a=>`<span class="chip">${esc(a.tool)}${a.args&&a.args.ticket_id?' #'+a.args.ticket_id:''}</span>`).join('')}</div>`:'';
- return `<div class="m ${m.role}"><div class="bubble">${m.role==='assistant'?md(m.content):esc(m.content)}${acts}</div></div>`;}
+ const u=m.usage&&m.usage.model?`<div style="margin-top:6px;font-size:10px;color:var(--muted)">${tok(m.usage.prompt_tokens+m.usage.completion_tokens)} tok · ${(m.usage.latency_ms/1000).toFixed(1)} s · ctx ${m.usage.context_pct!=null?m.usage.context_pct+'%':'—'}</div>`:'';
+ return `<div class="m ${m.role}"><div class="bubble">${m.role==='assistant'?md(m.content):esc(m.content)}${acts}${u}</div></div>`;}
 function hello(){$('cwMsgs').innerHTML=`<div class="hello">I know every ticket, who holds what, SLA risk, approvals and the Supervisor's work — and I can act for you.<div class="sugg"><button onclick="cwSay('What is the desk working on right now?')">What is the desk doing?</button><button onclick="cwSay('Is there anything waiting for my decision?')">Waiting for me?</button><button onclick="cwSay('Which tickets are at SLA risk?')">SLA risk?</button></div></div>`;}
 async function load(){if(!thread){hello();return;}const r=await fetch('/chat/threads/'+thread);if(!r.ok){thread=null;try{localStorage.removeItem('cw.thread')}catch(e){}hello();return;}
  const ms=await r.json();$('cwMsgs').innerHTML=ms.length?ms.map(render).join(''):'';if(!ms.length)hello();$('cwMsgs').scrollTop=1e9;}
@@ -713,7 +725,7 @@ window.cwSend=async function(ev){if(ev)ev.preventDefault();if(busy)return;const 
  if($('cwMsgs').querySelector('.hello'))$('cwMsgs').innerHTML='';$('cwMsgs').insertAdjacentHTML('beforeend',render({role:'user',content:text}));$('cwBox').value='';busy=true;$('cwSendBtn').disabled=true;
  $('cwMsgs').insertAdjacentHTML('beforeend','<div class="m assistant" id="cwTyping"><div class="bubble" style="color:var(--muted)">thinking…</div></div>');$('cwMsgs').scrollTop=1e9;
  try{const r=await (await fetch('/chat/threads/'+thread,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})).json();
-  $('cwTyping').remove();$('cwMsgs').insertAdjacentHTML('beforeend',render({role:'assistant',content:r.answer||r.detail||'(no answer)',actions:r.actions||[]}));if(!$('cw').classList.contains('on'))$('cwDot').style.display='block';}
+  $('cwTyping').remove();$('cwMsgs').insertAdjacentHTML('beforeend',render({role:'assistant',content:r.answer||r.detail||'(no answer)',actions:r.actions||[],usage:r.usage}));if(!$('cw').classList.contains('on'))$('cwDot').style.display='block';}
  catch(e){$('cwTyping').remove();$('cwMsgs').insertAdjacentHTML('beforeend',render({role:'assistant',content:'Failed: '+e}));}
  busy=false;$('cwSendBtn').disabled=false;$('cwMsgs').scrollTop=1e9;};
 if($('cw').classList.contains('on'))load();
@@ -728,7 +740,8 @@ CHAT_CSS = """
 #threads{overflow:auto;padding:0 8px 8px}.thread{display:block;padding:8px 10px;border-radius:8px;color:var(--fg);text-decoration:none;font-size:13px;position:relative;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .thread small{display:block;color:var(--muted);font-size:11px}.thread:hover{background:var(--bg)}.thread.on{background:rgba(8,102,255,.14)}
 .thread .x{position:absolute;right:8px;top:8px;color:var(--muted);display:none}.thread:hover .x{display:inline}
-.conv{display:flex;flex-direction:column;min-height:0}.msgs{flex:1;overflow:auto;padding:20px 24px;display:flex;flex-direction:column;gap:12px}
+.conv{display:flex;flex-direction:column;min-height:0}.conv-head{padding:8px 24px 0;min-height:14px}.msgs{flex:1;overflow:auto;padding:12px 24px 20px;display:flex;flex-direction:column;gap:12px}
+.usage{margin-top:8px;font-size:11px;color:var(--muted)}
 .hello{max-width:640px;margin:40px auto;text-align:center}.hello h2{margin:0 0 6px}.sugg{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
 .sugg button{font:inherit;font-size:13px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}.sugg button:hover{background:var(--bg)}
 .m{display:flex}.m.user{justify-content:flex-end}.bubble{max-width:760px;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
@@ -869,6 +882,24 @@ async def settings_secrets(request: Request, admin: User = Depends(admin_user), 
         with session() as db:
             audit(db, admin.email, "settings.secrets", detail=", ".join(f"{k}:{'cleared' if v is None else 'set'}" for k, v in changes.items()), ip=_ip(request))
     return RedirectResponse(f"/settings?tab={tab}&info={'Saved' if changes else 'Nothing+changed'}", 303)
+
+
+@router.post("/settings/context")
+async def settings_context(request: Request, admin: User = Depends(admin_user)):
+    from app.sla import put_setting
+    from app.usage import DEFAULT_CONTEXT
+    check_origin(request)
+    form = await request.form()
+    value = dict(DEFAULT_CONTEXT)
+    for k, v in form.items():
+        try:
+            value[str(k)] = max(1000, int(v))
+        except (TypeError, ValueError):
+            pass
+    put_setting("context", value)
+    with session() as db:
+        audit(db, admin.email, "settings.context", detail=str(value), ip=_ip(request))
+    return RedirectResponse("/settings?tab=models&info=Context+windows+saved", 303)
 
 
 @router.post("/settings/sla")

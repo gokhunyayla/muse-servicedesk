@@ -260,6 +260,19 @@ def sla_at_risk(user=Depends(current_user)) -> list[dict]:
         return at_risk(db)
 
 
+@app.get("/ai/usage")
+def ai_usage(period: str | None = None, user=Depends(current_user)) -> dict:
+    from app import usage
+    from app.dashboard import period_start
+    return usage.summary(period_start(period))
+
+
+@app.get("/chat/threads/{thread_id}/usage")
+def chat_thread_usage(thread_id: int, user=Depends(current_user)) -> dict:
+    from app import usage
+    return usage.for_thread(thread_id)
+
+
 @app.get("/supervisor/stats")
 def supervisor_stats(period: str | None = None, user=Depends(current_user)) -> dict:
     from app import supervisor
@@ -445,7 +458,7 @@ def chat_messages(thread_id: int, user=Depends(current_user)) -> list[dict]:
         t = db.get(ChatThread, thread_id)
         if t is None or t.user_id != user.id:
             raise HTTPException(404)
-        return [{"id": m.id, "at": m.at.isoformat(), "role": m.role, "content": m.content, "actions": m.actions}
+        return [{"id": m.id, "at": m.at.isoformat(), "role": m.role, "content": m.content, "actions": m.actions, "usage": m.usage or {}}
                 for m in db.query(ChatMessage).filter(ChatMessage.thread_id == thread_id).order_by(ChatMessage.id)]
 
 
@@ -662,5 +675,6 @@ def get_ticket(ticket_id: int, user=Depends(current_user)) -> dict:
                 "assignee": t.assignee,
                 "linked": [c.id for c in db.query(Ticket).filter(Ticket.incident_id == t.id)],
                 "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None, "timing": timing(t, t.events),
+                "ai": __import__("app.usage", fromlist=["summary"]).summary(scope_kind="ticket", scope_id=t.id),
                 "events": [{"at": e.at.isoformat(), "actor": e.actor, "kind": e.kind,
                             "content": e.content, "data": e.data} for e in t.events]}

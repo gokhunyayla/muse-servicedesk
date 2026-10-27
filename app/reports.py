@@ -107,6 +107,12 @@ Numbers (JSON): {numbers}"""
 
 def narrative(n: dict, lang: str) -> str:
     import json
+    from app import usage
+    with usage.scope("report", None, "report"):
+        return _narrative(n, lang, json)
+
+
+def _narrative(n: dict, lang: str, json) -> str:
     try:
         reply = get_llm().chat([{"role": "user", "content": NARRATIVE.format(
             kind=n["kind"], lang="Turkish" if lang == "tr" else "English", numbers=json.dumps(n, ensure_ascii=False))}],
