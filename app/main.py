@@ -9,6 +9,8 @@ from app.voice import transcribe
 app = FastAPI(title="Muse ServiceDesk")
 
 from app.auth import current_user, needs_setup  # noqa: E402
+from app.security import api_key, check_origin  # noqa: E402
+from app.db import audit  # noqa: E402
 from app.dashboard import router as dashboard_router  # noqa: E402
 from app.whatsapp import router as whatsapp_router    # noqa: E402
 from app.auth import router as auth_router            # noqa: E402
@@ -37,14 +39,14 @@ def health() -> dict:
     return {"ok": True}
 
 
-@app.post("/messages")
+@app.post("/messages", dependencies=[Depends(api_key)])
 def post_message(msg: Incoming) -> dict:
     with session() as db:
         ticket, answer = handle_message(db, msg.requester, msg.text)
         return {"ticket_id": ticket.id, "reply": answer}
 
 
-@app.post("/voice")
+@app.post("/voice", dependencies=[Depends(api_key)])
 async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) -> dict:
     """A voice note: transcribe it, then handle it like a text message."""
     text = transcribe(await audio.read(), audio.content_type or "audio/wav")
@@ -56,7 +58,7 @@ async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) 
         return {"ticket_id": ticket.id, "transcript": text, "reply": answer}
 
 
-@app.post("/image")
+@app.post("/image", dependencies=[Depends(api_key)])
 async def post_image(requester: str = Form(...), text: str = Form(""), image: UploadFile = File(...)) -> dict:
     """A photo or screenshot with an optional caption."""
     data = await image.read()
@@ -77,7 +79,7 @@ class DeskClose(BaseModel):
 
 
 @app.post("/tickets/{ticket_id}/close")
-def desk_close(ticket_id: int, d: DeskClose, user=Depends(current_user)) -> dict:
+def desk_close(ticket_id: int, d: DeskClose, request: Request, user=Depends(current_user)) -> dict:
     """A human on the desk closes a ticket (e.g. an escalated one); the employee is told over WhatsApp."""
     from app.db import Outbound
     with session() as db:
@@ -86,9 +88,11 @@ def desk_close(ticket_id: int, d: DeskClose, user=Depends(current_user)) -> dict
             raise HTTPException(404)
         if t.status == "resolved":
             return {"id": t.id, "status": t.status}
+        check_origin(request)
         by = f"desk:{user.name}"
         t.status, t.resolution, t.owner = "resolved", d.resolution, "desk"
         log(db, t.id, by, "note", f"closed by the desk: {d.resolution}")
+        audit(db, user.email, "ticket.close", target=t.id, detail=d.resolution)
         text = f"Talebiniz (#{t.id}) servis masası tarafından kapatıldı: {d.resolution}"
         if t.requester.startswith("+"):
             db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
@@ -104,7 +108,7 @@ class Problem(BaseModel):
 
 
 @app.post("/problems")
-def merge_into_problem(p: Problem, user=Depends(current_user)) -> dict:
+def merge_into_problem(p: Problem, request: Request, user=Depends(current_user)) -> dict:
     """The desk merges several tickets into one problem record. The oldest selected ticket becomes the
     record; the others link to it and close with it. An optional update goes out to everyone."""
     from app.db import Outbound
@@ -118,7 +122,9 @@ def merge_into_problem(p: Problem, user=Depends(current_user)) -> dict:
         head.title, head.owner = f"[INCIDENT] {p.title}", p.owner
         if head.status == "resolved":
             head.status = "open"
+        check_origin(request)
         log(db, head.id, f"desk:{user.name}", "note", f"problem record created by the desk from tickets {[t.id for t in ts]}")
+        audit(db, user.email, "problem.create", target=head.id, detail=f"{p.title} <- {[t.id for t in ts]}")
         for t in rest:
             t.incident_id = head.id
             log(db, t.id, "desk", "note", f"linked to problem #{head.id} by the desk")
@@ -136,7 +142,7 @@ class Assignment(BaseModel):
 
 
 @app.post("/tickets/{ticket_id}/assign")
-def assign_ticket(ticket_id: int, a: Assignment, user=Depends(current_user)) -> dict:
+def assign_ticket(ticket_id: int, a: Assignment, request: Request, user=Depends(current_user)) -> dict:
     """The desk assigns a ticket. To an agent tier: that agent takes over right away with the desk's note.
     To a human: the ticket is escalated and waits for that person."""
     from app.agents import AGENTS
@@ -144,6 +150,8 @@ def assign_ticket(ticket_id: int, a: Assignment, user=Depends(current_user)) -> 
         t = db.get(Ticket, ticket_id)
         if t is None:
             raise HTTPException(404)
+        check_origin(request)
+        audit(db, user.email, "ticket.assign", target=t.id, detail=f"{a.owner} {a.assignee} {a.note}".strip())
         if a.owner == "human":
             t.status, t.owner = "escalated", "human"
             who = f" to {a.assignee}" if a.assignee else ""
@@ -164,7 +172,7 @@ def assign_ticket(ticket_id: int, a: Assignment, user=Depends(current_user)) -> 
         return {"id": t.id, "status": t.status, "owner": t.owner, "reply": answer}
 
 
-@app.post("/approvals/{approval_id}")
+@app.post("/approvals/{approval_id}", dependencies=[Depends(api_key)])
 def decide_approval(approval_id: int, d: Decision) -> dict:
     from app.agents import handle_approval
     if d.decision not in ("approved", "denied"):
@@ -177,7 +185,7 @@ def decide_approval(approval_id: int, d: Decision) -> dict:
         return {"ticket_id": ticket.id, "reply": answer}
 
 
-@app.post("/video")
+@app.post("/video", dependencies=[Depends(api_key)])
 async def post_video(requester: str = Form(...), text: str = Form(""), video: UploadFile = File(...)) -> dict:
     """A short screen recording or phone clip: sample frames and let L1 look at them."""
     from app.llm import image_message
@@ -194,7 +202,7 @@ async def post_video(requester: str = Form(...), text: str = Form(""), video: Up
         return {"ticket_id": ticket.id, "frames": len(frames), "reply": answer}
 
 
-@app.post("/camera/{camera_id}")
+@app.post("/camera/{camera_id}", dependencies=[Depends(api_key)])
 async def post_camera_frame(camera_id: str, image: UploadFile = File(...)) -> dict:
     from app.camera import process_frame
     try:
@@ -219,7 +227,7 @@ def list_tickets(status: str | None = None, owner: str | None = None, period: st
                  "created_at": t.created_at.isoformat()} for t in q.limit(100)]
 
 
-@app.get("/outbound")
+@app.get("/outbound", dependencies=[Depends(api_key)])
 def list_outbound(unsent: bool = True) -> list[dict]:
     """Messages the desk wants to send on its own; a channel (WhatsApp) drains this."""
     from app.db import Outbound
@@ -230,13 +238,13 @@ def list_outbound(unsent: bool = True) -> list[dict]:
         return [{"id": o.id, "to": o.to, "ticket_id": o.ticket_id, "text": o.text} for o in q.limit(100)]
 
 
-@app.post("/proactive/run")
+@app.post("/proactive/run", dependencies=[Depends(api_key)])
 def run_proactive() -> dict:
     from app.proactive import run_proactive_checks
     return {"opened": run_proactive_checks()}
 
 
-@app.post("/followups/run")
+@app.post("/followups/run", dependencies=[Depends(api_key)])
 def run_followups() -> dict:
     from app.scheduler import run_due_followups
     return {"ran": run_due_followups()}

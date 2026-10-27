@@ -144,3 +144,20 @@ class Session(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class Audit(Base):
+    """What a signed-in desk user did in the console (sign-ins, assignments, merges, user admin)."""
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    user: Mapped[str] = mapped_column(String(255))       # e-mail (or "anonymous")
+    action: Mapped[str] = mapped_column(String(64))
+    target: Mapped[str] = mapped_column(String(255), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    ip: Mapped[str] = mapped_column(String(64), default="")
+
+
+def audit(db, user: str, action: str, target: str = "", detail: str = "", ip: str = "") -> None:
+    db.add(Audit(user=user, action=action, target=str(target), detail=detail[:2000], ip=ip))

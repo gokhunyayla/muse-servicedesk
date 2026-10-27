@@ -129,3 +129,31 @@ def test_first_run_setup_creates_the_admin_and_roles_can_change(fresh):
     assert [u for u in c.get("/users.json").json() if u["name"] == "Ali"][0]["role"] == "admin"
     me = c.get("/me").json()["id"]
     assert c.post(f"/users/{me}/role", data={"role": "agent"}).status_code == 400
+
+
+def test_login_is_rate_limited_and_audited(desk, monkeypatch):
+    from app import security
+    from app.db import Audit, session
+    security._hits.clear()
+    anon = TestClient(app)
+    for _ in range(10):
+        anon.post("/login", data={"email": "admin@test", "password": "nope"}, follow_redirects=False)
+    assert anon.post("/login", data={"email": "admin@test", "password": "nope"}, follow_redirects=False).status_code == 429
+    security._hits.clear()
+    with session() as db:
+        actions = [a.action for a in db.query(Audit).order_by(Audit.id)]
+    assert actions[0] == "login.ok" and actions.count("login.failed") == 10
+    # cross-site form posts are refused
+    r = desk.post("/users", data={"name": "Evil", "email": "e@test", "role": "admin"},
+                  headers={"origin": "https://evil.example"}, follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_machine_endpoints_need_the_api_key_when_one_is_set(monkeypatch):
+    from app import security
+    monkeypatch.setattr(security, "API_KEY", "k-123")
+    c = TestClient(app)
+    assert c.post("/messages", json={"requester": "+905551110001", "text": "x"}).status_code == 401
+    set_llm(ScriptedLLM([Reply(text="ok")]))
+    assert c.post("/messages", json={"requester": "+905551110001", "text": "x"}, headers={"X-API-Key": "k-123"}).status_code == 200
+    assert c.get("/webhook", params={"hub.mode": "subscribe", "hub.verify_token": "muse-servicedesk", "hub.challenge": "1"}).status_code == 200

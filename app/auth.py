@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.config import auth_settings
-from app.db import Session, User, _now, session
+from app.db import Session, User, _now, audit, session
+from app.security import check_origin, cookie_secure, rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -74,7 +75,8 @@ def admin_user(user: User = Depends(current_user)) -> User:
 def _sign_in(db, user: User, response: Response) -> None:
     token = secrets.token_urlsafe(32)
     db.add(Session(token=token, user_id=user.id, expires_at=_now() + timedelta(days=SESSION_DAYS)))
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_DAYS * 86400)
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=cookie_secure(),
+                        max_age=SESSION_DAYS * 86400)
 
 
 # ---- e-mail ----------------------------------------------------------------------------------
@@ -114,7 +116,8 @@ def setup_page(error: str = "") -> str:
 
 
 @router.post("/setup")
-def setup(name: str = Form(...), email: str = Form(...), password: str = Form(...), password2: str = Form(...)):
+def setup(request: Request, name: str = Form(...), email: str = Form(...), password: str = Form(...), password2: str = Form(...)):
+    check_origin(request)
     if not needs_setup():
         raise HTTPException(403, "setup already done")
     if password != password2:
@@ -123,6 +126,7 @@ def setup(name: str = Form(...), email: str = Form(...), password: str = Form(..
         u = User(email=email.lower().strip(), name=name.strip(), role="admin", password_hash=hash_password(password))
         db.add(u)
         db.flush()
+        audit(db, u.email, "setup.first_admin", ip=_ip(request))
         r = RedirectResponse("/", 303)
         _sign_in(db, u, r)
         return r
@@ -144,11 +148,15 @@ def login_page(request: Request, error: str = "", info: str = "") -> str:
 
 
 @router.post("/login")
-def login(email: str = Form(...), password: str = Form(...)):
+def login(request: Request, email: str = Form(...), password: str = Form(...)):
+    check_origin(request)
+    rate_limit(request, "login", limit=10, window_sec=300)
     with session() as db:
         u = db.query(User).filter(User.email == email.lower().strip()).first()
         if u is None or not u.active or not u.password_hash or not verify_password(password, u.password_hash):
+            audit(db, email.lower().strip(), "login.failed", ip=_ip(request))
             return RedirectResponse("/login?error=Wrong+e-mail+or+password", 303)
+        audit(db, u.email, "login.ok", ip=_ip(request))
         r = RedirectResponse("/", 303)
         _sign_in(db, u, r)
         return r
@@ -162,6 +170,8 @@ def logout(request: Request):
         with session() as db:
             s = db.get(Session, token)
             if s:
+                u = db.get(User, s.user_id)
+                audit(db, u.email if u else "?", "logout", ip=_ip(request))
                 db.delete(s)
     r = RedirectResponse("/login", 303)
     r.delete_cookie(COOKIE)
@@ -180,8 +190,11 @@ def forgot_page(info: str = "") -> str:
 
 
 @router.post("/forgot")
-def forgot(email: str = Form(...)):
+def forgot(request: Request, email: str = Form(...)):
+    check_origin(request)
+    rate_limit(request, "forgot", limit=5, window_sec=900)
     with session() as db:
+        audit(db, email.lower().strip(), "password.reset_requested", ip=_ip(request))
         u = db.query(User).filter(User.email == email.lower().strip(), User.active.is_(True)).first()
         if u:
             u.reset_token = secrets.token_urlsafe(32)
@@ -204,7 +217,9 @@ def reset_page(token: str = "", error: str = "") -> str:
 
 
 @router.post("/reset")
-def reset(token: str = Form(...), password: str = Form(...), password2: str = Form(...)):
+def reset(request: Request, token: str = Form(...), password: str = Form(...), password2: str = Form(...)):
+    check_origin(request)
+    rate_limit(request, "reset", limit=10, window_sec=900)
     if password != password2:
         return RedirectResponse(f"/reset?token={token}&error=Passwords+do+not+match", 303)
     with session() as db:
@@ -212,6 +227,7 @@ def reset(token: str = Form(...), password: str = Form(...), password2: str = Fo
         if u is None or not u.reset_expires or u.reset_expires < _now():
             return RedirectResponse("/forgot?info=That+link+is+invalid+or+expired;+request+a+new+one.", 303)
         u.password_hash, u.reset_token, u.reset_expires = hash_password(password), None, None
+        audit(db, u.email, "password.set", ip=_ip(request))
         for s in db.query(Session).filter(Session.user_id == u.id):
             db.delete(s)                       # sign out everywhere after a reset
     return RedirectResponse("/login?info=Password+updated,+sign+in.", 303)
@@ -249,9 +265,10 @@ def users_page(admin: User = Depends(admin_user), info: str = "", error: str = "
 
 
 @router.post("/users")
-def add_user(admin: User = Depends(admin_user), name: str = Form(...), email: str = Form(...),
+def add_user(request: Request, admin: User = Depends(admin_user), name: str = Form(...), email: str = Form(...),
              role: str = Form("agent")):
     """Invite a desk user: the account is created without a password and a set-password link is sent."""
+    check_origin(request)
     if role not in ("admin", "agent"):
         raise HTTPException(422, "role must be admin or agent")
     with session() as db:
@@ -260,6 +277,7 @@ def add_user(admin: User = Depends(admin_user), name: str = Form(...), email: st
         u = User(email=email.lower().strip(), name=name.strip(), role=role, password_hash="",
                  reset_token=secrets.token_urlsafe(32), reset_expires=_now() + timedelta(hours=24))
         db.add(u)
+        audit(db, admin.email, "user.invited", target=u.email, detail=role, ip=_ip(request))
         link = f"{auth_settings.public_url}/reset?token={u.reset_token}"
         mailed = send_mail(u.email, "You were invited to Muse ServiceDesk",
                            f"Hello {u.name},\n\n{admin.name} invited you to the service desk console as {role}. "
@@ -269,8 +287,9 @@ def add_user(admin: User = Depends(admin_user), name: str = Form(...), email: st
 
 
 @router.post("/users/{user_id}/role")
-def set_role(user_id: int, role: str = Form(...), admin: User = Depends(admin_user)):
+def set_role(request: Request, user_id: int, role: str = Form(...), admin: User = Depends(admin_user)):
     """Any user can be made an admin (or back to agent); you cannot change your own role."""
+    check_origin(request)
     if role not in ("admin", "agent"):
         raise HTTPException(422, "role must be admin or agent")
     with session() as db:
@@ -278,16 +297,19 @@ def set_role(user_id: int, role: str = Form(...), admin: User = Depends(admin_us
         if u is None or u.id == admin.id:
             raise HTTPException(400, "cannot change this user")
         u.role = role
+        audit(db, admin.email, "user.role", target=u.email, detail=role, ip=_ip(request))
     return RedirectResponse("/users", 303)
 
 
 @router.post("/users/{user_id}/toggle")
-def toggle_user(user_id: int, admin: User = Depends(admin_user)):
+def toggle_user(request: Request, user_id: int, admin: User = Depends(admin_user)):
+    check_origin(request)
     with session() as db:
         u = db.get(User, user_id)
         if u is None or u.id == admin.id:
             raise HTTPException(400, "cannot change this user")
         u.active = not u.active
+        audit(db, admin.email, "user.enabled" if u.active else "user.disabled", target=u.email, ip=_ip(request))
         if not u.active:
             for s in db.query(Session).filter(Session.user_id == u.id):
                 db.delete(s)
@@ -305,6 +327,10 @@ def users_json(user: User = Depends(current_user)) -> list[dict]:
     with session() as db:
         return [{"id": u.id, "name": u.name, "role": u.role}
                 for u in db.query(User).filter(User.active.is_(True)).order_by(User.name)]
+
+
+def _ip(request: Request) -> str:
+    return request.client.host if request.client else ""
 
 
 # ---- tiny page shell (same look as the console) ----------------------------------------------
