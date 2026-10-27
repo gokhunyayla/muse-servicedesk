@@ -58,6 +58,30 @@ class Decision(BaseModel):
     by: str                # approver's phone
 
 
+class DeskClose(BaseModel):
+    resolution: str = "closed by the service desk"
+    by: str = "desk"
+
+
+@app.post("/tickets/{ticket_id}/close")
+def desk_close(ticket_id: int, d: DeskClose) -> dict:
+    """A human on the desk closes a ticket (e.g. an escalated one); the employee is told over WhatsApp."""
+    from app.db import Outbound
+    with session() as db:
+        t = db.get(Ticket, ticket_id)
+        if t is None:
+            raise HTTPException(404)
+        if t.status == "resolved":
+            return {"id": t.id, "status": t.status}
+        t.status, t.resolution, t.owner = "resolved", d.resolution, d.by
+        log(db, t.id, d.by, "note", f"closed by the desk: {d.resolution}")
+        text = f"Talebiniz (#{t.id}) servis masası tarafından kapatıldı: {d.resolution}"
+        if t.requester.startswith("+"):
+            db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
+        log(db, t.id, "L1", "message", text)
+        return {"id": t.id, "status": "resolved"}
+
+
 @app.post("/approvals/{approval_id}")
 def decide_approval(approval_id: int, d: Decision) -> dict:
     from app.agents import handle_approval

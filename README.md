@@ -33,7 +33,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   the same tools, SOPs and lifecycle; a problem nobody anticipated goes through the same path.
 * **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
   approval over chat (`ONAY 12`), confirmation before closing, satisfaction rating, scheduled follow-ups,
-  incident linking for mass outages, proactive tickets from inventory checks.
+  incident linking for mass outages, proactive tickets from inventory checks, escalation to a human engineer when no tier can solve it, desk-side close from the dashboard.
 * **Simulated enterprise systems** (`app/systems.py`) stand in for Entra/M365, Defender, SAP, the vendor
   portal and the courier, behind the same function shapes a real connector would expose.
 
@@ -73,7 +73,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # add META_API_KEY (and WhatsApp tokens when you have them)
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 47 offline tests with a scripted model
+.venv/bin/python -m pytest      # 49 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.

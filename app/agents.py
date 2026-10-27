@@ -20,6 +20,9 @@ RULES = """Rules:
 - You are a service that finishes the job, not a guide: use your tools to fix the problem yourself.
 - Verify identity before any account change. Ask for explicit consent before scripts that need it.
 - If the problem is outside your tools, hand off to the right tier with a clear summary.
+- If no tier can solve it (needs hands on site, a vendor or budget decision, something nobody is
+  authorised to change), don't guess and don't loop: escalate_to_human with what was tried. Never leave
+  the employee without a next step.
 - A ticket closes only after the employee confirms: when you think it's fixed, request_confirmation;
   when the employee says it's solved, close_ticket right away (don't ask again).
 - If the employee asks to close or cancel the ticket ("kapat", "iptal", "yanlış talep", "gerek kalmadı"),
@@ -51,6 +54,9 @@ class Agent:
             state += (f"\nThe employee was asked to confirm this fix: \"{ticket.resolution}\". If they confirm, "
                       f"close_ticket and ask for a 1-5 rating; if they report it still fails, keep working. "
                       f"If their message is a rating, record_rating.")
+        elif ticket.status == "escalated":
+            state += ("\nThis ticket is escalated to a human engineer. Acknowledge new information, add_note it, "
+                      "and tell the employee it has been passed on; don't restart troubleshooting.")
         elif ticket.status == "resolved":
             state += (f"\nThis ticket is already resolved (\"{ticket.resolution}\") and the employee was asked for "
                       f"a 1-5 rating. If their message is a number, record_rating and thank them in one line. "
@@ -101,7 +107,12 @@ class Agent:
                 log(db, ticket.id, self.tier, "tool_result", call.name, result)
                 messages.append({"role": "tool", "tool_call_id": call.id,
                                  "content": json.dumps(result, ensure_ascii=False, default=str)})
-        return "Bu adımda ilerleyemedim; talebiniz bir uzmana iletildi."
+        # out of steps: park it for a human instead of leaving the employee hanging
+        if ticket.status not in ("resolved", "escalated"):
+            run_tool(ctx, "escalate_to_human", {"reason": "agent could not finish within its step budget",
+                                                "tried": f"{MAX_STEPS} tool steps on {self.tier}"})
+            log(db, ticket.id, self.tier, "tool_call", "escalate_to_human", {"reason": "step budget exhausted"})
+        return "Bu adımda ilerleyemedim; talebiniz bir destek mühendisine aktarıldı, sizinle iletişime geçilecek."
 
     def _handoff(self, db, ticket: Ticket, target: str, summary: str, depth: int) -> dict:
         if target not in AGENTS:

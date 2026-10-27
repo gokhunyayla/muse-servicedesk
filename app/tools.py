@@ -477,6 +477,17 @@ def request_confirmation(ctx: Ctx, summary: str) -> dict:
     return {"ok": True, "status": "waiting_user"}
 
 
+@tool("No SOP and no tool of any tier can solve this (e.g. needs physical presence, a vendor decision, a "
+      "budget, or a change nobody is authorised for). Park the ticket for a human engineer with a clear "
+      "summary of what was tried. Tell the employee it was escalated and they'll be contacted.",
+      ALL, reason=STR, tried=STR)
+def escalate_to_human(ctx: Ctx, reason: str, tried: str) -> dict:
+    ctx.ticket.status = "escalated"
+    ctx.ticket.owner = "human"
+    ctx.ticket.resolution = f"escalated: {reason} | tried: {tried}"
+    return {"ok": True, "status": "escalated"}
+
+
 @tool("Close the ticket after the employee confirmed the fix. Ask them for a 1-5 rating in your reply.",
       ("L1",), resolution=STR)
 def close_ticket(ctx: Ctx, resolution: str) -> dict:

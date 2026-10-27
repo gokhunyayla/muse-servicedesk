@@ -125,3 +125,30 @@ def test_employee_can_close_the_ticket_directly_without_a_model_call():
         from app.agents import CLOSE_RE
         assert CLOSE_RE.match(text), text
     assert not CLOSE_RE.match("kapatmayın, hâlâ bağlanamıyorum")
+
+
+def test_unsolvable_request_is_escalated_to_a_human_and_desk_can_close_it():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    set_llm(ScriptedLLM([
+        Reply(tool_calls=[call("escalate_to_human", reason="projektör fiziksel arızalı, yerinde müdahale gerek",
+                               tried="uzaktan teşhis, sürücü kontrolü")]),
+        Reply(text="Talebiniz bir destek mühendisine aktarıldı, sizinle iletişime geçilecek."),
+    ]))
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "toplantı odası projektörü hiç açılmıyor, lambası yanmıyor")
+        assert t.status == "escalated" and t.owner == "human" and "aktarıldı" in answer
+        tid = t.id
+    r = TestClient(app).post(f"/tickets/{tid}/close", json={"resolution": "lamba değiştirildi"})
+    assert r.json() == {"id": tid, "status": "resolved"}
+    with session() as db:
+        assert db.get(Ticket, tid).resolution == "lamba değiştirildi"
+        out = db.query(Outbound).filter_by(ticket_id=tid).one()
+        assert out.to == "+905551110001" and "lamba değiştirildi" in out.text
+
+
+def test_step_budget_exhaustion_escalates_instead_of_looping():
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("search_knowledge", query="x")])] * 12))
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "garip bir hata")
+        assert t.status == "escalated" and "aktarıldı" in answer

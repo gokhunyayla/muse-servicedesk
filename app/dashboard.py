@@ -74,7 +74,8 @@ main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 20px}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:hover{background:var(--bg)}
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;color:#fff}
-.open{background:var(--accent)}.waiting_user{background:var(--warn);color:#000}.waiting_approval{background:#8a2be2}.resolved{background:var(--ok)}
+.open{background:var(--accent)}.waiting_user{background:var(--warn);color:#000}.waiting_approval{background:#8a2be2}.resolved{background:var(--ok)}.escalated{background:#d9480f}
+button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:inherit;cursor:pointer;font-size:12px}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
 #trail{max-height:70vh;overflow:auto}.ev{padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px}
 .ev b{color:var(--accent)}.ev.user b{color:var(--ok)}.ev.handoff b{color:var(--bad)}.ev code{font-size:12px;color:var(--muted);white-space:pre-wrap}
@@ -91,7 +92,7 @@ const $=s=>document.querySelector(s);let cur=null;
 async function load(){
  const s=await (await fetch('/stats')).json(), ts=await (await fetch('/tickets')).json();
  const st=s.by_status||{};
- $('#kpis').innerHTML=[['Toplam',s.total],['Açık',(st.open||0)+(st.waiting_user||0)+(st.waiting_approval||0)],
+ $('#kpis').innerHTML=[['Toplam',s.total],['Açık',(st.open||0)+(st.waiting_user||0)+(st.waiting_approval||0)],['İnsana aktarılan',st.escalated||0],
   ['Otomatik çözüm',Math.round(s.auto_resolution_rate*100)+'%'],['Memnuniyet',s.avg_rating?s.avg_rating+' / 5':'—']]
   .map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');
  const max=Math.max(1,...s.top_issues.map(x=>x[1]));
@@ -102,8 +103,11 @@ async function load(){
  if(cur)show(cur,true);
 }
 async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id)).json();
- $('#ttitle').textContent=`#${t.id} ${t.title} — ${t.status}`;
+ $('#ttitle').innerHTML=`#${t.id} ${t.title.replace(/</g,'&lt;')} — <span class="pill ${t.status}">${t.status}</span>`+
+  (t.status!=='resolved'?` <button class="close" onclick="closeTicket(${t.id})">Kapat</button>`:'');
  $('#trail').innerHTML=t.events.map(e=>`<div class="ev ${e.actor==='user'?'user':''} ${e.kind}"><b>${e.actor}</b> <small>${e.kind}</small> ${e.content.replace(/</g,'&lt;')}${e.data?`<br><code>${JSON.stringify(e.data).slice(0,300).replace(/</g,'&lt;')}</code>`:''}</div>`).join('');
  if(!quiet)$('#trail').scrollTop=1e9;}
+async function closeTicket(id){const r=prompt('Kapanış notu (çalışana iletilir):','servis masası tarafından kapatıldı');
+ if(r===null)return;await fetch('/tickets/'+id+'/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution:r})});load();}
 load();setInterval(load,5000);
 </script></body></html>"""
