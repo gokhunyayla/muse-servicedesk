@@ -100,7 +100,7 @@ h1{font-size:16px;margin:0;line-height:1.1;white-space:nowrap}h1 small{display:b
 @media(max-width:600px){.live span{display:none}}
 .ibtn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;display:grid;place-items:center;padding:0}
 .ibtn:hover{background:var(--bg)}.ibtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}
+main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:12px 16px 16px}
 @media(max-width:900px){main{grid-template-columns:1fr;padding:12px;gap:12px}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
 .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.kpi{padding:10px;border:1px solid var(--line);border-radius:8px}
@@ -117,8 +117,8 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 .seg button{font:inherit;font-size:12px;padding:6px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
 .seg button.on{background:var(--accent);color:#fff}@media(max-width:600px){.seg button{padding:6px 7px}}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px 0}
-.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:12px}@media(max-width:900px){.cards{grid-template-columns:repeat(3,1fr)}}
-.tcard{padding:10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:12px 16px 0}@media(max-width:900px){.cards{grid-template-columns:repeat(3,1fr);padding:12px 12px 0}}
+.tcard{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit;font:inherit;text-align:left;cursor:pointer}
 .tcard b{display:block;font-size:20px}.tcard span{color:var(--muted);font-size:12px}.tcard em{font-style:normal;font-size:11px;color:var(--muted)}
 .tcard.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.tcard:hover{background:var(--bg)}
 #trail{max-height:70vh;overflow:auto}.ev{padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px;overflow-wrap:anywhere}
@@ -131,8 +131,9 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 <button class="ibtn" id="theme" title="Theme: system" aria-label="Toggle theme"></button></div></header>
 <div class="toolbar"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
 <small id="scope"></small></div>
+<div class="cards" id="cards"></div>
 <main>
-<section class="card"><div class="kpis" id="kpis"></div><div class="cards" id="cards"></div><h3>Top issues</h3><div id="issues"></div>
+<section class="card"><div class="kpis" id="kpis"></div><h3>Top issues</h3><div id="issues"></div>
 <h3>Tier load</h3><div class="tiers" id="tiers"></div></section>
 <section class="card"><h3 id="tt">Tickets</h3><div class="scroll"><table><thead><tr><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
 <section class="card" style="grid-column:1/-1"><h3 id="ttitle">Ticket trail</h3><div id="trail"><small>Select a ticket.</small></div></section>
