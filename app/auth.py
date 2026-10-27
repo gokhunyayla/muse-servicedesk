@@ -243,30 +243,51 @@ def reset(request: Request, token: str = Form(...), password: str = Form(...), p
 @router.get("/users", response_class=HTMLResponse)
 def users_page(admin: User = Depends(admin_user), info: str = "", error: str = "", link: str = "") -> str:
     with session() as db:
-        rows = "".join(
-            f"<tr><td>{_esc(u.name)}</td><td>{_esc(u.email)}</td><td>{u.role}</td>"
-            f"<td>{'active' if u.active else 'disabled'}</td><td>"
-            + ("<span class='muted'>you</span>" if u.id == admin.id else
-               f"<form method='post' action='/users/{u.id}/role' style='display:inline'>"
-               f"<input type='hidden' name='role' value='{'agent' if u.role == 'admin' else 'admin'}'>"
-               f"<button class='btn'>{'Make agent' if u.role == 'admin' else 'Make admin'}</button></form> "
-               f"<form method='post' action='/users/{u.id}/toggle' style='display:inline'>"
-               f"<button class='btn'>{'Disable' if u.active else 'Enable'}</button></form>")
-            + "</td></tr>"
-            for u in db.query(User).order_by(User.id))
-    return _page("Desk users", f"""
-<p class="muted">People who may sign in to this console. Employees never sign in; they use WhatsApp.</p>
-<table><thead><tr><th>Name</th><th>E-mail</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>{rows}</tbody></table>
-<h3>Add a support agent or admin</h3>
-<form method="post" action="/users" class="grid">
-<div><label>Name</label><input name="name" required></div>
-<div><label>E-mail</label><input name="email" type="email" required></div>
-<div><label>Role</label><select name="role"><option value="agent">Support agent</option><option value="admin">Admin</option></select></div>
-<div><label>Invitation</label><p class="muted" style="margin:6px 0 0">They receive a link to set their own password (valid 24 h). No passwords are typed or e-mailed by you.</p></div>
+        rows = ""
+        for u in db.query(User).order_by(User.id):
+            if u.id == admin.id:
+                actions = "<span class='muted'>you</span>"
+            else:
+                actions = f"""<div class="menu"><button class="kebab" onclick="toggleRow(this)" aria-label="Actions">⋯</button>
+<div class="dropdown right"><form method="post" action="/users/{u.id}/role"><input type="hidden" name="role" value="{'agent' if u.role == 'admin' else 'admin'}"><button>{'Make support agent' if u.role == 'admin' else 'Make admin'}</button></form>
+<form method="post" action="/users/{u.id}/invite"><button>Resend invitation</button></form><div class="dd-sep"></div>
+<form method="post" action="/users/{u.id}/toggle"><button class="{'danger' if u.active else ''}">{'Disable account' if u.active else 'Enable account'}</button></form></div></div>"""
+            state = "invited" if not u.password_hash else ("active" if u.active else "disabled")
+            rows += (f"<tr><td><div class='who'><span class='avatar sm'>{_initials(u.name)}</span><div><b>{_esc(u.name)}</b>"
+                     f"<small>{_esc(u.email)}</small></div></div></td><td><span class='tag'>{u.role}</span></td>"
+                     f"<td><span class='tag {state}'>{state}</span></td><td class='mono muted'>{u.created_at:%d %b %Y}</td><td class='act'>{actions}</td></tr>")
+    body = f"""
+<div class="pagehead"><p class="muted">People who may sign in to this console. Employees never sign in; they use WhatsApp.</p>
+<button class="btn primary slim" onclick="openModal('inviteModal')">+ Invite user</button></div>
 {_alert(error, info)}
-<div><button class="btn primary" type="submit">Invite user</button></div></form>
-{('<p class="alert ok">Set-password link (SMTP not configured, share it yourself): <a href="'+_esc(link)+'">'+_esc(link)+'</a></p>') if link else ''}
-<p class="links"><a href="/">Back to the console</a></p>""", wide=True, user=admin, active="users")
+<div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Since</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>
+<div class="modal {'on' if error else ''}" id="inviteModal"><div class="box"><h3>Invite a desk user</h3>
+<p class="muted">They receive a link to set their own password (valid 24 hours). You never type or e-mail a password.</p>
+<form method="post" action="/users">
+<label for="iname">Name</label><input id="iname" name="name" required>
+<label for="imail">E-mail</label><input id="imail" name="email" type="email" required>
+<label for="irole">Role</label><select id="irole" name="role"><option value="agent">Support agent</option><option value="admin">Admin</option></select>
+<div class="row end"><button type="button" class="btn" onclick="closeModal('inviteModal')">Cancel</button><button class="btn primary slim" type="submit">Send invitation</button></div></form></div></div>
+<div class="modal {'on' if link else ''}" id="linkModal"><div class="box"><h3>Invitation link</h3>
+<p class="muted">SMTP is not configured, so the e-mail was not sent. Share this link with them yourself; it is valid 24 hours.</p>
+<input value="{_esc(link)}" readonly onclick="this.select()">
+<div class="row end"><button type="button" class="btn" onclick="navigator.clipboard&&navigator.clipboard.writeText('{_esc(link)}');this.textContent='Copied'">Copy</button><button type="button" class="btn primary slim" onclick="closeModal('linkModal')">Done</button></div></div></div>"""
+    return _page("Desk users", body, wide=True, user=admin, active="users")
+
+
+@router.post("/users/{user_id}/invite")
+def reinvite(request: Request, user_id: int, admin: User = Depends(admin_user)):
+    check_origin(request)
+    with session() as db:
+        u = db.get(User, user_id)
+        if u is None:
+            raise HTTPException(404)
+        u.reset_token, u.reset_expires = secrets.token_urlsafe(32), _now() + timedelta(hours=24)
+        link = f"{auth_settings.public_url}/reset?token={u.reset_token}"
+        mailed = send_mail(u.email, "Muse ServiceDesk: set your password",
+                           f"Hello {u.name},\n\nSet your password here (valid 24 hours):\n{link}\n")
+        audit(db, admin.email, "user.reinvited", target=u.email, ip=_ip(request))
+    return RedirectResponse("/users?info=Invitation+sent" + ("" if mailed else f"&link={link}"), 303)
 
 
 @router.post("/users")
@@ -512,12 +533,28 @@ body.auth{min-height:100vh;display:grid;place-items:center;padding:24px;backgrou
 .cols{display:grid;grid-template-columns:1fr 340px;gap:24px}@media(max-width:800px){.cols{grid-template-columns:1fr}}
 .side{border-left:1px solid var(--line);padding-left:24px}@media(max-width:800px){.side{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:8px}}
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}.scroll{overflow-x:auto}
+.pagehead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.pagehead p{margin:0}
+.btn.slim{width:auto;margin-top:0;padding:8px 14px}.row.end{justify-content:flex-end;margin-top:16px}.row.end .btn{margin-top:0}
+.who{display:flex;align-items:center;gap:10px}.who b{display:block;font-size:13px}.who small{color:var(--muted)}
+.avatar.sm{width:30px;height:30px;font-size:12px}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:var(--bg);border:1px solid var(--line)}
+.tag.active{color:var(--ok)}.tag.invited{color:var(--accent)}.tag.disabled{color:var(--bad)}
+td.act{text-align:right;width:40px}.kebab{border:1px solid transparent;background:transparent;color:var(--muted);font-size:18px;line-height:1;width:32px;height:32px;border-radius:8px;cursor:pointer}
+.kebab:hover{background:var(--bg);color:var(--fg)}.dropdown.right{right:0;top:36px;left:auto;min-width:200px}
+.dropdown form{margin:0}.dropdown form button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:transparent;color:var(--fg);font:inherit;font-size:13px;border-radius:6px;cursor:pointer}
+.dropdown form button:hover{background:var(--bg)}.dropdown form button.danger{color:var(--bad)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:30;padding:16px}.modal.on{display:grid}
+.modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(480px,100%)}.modal h3{margin:0 0 6px}
 """ + RAIL_CSS
 
 JS = "<script>" + """
 try{var t=localStorage.getItem('theme');if(t&&t!=='system')document.documentElement.setAttribute('data-theme',t)}catch(e){}
 function togglePw(id,b){var i=document.getElementById(id);i.type=i.type==='password'?'text':'password';b.setAttribute('aria-label',i.type==='password'?'Show password':'Hide password');}
 function toggleMenu(b){var m=document.getElementById('userMenu');var on=!m.classList.contains('on');m.classList.toggle('on',on);b.setAttribute('aria-expanded',on);}
+function toggleRow(b){var m=b.nextElementSibling,on=!m.classList.contains('on');document.querySelectorAll('.dropdown.right.on').forEach(function(x){x.classList.remove('on')});m.classList.toggle('on',on);}
+function openModal(id){document.getElementById(id).classList.add('on');var f=document.querySelector('#'+id+' input');if(f)f.focus();}
+function closeModal(id){document.getElementById(id).classList.remove('on');}
+document.addEventListener('click',function(e){if(!e.target.closest('.menu'))document.querySelectorAll('.dropdown.right.on').forEach(function(x){x.classList.remove('on')});});
 (function(){var b=document.getElementById('theme');if(!b)return;var I=""" + __import__("json").dumps({k: ICONS[k] for k in ("system", "light", "dark")}) + """;
  var O=['system','light','dark'],cur='system';try{cur=localStorage.getItem('theme')||'system'}catch(e){}
  function ap(v){cur=v;try{localStorage.setItem('theme',v)}catch(e){}if(v==='system')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);b.innerHTML=I[v];b.title='Theme: '+v;}
