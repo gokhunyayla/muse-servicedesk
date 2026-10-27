@@ -110,3 +110,18 @@ def test_every_tier_has_the_general_tools():
     for tier in AGENTS:
         names = {s["function"]["name"] for s in AGENTS[tier].tool_specs()}
         assert {"search_knowledge", "write_sop", "add_note", "schedule_followup", "notify_user"} <= names
+
+
+def test_employee_can_close_the_ticket_directly_without_a_model_call():
+    llm = ScriptedLLM([Reply(text="Bakıyorum.")])
+    set_llm(llm)
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", "vpn bağlanmıyor")
+        t2, answer = handle_message(db, "+905551110001", "yanlış talep, kapat")
+        assert t2.id == t.id and t2.status == "resolved" and "kapatıldı" in answer
+        assert t2.resolution == "closed on the employee's request"
+    assert len(llm.requests) == 1            # the close was handled without the model
+    for text in ("kapat", "İptal", "bileti kapatın.", "cancel"):
+        from app.agents import CLOSE_RE
+        assert CLOSE_RE.match(text), text
+    assert not CLOSE_RE.match("kapatmayın, hâlâ bağlanamıyorum")

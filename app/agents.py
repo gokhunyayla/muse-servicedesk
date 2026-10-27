@@ -22,6 +22,9 @@ RULES = """Rules:
 - If the problem is outside your tools, hand off to the right tier with a clear summary.
 - A ticket closes only after the employee confirms: when you think it's fixed, request_confirmation;
   when the employee says it's solved, close_ticket right away (don't ask again).
+- If the employee asks to close or cancel the ticket ("kapat", "iptal", "yanlış talep", "gerek kalmadı"),
+  close_ticket immediately with resolution "closed on the employee's request" and confirm in one line;
+  don't ask for a rating.
 - When you solve something no SOP covered, write_sop so the next agent has it.
 - Record important decisions with add_note.
 - Messages may come from voice notes: numbers can be spelled out ("e bin bir" = E1001,
@@ -150,6 +153,9 @@ def _belongs_to(ticket: Ticket, text: str) -> bool:
 
 
 RATING_WINDOW_HOURS = 24
+# "kapat", "iptal", "yanlış talep, kapat", "bileti kapatın", "close", "cancel"
+CLOSE_RE = re.compile(r"^\s*(?:(?:yanlış|hatalı)\s+talep[\s,.]*)?(?:bileti\s+|talebi\s+)?"
+                      r"(?:kapat(?:ın|ınız)?|iptal(?:\s+et(?:in)?)?|close|cancel)[\s.!]*$", re.I)
 
 
 def _closing_exchange(db, requester: str, text: str) -> Ticket | None:
@@ -194,6 +200,15 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         decision = "approved" if m.group(1).lower() in ("onay", "approve") else "denied"
         return handle_approval(db, int(m.group(2)), decision, requester)
     log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
+    # a plain "kapat" / "iptal" closes the ticket without a model round-trip
+    if ticket.status != "resolved" and CLOSE_RE.match(text):
+        run_tool(Ctx(db=db, ticket=ticket, agent="L1"), "close_ticket",
+                 {"resolution": "closed on the employee's request"})
+        log(db, ticket.id, "L1", "tool_call", "close_ticket", {"resolution": "closed on the employee's request"})
+        answer = f"Talebiniz (#{ticket.id}) isteğiniz üzerine kapatıldı. Yeni bir sorun olursa yazmanız yeterli."
+        log(db, ticket.id, "L1", "message", answer)
+        db.refresh(ticket)
+        return ticket, answer
     content = image_message(text, image, mime) if image else text
     for extra in extra_images or []:          # video frames: same message, more image parts
         content.append(image_message("", extra, mime)[1])
