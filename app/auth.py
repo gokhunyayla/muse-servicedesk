@@ -459,7 +459,8 @@ SLA_FIELDS = [("first_response", "First response", "Time until the employee gets
               ("L1", "L1 · first contact", "Time L1 may hold a ticket"), ("L2", "L2 · devices & network", ""),
               ("L3", "L3 · servers & security", ""), ("L4", "L4 · vendors & logistics", ""),
               ("human", "Human engineer", "Time an escalated ticket may wait for a person"),
-              ("total", "Total resolution", "Open → resolved, excluding time waiting for the employee")]
+              ("total", "Total resolution", "Open → resolved, excluding time waiting for the employee"),
+              ("at_risk_pct", "At-risk threshold (%)", "The Supervisor acts when a ticket reaches this share of a target")]
 
 
 @router.get("/settings", response_class=HTMLResponse)
@@ -471,7 +472,7 @@ def settings_page(user: User = Depends(current_user), tab: str = "sla", info: st
     if tab == "sla":
         t = sla_targets()
         rows = "".join(f'<div class="srow"><div><b>{label}</b><small>{hint}</small></div>'
-                       f'<div class="min"><input name="{k}" type="number" min="1" step="1" value="{t.get(k, "")}" {"" if admin else "disabled"}> <span>min</span></div></div>'
+                       f'<div class="min"><input name="{k}" type="number" min="1" {"max=\"100\"" if k == "at_risk_pct" else ""} step="1" value="{t.get(k, "")}" {"" if admin else "disabled"}> <span>{"%" if k == "at_risk_pct" else "min"}</span></div></div>'
                        for k, label, hint in SLA_FIELDS)
         body = f"""<p class="muted">Targets in minutes. Tickets show green/red against these on their Timing panel.</p>
 <form method="post" action="/settings/sla">{rows}{_alert('', info)}
@@ -686,6 +687,7 @@ async def settings_sla(request: Request, admin: User = Depends(admin_user)):
             value[k] = max(1, int(form.get(k, DEFAULT_SLA[k])))
         except (TypeError, ValueError):
             value[k] = DEFAULT_SLA[k]
+    value["at_risk_pct"] = min(100, value["at_risk_pct"])
     put_setting("sla", value)
     with session() as db:
         audit(db, admin.email, "settings.sla", detail=str(value), ip=_ip(request))

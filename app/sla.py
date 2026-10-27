@@ -11,6 +11,7 @@ DEFAULT_SLA = {             # minutes; editable in Settings → SLA
     "L1": 30, "L2": 120, "L3": 480, "L4": 1440,
     "human": 480,
     "total": 480,
+    "at_risk_pct": 80,          # warn the Supervisor when a ticket reaches this % of a target
 }
 _HANDOFF = re.compile(r"^(\w+)\s*->\s*(\w+):")
 
@@ -114,3 +115,45 @@ def timing(ticket, events) -> dict:
         "total_breached": total - waiting > targets.get("total", 0) * 60,
         "resolved": ticket.resolved_at is not None,
     }
+
+
+def risk(ticket, events, targets: dict | None = None) -> dict | None:
+    """SLA position of an unresolved ticket: which target is closest to breaching and how far along.
+    Returns None for resolved tickets or when nothing is above the at-risk threshold."""
+    if ticket.status == "resolved":
+        return None
+    targets = targets or sla_targets()
+    pct_limit = int(targets.get("at_risk_pct", 80))
+    tm = timing(ticket, events)
+    worst = None
+    cands = []
+    if tm["first_response_seconds"] is None and targets.get("first_response"):
+        cands.append(("first_response", tm["total_seconds"], targets["first_response"] * 60))
+    for x in tm["tiers"]:
+        if x["tier"] == ticket.owner and x["target_minutes"]:
+            cands.append((x["tier"], x["seconds"], x["target_minutes"] * 60))
+    if targets.get("total"):
+        cands.append(("total", tm["total_seconds"] - tm["waiting_for_employee_seconds"], targets["total"] * 60))
+    for name, secs, limit in cands:
+        pct = int(100 * secs / limit) if limit else 0
+        if worst is None or pct > worst["pct"]:
+            worst = {"metric": name, "seconds": round(secs), "limit_seconds": limit, "pct": pct}
+    if worst is None or worst["pct"] < pct_limit:
+        return None
+    worst["breached"] = worst["pct"] >= 100
+    worst["owner"] = ticket.owner
+    worst["who"] = "human" if ticket.owner in ("human", "desk") else "agent"
+    return worst
+
+
+def at_risk(db) -> list[dict]:
+    """All unresolved tickets at or over the at-risk threshold, worst first."""
+    from app.db import Ticket
+    out = []
+    targets = sla_targets()
+    for t in db.query(Ticket).filter(Ticket.status != "resolved").all():
+        r = risk(t, t.events, targets)
+        if r:
+            out.append({"ticket_id": t.id, "title": t.title[:80], "status": t.status, **r})
+    out.sort(key=lambda x: -x["pct"])
+    return out

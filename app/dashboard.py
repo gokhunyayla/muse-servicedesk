@@ -167,6 +167,9 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
 .tiers{display:flex;flex-wrap:wrap;gap:6px}
 h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.risk{display:flex;flex-direction:column;gap:6px;margin-top:8px}.riskrow{display:grid;grid-template-columns:56px 1fr auto auto;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;border-left:3px solid var(--warn);background:rgba(247,185,40,.08);color:var(--fg);text-decoration:none}
+.riskrow.bad{border-left-color:var(--bad);background:rgba(228,30,63,.08)}.riskrow .pct{font-weight:700;font-variant-numeric:tabular-nums}.riskrow .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.riskrow .m{color:var(--muted);font-size:12px;white-space:nowrap}
+@media(max-width:900px){.riskrow{grid-template-columns:56px 1fr}.riskrow .m{grid-column:2}}
 .run{border-bottom:1px solid var(--line)}.run summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:center;padding:9px 4px}
 .run summary::-webkit-details-marker{display:none}.run .when{font-weight:600;white-space:nowrap}.run .first{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 .run .chips{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.chip{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
@@ -222,6 +225,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 <section class="card"><div class="kpis" id="kpis"></div></section>
 <section class="card"><h3 style="margin-top:0">Top issues</h3><div id="issues"></div></section>
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
+<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">SLA at risk</h3><a class="btn" href="/settings?tab=sla">Targets</a></div><div id="risk" class="risk">—</div></section>
 <section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor <small id="supMode"></small></h3><div class="actions"><button class="btn primary" id="runBtn" onclick="runSupervisor()">Run now</button></div></div>
 <div class="kpis six" id="supKpis" style="margin-top:10px"></div><h4 class="sub">Recent runs</h4><div id="sup" class="runs">—</div></section>
 </main>
@@ -284,7 +288,9 @@ async function load(){
   const tc=s.tool_calls_by_tier||{};$('#tiers').innerHTML=['L1','L2','L3','L4'].map(t=>`<span class="pill open">${t}: ${tc[t]||0} tool calls</span>`).join('');
   const h=s.handoffs||{};$('#handoffs').innerHTML=Object.keys(h).length?Object.entries(h).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · '):'none';
   try{const ss=await (await fetch('/supervisor/stats?period='+period)).json();$('#supMode').textContent=ss.mode==='auto'?'· automatic':'· manual';
-   $('#supKpis').innerHTML=[['Runs',ss.runs],['Problems merged',ss.problems],['SOPs drafted',ss.sops_drafted],['SOPs published',ss.sops_published],['Human asks',ss.human_asks],['Research calls',ss.research]].map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');}catch(e){}
+   $('#supKpis').innerHTML=[['Runs',ss.runs],['Problems merged',ss.problems],['SOPs drafted',ss.sops_drafted],['SOPs published',ss.sops_published],['SLA actions',ss.sla_actions||0],['Human asks',ss.human_asks]].map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');}catch(e){}
+  try{const rk=await (await fetch('/sla/at-risk')).json();
+   $('#risk').innerHTML=rk.length?rk.map(r=>`<a class="riskrow ${r.breached?'bad':'warn'}" href="/tickets?id=${r.ticket_id}"><span class="pct">${r.pct}%</span><span class="t">#${r.ticket_id} ${esc(r.title)}</span><span class="m">${esc(r.metric.replace('_',' '))} · ${dur(r.seconds)} / ${dur(r.limit_seconds)} · ${esc(r.owner)}</span>${pill(r.status)}</a>`).join(''):'<small>No ticket is near an SLA target.</small>';}catch(e){}
   try{const runs=await (await fetch('/supervisor/runs?limit=5')).json();
    $('#sup').innerHTML=runs.length?runs.map(r=>{const c={};(r.actions||[]).forEach(a=>{if(a.ok)c[a.tool]=(c[a.tool]||0)+1});
     const chips=[['create_problem','problem'],['propose_sop','SOP draft'],['open_human_ticket','human ask'],['note_ticket','note'],['read_ticket','ticket read'],['web_search','search'],['fetch_page','page']].filter(([k])=>c[k]).map(([k,l])=>`<span class="chip">${c[k]} ${l}${c[k]>1?'s':''}</span>`).join('');

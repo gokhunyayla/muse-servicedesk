@@ -251,6 +251,13 @@ def supervisor_run_now(request: Request, user=Depends(current_user)) -> dict:
     return {"id": r.id, "summary": r.summary, "actions": r.actions, "findings": r.findings, "error": r.error}
 
 
+@app.get("/sla/at-risk")
+def sla_at_risk(user=Depends(current_user)) -> list[dict]:
+    from app.sla import at_risk
+    with session() as db:
+        return at_risk(db)
+
+
 @app.get("/supervisor/stats")
 def supervisor_stats(period: str | None = None, user=Depends(current_user)) -> dict:
     from app import supervisor

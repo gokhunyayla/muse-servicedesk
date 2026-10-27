@@ -35,6 +35,9 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   problem records, detects where the tier agents fail (stuck, escalated, SLA breach, tool errors, low ratings),
   researches the gap on the web and writes a draft SOP that an admin publishes at `/knowledge`, or opens a
   `[Supervisor]` ticket asking a human for exactly what is missing (access, purchase, policy, on-site work).
+  It also watches SLA: tickets at or past the admin-set at-risk share of a target (Settings → SLA) get the least
+  drastic fix that moves the clock — nudge the employee, remind the approver, reassign to another tier, or
+  escalate to a human.
 * **Reports.** Daily, weekly and monthly reports (Settings → Reports: recipients, schedule, SMTP): numbers from the
   ticket store, a narrative by Muse Wonder, delivered as HTML e-mail; history and "send test" in the console.
 * **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
@@ -81,7 +84,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # database URL, port, time zone — no API keys here
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 71 offline tests with a scripted model
+.venv/bin/python -m pytest      # 72 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.

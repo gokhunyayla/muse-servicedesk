@@ -87,9 +87,11 @@ def failure_signals(db, cfg: dict) -> list[dict]:
             sig.append("tool errors: " + ", ".join(sorted(set(errs))[:5]))
         if t.rating is not None and t.rating <= 2:
             sig.append(f"low rating {t.rating}/5")
-        tm = timing(t, ev)
-        if tm["total_breached"] or tm["first_response_breached"]:
-            sig.append("SLA breached")
+        from app.sla import risk
+        r = risk(t, ev)
+        if r:
+            sig.append(f"SLA {'breached' if r['breached'] else 'at risk'}: {r['metric']} at {r['pct']}% of target "
+                       f"({'human' if r['who'] == 'human' else 'agent ' + str(r['owner'])})")
         if any(e.kind == "note" and "content filter" in e.content for e in ev):
             sig.append("model request blocked by content filter")
         if sig:
@@ -180,6 +182,73 @@ def open_human_ticket(ctx: Ctx, need: str, why: str, ticket_ids: list[int] | Non
     return {"ok": True, "ticket_id": t.id}
 
 
+@tool("Hand a ticket to another tier (L1-L4) with instructions; that agent takes over immediately. Use when the "
+      "current owner is stuck or the wrong tier holds it.", SUP, ticket_id={"type": "integer"}, tier=STR, instructions=STR)
+def reassign_ticket(ctx: Ctx, ticket_id: int, tier: str, instructions: str) -> dict:
+    from app.agents import AGENTS
+    t = ctx.db.get(Ticket, int(ticket_id))
+    if t is None:
+        return {"ok": False, "error": "no such ticket"}
+    if tier not in AGENTS:
+        return {"ok": False, "error": "tier must be L1..L4"}
+    old = t.owner
+    t.owner = tier
+    if t.status in ("escalated", "resolved"):
+        t.status = "open"
+    log(ctx.db, t.id, "supervisor", "note", f"reassigned {old} → {tier} by the Supervisor: {instructions}")
+    answer = AGENTS[tier].run(ctx.db, t, f"[Reassigned to you by the Supervisor] {instructions} Review the trail, act with "
+                                         f"your tools, and report what you did.")
+    log(ctx.db, t.id, tier, "message", answer)
+    if tier == "L1" and t.requester.startswith("+"):
+        from app.db import Outbound
+        ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
+    return {"ok": True, "owner": tier, "result": answer[:400]}
+
+
+@tool("Message the employee on a ticket that is waiting for them (confirmation, information, consent) so the "
+      "clock moves. Short and polite, in their language.", SUP, ticket_id={"type": "integer"}, text=STR)
+def nudge_employee(ctx: Ctx, ticket_id: int, text: str) -> dict:
+    from app.db import Outbound
+    t = ctx.db.get(Ticket, int(ticket_id))
+    if t is None:
+        return {"ok": False, "error": "no such ticket"}
+    if not t.requester.startswith("+"):
+        return {"ok": False, "error": "requester has no phone"}
+    ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
+    log(ctx.db, t.id, "supervisor", "message", text)
+    return {"ok": True}
+
+
+@tool("Remind the approver of a pending approval on this ticket (sends the ONAY/RET prompt again).", SUP,
+      ticket_id={"type": "integer"})
+def remind_approver(ctx: Ctx, ticket_id: int) -> dict:
+    from app import systems
+    from app.db import Approval, Outbound
+    a = (ctx.db.query(Approval).filter(Approval.ticket_id == int(ticket_id), Approval.decision.is_(None))
+         .order_by(Approval.id.desc()).first())
+    if a is None:
+        return {"ok": False, "error": "no pending approval on this ticket"}
+    phone = systems.USERS.get(a.approver, {}).get("phone")
+    if not phone:
+        return {"ok": False, "error": "approver has no phone"}
+    ctx.db.add(Outbound(to=phone, ticket_id=a.ticket_id,
+                        text=f"Hatırlatma: onayınız bekleniyor (#{a.id}): {a.request[:200]} — \"ONAY {a.id}\" / \"RET {a.id}\""))
+    log(ctx.db, a.ticket_id, "supervisor", "note", f"approver {a.approver} reminded about approval #{a.id}")
+    return {"ok": True, "approval_id": a.id, "approver": a.approver}
+
+
+@tool("Escalate a ticket to a human engineer now (SLA about to break or agents cannot progress), with a summary "
+      "of what is needed.", SUP, ticket_id={"type": "integer"}, summary=STR)
+def bump_to_human(ctx: Ctx, ticket_id: int, summary: str) -> dict:
+    t = ctx.db.get(Ticket, int(ticket_id))
+    if t is None:
+        return {"ok": False, "error": "no such ticket"}
+    t.status, t.owner = "escalated", "human"
+    t.resolution = f"escalated by the Supervisor: {summary}"
+    log(ctx.db, t.id, "supervisor", "note", f"escalated to a human by the Supervisor: {summary}")
+    return {"ok": True, "status": "escalated"}
+
+
 @tool("Leave a note on a ticket (what you noticed, what you did).", SUP, ticket_id={"type": "integer"}, text=STR)
 def note_ticket(ctx: Ctx, ticket_id: int, text: str) -> dict:
     t = ctx.db.get(Ticket, int(ticket_id))
@@ -257,10 +326,14 @@ Your duties, in order:
 3. LEARN: for (a), research the real fix on the web (web_search, then fetch_page on 1-2 good sources,
    prefer vendor docs) and propose_sop for the right tier: concrete symptom → checks → fix steps naming the
    desk's own tools/scripts where they exist → when to hand off. At most {max_research} research tasks per run.
-4. ASK A HUMAN: for (b), open_human_ticket with exactly what is needed (access, purchase, policy decision,
+4. SLA: for tickets "at risk" or breached, act so the clock moves, with the least drastic step that works:
+   waiting on the employee → nudge_employee; waiting on an approval → remind_approver; the owning tier is
+   stuck or wrong → reassign_ticket with precise instructions; nothing an agent can do → bump_to_human.
+   Human-owned tickets at risk → open_human_ticket (or note_ticket if one is already open for it).
+5. ASK A HUMAN: for (b), open_human_ticket with exactly what is needed (access, purchase, policy decision,
    on-site action, vendor contact) and why, referencing the affected tickets. Don't open duplicates: if a
    [Supervisor] ticket for the same need is already open, note_ticket instead.
-5. Finish with a short summary in English, PLAIN TEXT (no markdown, no bullets, no backticks): first one
+6. Finish with a short summary in English, PLAIN TEXT (no markdown, no bullets, no backticks): first one
    sentence with the outcome, then 2-5 short sentences on what you noticed, did and deliberately skipped.
 
 Desk's own tools agents can use: {tools}
@@ -269,6 +342,7 @@ SOP pools already present: {sops}
 Findings from the pre-analysis (facts, not conclusions):
 Emerging clusters: {clusters}
 Failure signals: {signals}
+SLA at risk now (threshold {risk_pct}% of target): {at_risk}
 Open [Supervisor] tickets: {open_sup}
 """
 
@@ -289,8 +363,10 @@ def run(trigger: str = "schedule") -> SupervisorRun:
             signals = failure_signals(db, cfg)
             open_sup = [t.title for t in db.query(Ticket).filter(Ticket.title.like("[Supervisor]%"),
                                                                    Ticket.status != "resolved")]
-            findings = {"clusters": clusters, "signals": signals}
-            if not clusters and not signals:
+            from app.sla import at_risk as _at_risk, sla_targets
+            risks = _at_risk(db)
+            findings = {"clusters": clusters, "signals": signals, "at_risk": risks}
+            if not clusters and not signals and not risks:
                 summary = "Nothing to do: no emerging problems and no failing tickets."
             else:
                 from app import knowledge
@@ -299,7 +375,8 @@ def run(trigger: str = "schedule") -> SupervisorRun:
                 sops = {tier: knowledge.titles(tier) for tier in ("L1", "L2", "L3", "L4")}
                 prompt = PROMPT.format(max_research=cfg["max_research"], tools=", ".join(tool_names),
                                        sops=json.dumps(sops, ensure_ascii=False), clusters=json.dumps(clusters, ensure_ascii=False),
-                                       signals=json.dumps(signals, ensure_ascii=False), open_sup=open_sup)
+                                       signals=json.dumps(signals, ensure_ascii=False), open_sup=open_sup,
+                                       at_risk=json.dumps(risks, ensure_ascii=False), risk_pct=sla_targets().get("at_risk_pct", 80))
                 summary = _agent_loop(db, prompt, actions)
     except ContentFiltered:
         error = "model request blocked by content filter"
@@ -366,5 +443,6 @@ def stats(since=None) -> dict:
                 "sops_published": sum(d.status == "published" for d in drafts),
                 "sops_pending": sum(d.status == "pending" for d in drafts),
                 "human_asks": c["open_human_ticket"], "notes": c["note_ticket"],
+                "sla_actions": c["reassign_ticket"] + c["nudge_employee"] + c["remind_approver"] + c["bump_to_human"],
                 "research": c["web_search"] + c["fetch_page"], "errors": c["errors"],
                 "last_run": max((r.started_at for r in runs), default=None)}

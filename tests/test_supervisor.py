@@ -98,3 +98,41 @@ def test_nothing_to_do_and_cadence():
     assert supervisor.due(None) is True
     st = supervisor.stats()
     assert st["runs"] == 1 and st["problems"] == 0
+
+
+def test_sla_at_risk_detection_and_supervisor_actions():
+    from datetime import timedelta
+    from app.db import Approval, Event, Outbound
+    from app.sla import at_risk
+    from app.tools import Ctx
+    # ticket 1: L1 holding it for 25 of 30 minutes → at risk (default 80%); ticket 2: waiting for approval
+    seed([("+905551110001", "VPN bağlanmıyor"), ("+905551110002", "Project lisansı lazım")])
+    with session() as db:
+        t1 = db.get(Ticket, 1)
+        t1.created_at = t1.created_at - timedelta(minutes=25)
+        for e in db.query(Event).filter_by(ticket_id=1):
+            e.at = t1.created_at + timedelta(seconds=5)
+        t2 = db.get(Ticket, 2)
+        t2.status = "waiting_approval"
+        db.add(Approval(ticket_id=2, approver="E1002", request="Project lisansı"))
+    with session() as db:
+        risks = at_risk(db)
+        assert risks and risks[0]["ticket_id"] == 1 and risks[0]["metric"] == "L1" and 80 <= risks[0]["pct"] < 100 and not risks[0]["breached"]
+        sig = supervisor.failure_signals(db, supervisor.config())
+        assert any("SLA at risk" in x for s in sig for x in s["signals"] if s["ticket_id"] == 1)
+    put_setting("sla", {**__import__("app.sla", fromlist=["DEFAULT_SLA"]).DEFAULT_SLA, "at_risk_pct": 95})
+    with session() as db:
+        assert at_risk(db) == []                                   # threshold raised by the admin → not at risk yet
+    put_setting("sla", __import__("app.sla", fromlist=["DEFAULT_SLA"]).DEFAULT_SLA)
+    # the Supervisor's levers
+    set_llm(ScriptedLLM([Reply(text="L2 devraldım, teşhis başlıyor.")]))
+    with session() as db:
+        ctx = Ctx(db=db, ticket=None, agent="SUP")
+        assert supervisor.reassign_ticket(ctx, 1, "L2", "Run network_diagnostics on TR-LT-101")["owner"] == "L2"
+        assert db.get(Ticket, 1).owner == "L2"
+        assert supervisor.remind_approver(ctx, 2)["approver"] == "E1002"
+        assert supervisor.nudge_employee(ctx, 1, "Bağlantıyı tekrar dener misiniz?")["ok"]
+        assert supervisor.bump_to_human(ctx, 1, "needs on-site")["status"] == "escalated"
+        assert db.get(Ticket, 1).owner == "human"
+        outs = [o.to for o in db.query(Outbound)]
+        assert "+905551110002" in outs and "+905551110001" in outs
