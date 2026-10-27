@@ -494,7 +494,7 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 {('<div class="row end"><button class="btn" type="button" onclick="runNow(this)">Run now</button><button class="btn primary slim" type="submit">Save</button></div>' if admin else '<p class="muted">Only admins can change these.</p>')}</form>
 <pre id="runOut" class="muted" style="white-space:pre-wrap;display:none"></pre>
 <script>async function runNow(b){{b.disabled=true;b.textContent='Running…';const o=document.getElementById('runOut');o.style.display='';o.textContent='The Supervisor is reviewing the desk…';
- try{{const r=await (await fetch('/supervisor/run',{{method:'POST'}})).json();o.textContent=(r.error?'Error: '+r.error+'\n':'')+r.summary+'\n\nActions: '+r.actions.map(a=>a.tool+(a.ok?' ✓':' ✗')).join(', ');}}catch(e){{o.textContent='Failed: '+e}}
+ try{{const r=await (await fetch('/supervisor/run',{{method:'POST'}})).json();o.textContent=(r.error?'Error: '+r.error+String.fromCharCode(10):'')+r.summary+String.fromCharCode(10,10)+'Actions: '+r.actions.map(a=>a.tool+(a.ok?' ✓':' ✗')).join(', ');}}catch(e){{o.textContent='Failed: '+e}}
  b.disabled=false;b.textContent='Run now';}}</script>"""
     elif tab == "channels":
         body = '<p class="muted">WhatsApp Cloud API settings are read from <code>.env</code> (WA_PHONE_NUMBER_ID, WA_ACCESS_TOKEN, WA_VERIFY_TOKEN). An editable form lands here next.</p>'
