@@ -60,3 +60,26 @@ def test_dashboard_page_and_stats():
     s = c.get("/stats").json()
     assert s["total"] == 1 and s["auto_resolution_rate"] == 1.0 and s["top_issues"][0][0] == "vpn / network"
     assert "Muse ServiceDesk" in c.get("/").text
+
+
+def test_desk_merges_tickets_into_a_problem_and_assigns_it(fresh):
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")] * 3))
+    c = TestClient(app)
+    for who, text in (("+905551110001", "Outlook açılmıyor"), ("+905551110002", "mail sunucusu hata veriyor"),
+                      ("+905551110003", "e-posta gelmiyor")):
+        c.post("/messages", json={"requester": who, "text": text})
+    r = c.post("/problems", json={"ticket_ids": [1, 2, 3], "title": "Exchange outage",
+                                  "update": "Biliyoruz, çalışıyoruz."}).json()
+    assert r == {"problem_id": 1, "linked": [2, 3]}
+    with session() as db:
+        assert db.query(Outbound).count() == 3 and db.query(Outbound).first().text.startswith("[#1]")
+    ts = {t["id"]: t for t in c.get("/tickets").json()}
+    assert ts[1]["title"] == "[INCIDENT] Exchange outage" and ts[2]["incident_id"] == 1 and ts[3]["incident_id"] == 1
+    # assign the problem to L3: the agent takes over with the desk's note
+    set_llm(ScriptedLLM([Reply(text="Exchange kuyruğunu temizledim.")]))
+    r = c.post("/tickets/1/assign", json={"owner": "L3", "note": "Exchange kuyruğuna bak"}).json()
+    assert r["owner"] == "L3" and "temizledim" in r["reply"]
+    # and to a human: escalated, no model call
+    r = c.post("/tickets/2/assign", json={"owner": "human", "assignee": "Mehmet"}).json()
+    assert r == {"id": 2, "status": "escalated", "owner": "human"}
+    assert c.post("/problems", json={"ticket_ids": [1], "title": "x"}).status_code == 422

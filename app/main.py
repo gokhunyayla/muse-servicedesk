@@ -82,6 +82,74 @@ def desk_close(ticket_id: int, d: DeskClose) -> dict:
         return {"id": t.id, "status": "resolved"}
 
 
+class Problem(BaseModel):
+    ticket_ids: list[int]
+    title: str
+    update: str = ""          # optional first status update sent to everyone affected
+    owner: str = "L1"
+
+
+@app.post("/problems")
+def merge_into_problem(p: Problem) -> dict:
+    """The desk merges several tickets into one problem record. The oldest selected ticket becomes the
+    record; the others link to it and close with it. An optional update goes out to everyone."""
+    from app.db import Outbound
+    if len(p.ticket_ids) < 2:
+        raise HTTPException(422, "select at least two tickets")
+    with session() as db:
+        ts = [db.get(Ticket, i) for i in sorted(set(p.ticket_ids))]
+        if any(t is None for t in ts):
+            raise HTTPException(404, "unknown ticket")
+        head, rest = ts[0], ts[1:]
+        head.title, head.owner = f"[INCIDENT] {p.title}", p.owner
+        if head.status == "resolved":
+            head.status = "open"
+        log(db, head.id, "desk", "note", f"problem record created by the desk from tickets {[t.id for t in ts]}")
+        for t in rest:
+            t.incident_id = head.id
+            log(db, t.id, "desk", "note", f"linked to problem #{head.id} by the desk")
+        if p.update:
+            for r in {t.requester for t in ts if t.requester.startswith("+")}:
+                db.add(Outbound(to=r, ticket_id=head.id, text=f"[#{head.id}] {p.update}"))
+            log(db, head.id, "desk", "note", f"update sent to {len(ts)} employees: {p.update}")
+        return {"problem_id": head.id, "linked": [t.id for t in rest]}
+
+
+class Assignment(BaseModel):
+    owner: str                # L1 | L2 | L3 | L4 | human
+    note: str = ""
+    assignee: str = ""        # a person's name when owner == human
+
+
+@app.post("/tickets/{ticket_id}/assign")
+def assign_ticket(ticket_id: int, a: Assignment) -> dict:
+    """The desk assigns a ticket. To an agent tier: that agent takes over right away with the desk's note.
+    To a human: the ticket is escalated and waits for that person."""
+    from app.agents import AGENTS
+    with session() as db:
+        t = db.get(Ticket, ticket_id)
+        if t is None:
+            raise HTTPException(404)
+        if a.owner == "human":
+            t.status, t.owner = "escalated", "human"
+            who = f" to {a.assignee}" if a.assignee else ""
+            log(db, t.id, "desk", "note", f"assigned{who} by the desk. {a.note}".strip())
+            return {"id": t.id, "status": t.status, "owner": t.owner}
+        if a.owner not in AGENTS:
+            raise HTTPException(422, "owner must be L1, L2, L3, L4 or human")
+        t.owner = a.owner
+        if t.status in ("escalated", "resolved"):
+            t.status = "open"
+        log(db, t.id, "desk", "note", f"assigned to {a.owner} by the desk. {a.note}".strip())
+        answer = AGENTS[a.owner].run(db, t, f"[Assigned to you by the service desk] {a.note or 'Take over this ticket.'} "
+                                            f"Review the trail, act with your tools, and report what you did.")
+        log(db, t.id, a.owner, "message", answer)
+        if a.owner == "L1" and t.requester.startswith("+"):
+            from app.db import Outbound
+            db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
+        return {"id": t.id, "status": t.status, "owner": t.owner, "reply": answer}
+
+
 @app.post("/approvals/{approval_id}")
 def decide_approval(approval_id: int, d: Decision) -> dict:
     from app.agents import handle_approval
@@ -133,7 +201,7 @@ def list_tickets(status: str | None = None, owner: str | None = None, period: st
         since = period_start(period)
         if since:
             q = q.filter(Ticket.created_at >= since)
-        return [{"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "rating": t.rating,
+        return [{"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "rating": t.rating, "incident_id": t.incident_id,
                  "created_at": t.created_at.isoformat()} for t in q.limit(100)]
 
 
@@ -166,6 +234,6 @@ def get_ticket(ticket_id: int) -> dict:
         t = db.get(Ticket, ticket_id)
         if t is None:
             raise HTTPException(404)
-        return {"id": t.id, "title": t.title, "status": t.status, "verified": t.verified,
+        return {"id": t.id, "title": t.title, "status": t.status, "verified": t.verified, "owner": t.owner, "incident_id": t.incident_id,
                 "events": [{"at": e.at.isoformat(), "actor": e.actor, "kind": e.kind,
                             "content": e.content, "data": e.data} for e in t.events]}

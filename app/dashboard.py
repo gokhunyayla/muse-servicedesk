@@ -125,6 +125,15 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 .tcard{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit;font:inherit;text-align:left;cursor:pointer}
 .tcard b{display:block;font-size:20px}.tcard span{color:var(--muted);font-size:12px}.tcard em{font-style:normal;font-size:11px;color:var(--muted)}
 .tcard.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.tcard:hover{background:var(--bg)}
+.btn{font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn:disabled{opacity:.5;cursor:default}
+.thead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.thead h3{margin:0}
+.actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.link{font-size:11px;color:var(--muted)}td.sel{width:24px}input[type=checkbox]{accent-color:var(--accent)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:9;padding:16px}.modal.on{display:grid}
+.modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;width:min(520px,100%)}
+.modal label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}.modal input,.modal textarea,.modal select{width:100%;font:inherit;padding:7px 9px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.modal .row{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 #trail{max-height:70vh;overflow:auto}.ev{padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px;overflow-wrap:anywhere}
 .ev b{color:var(--accent)}.ev.user b{color:var(--ok)}.ev.handoff b{color:var(--bad)}.ev code{font-size:12px;color:var(--muted);white-space:pre-wrap}
 </style></head><body>
@@ -139,9 +148,20 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 <main>
 <section class="card"><div class="kpis" id="kpis"></div><h3>Top issues</h3><div id="issues"></div>
 <h3>Tier load</h3><div class="tiers" id="tiers"></div></section>
-<section class="card"><h3 id="tt">Tickets</h3><div class="scroll"><table><thead><tr><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
-<section class="card" style="grid-column:1/-1"><h3 id="ttitle">Ticket trail</h3><div id="trail"><small>Select a ticket.</small></div></section>
+<section class="card"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn primary" id="mergeBtn" disabled onclick="openMerge()">Merge into problem</button></div></div>
+<div class="scroll"><table><thead><tr><th class="sel"></th><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
+<section class="card" style="grid-column:1/-1"><div class="thead"><h3 id="ttitle">Ticket trail</h3><div class="actions" id="tactions"></div></div><div id="trail"><small>Select a ticket.</small></div></section>
 </main>
+<div class="modal" id="mergeModal"><div class="box"><h3>Merge into a problem record</h3><small id="mergeList"></small>
+<label>Problem title</label><input id="mTitle" placeholder="e.g. Exchange connectivity outage">
+<label>First update to everyone affected (optional)</label><textarea id="mUpdate" rows="2" placeholder="We are aware of the issue and working on it."></textarea>
+<label>Owner</label><select id="mOwner"><option>L1</option><option>L2</option><option>L3</option><option>L4</option><option value="human">Human engineer</option></select>
+<div class="row"><button class="btn" onclick="closeModal('mergeModal')">Cancel</button><button class="btn primary" onclick="doMerge()">Create problem</button></div></div></div>
+<div class="modal" id="assignModal"><div class="box"><h3 id="aTitle">Assign ticket</h3>
+<label>Assign to</label><select id="aOwner"><option>L1</option><option>L2</option><option>L3</option><option>L4</option><option value="human">Human engineer</option></select>
+<div id="aWho"><label>Person (optional)</label><input id="aName" placeholder="e.g. Mehmet, network team"></div>
+<label>Note to the assignee</label><textarea id="aNote" rows="2" placeholder="What should they do?"></textarea>
+<div class="row"><button class="btn" onclick="closeModal('assignModal')">Cancel</button><button class="btn primary" id="aGo" onclick="doAssign()">Assign</button></div></div></div>
 <script>
 const $=s=>document.querySelector(s);let cur=null;
 const LABELS={open:'open',waiting_user:'waiting for user',waiting_approval:'waiting for approval',resolved:'resolved',escalated:'escalated'};
@@ -173,13 +193,27 @@ async function load(){
  const max=Math.max(1,...s.top_issues.map(x=>x[1]));
  $('#issues').innerHTML=s.top_issues.map(([k,v])=>`<div>${esc(k)} <small>${v}</small><div class="bar"><i style="width:${v/max*100}%"></i></div></div>`).join('');
  const tc=s.tool_calls_by_tier||{};$('#tiers').innerHTML=['L1','L2','L3','L4'].map(t=>`<span class="pill open">${t}: ${tc[t]||0} tool calls</span>`).join('');
- $('#tickets').innerHTML=ts.map(t=>`<tr class="t" onclick="show(${t.id})"><td>${t.id}</td><td class="title" title="${esc(t.title)}">${esc(t.title)}</td><td>${pill(t.status)}</td><td>${esc(t.owner)}</td><td>${t.rating||''}</td></tr>`).join('');
+ $('#tickets').innerHTML=ts.map(t=>`<tr class="t" onclick="show(${t.id})"><td class="sel" onclick="event.stopPropagation()"><input type="checkbox" ${sel.has(t.id)?'checked':''} onchange="toggle(${t.id},this.checked)"></td><td>${t.id}</td><td class="title" title="${esc(t.title)}">${esc(t.title)}${t.incident_id?` <span class="link">→ #${t.incident_id}</span>`:''}</td><td>${pill(t.status)}</td><td>${esc(t.owner)}</td><td>${t.rating||''}</td></tr>`).join('');
+ updateSel();
  $('#upd').textContent='updated '+new Date().toLocaleTimeString();
  if(cur)show(cur,true);
 }
+const sel=new Set();
+function toggle(id,on){on?sel.add(id):sel.delete(id);updateSel();}
+function updateSel(){$('#mergeBtn').disabled=sel.size<2;$('#selinfo').textContent=sel.size?sel.size+' selected':'';}
+function closeModal(id){$('#'+id).classList.remove('on');}
+function openMerge(){$('#mergeList').textContent='Tickets: '+[...sel].sort((a,b)=>a-b).map(i=>'#'+i).join(', ');$('#mergeModal').classList.add('on');$('#mTitle').focus();}
+async function doMerge(){const title=$('#mTitle').value.trim();if(!title)return $('#mTitle').focus();
+ const r=await fetch('/problems',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_ids:[...sel],title,update:$('#mUpdate').value.trim(),owner:$('#mOwner').value})});
+ const j=await r.json();closeModal('mergeModal');sel.clear();$('#mTitle').value='';$('#mUpdate').value='';await load();if(j.problem_id)show(j.problem_id);}
+function openAssign(id){$('#aTitle').textContent='Assign #'+id;$('#assignModal').dataset.id=id;$('#assignModal').classList.add('on');
+ $('#aOwner').onchange=()=>{$('#aWho').style.display=$('#aOwner').value==='human'?'':'none'};$('#aOwner').onchange();}
+async function doAssign(){const id=$('#assignModal').dataset.id;$('#aGo').disabled=true;$('#aGo').textContent='Assigning…';
+ await fetch('/tickets/'+id+'/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner:$('#aOwner').value,note:$('#aNote').value.trim(),assignee:$('#aName').value.trim()})});
+ $('#aGo').disabled=false;$('#aGo').textContent='Assign';closeModal('assignModal');$('#aNote').value='';await load();show(id);}
 async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id)).json();
- $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} — ${pill(t.status)}`+
-  (t.status!=='resolved'?` <button class="close" onclick="closeTicket(${t.id})">Close</button>`:'');
+ $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} — ${pill(t.status)} <small>owner: ${esc(t.owner||'')}${t.incident_id?` · part of problem #${t.incident_id}`:''}</small>`;
+ $('#tactions').innerHTML=`<button class="btn" onclick="openAssign(${t.id})">Assign</button>`+(t.status!=='resolved'?` <button class="btn" onclick="closeTicket(${t.id})">Close</button>`:'');
  $('#trail').innerHTML=t.events.map(e=>`<div class="ev ${e.actor==='user'?'user':''} ${e.kind}"><b>${esc(e.actor)}</b> <small>${e.kind}</small> ${esc(e.content)}${e.data?`<br><code>${esc(JSON.stringify(e.data).slice(0,300))}</code>`:''}</div>`).join('');
  if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#ttitle').scrollIntoView({behavior:'smooth'});}}
 async function closeTicket(id){const r=prompt('Closing note (sent to the employee):','closed by the service desk');
