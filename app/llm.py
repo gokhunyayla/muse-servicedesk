@@ -44,8 +44,9 @@ class MetaLLM:
         self._client = None
 
     @property
-    def client(self) -> OpenAI:
+    def client(self):
         """Rebuilt whenever the admin changes the key in Settings (no restart)."""
+        from openai import OpenAI
         from app import vault
         key = vault.get("META_API_KEY")
         if self._client is None or key != self._key:
