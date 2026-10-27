@@ -15,6 +15,8 @@ def desk():
     from app.main import app
     with session() as db:
         db.add(User(email="admin@test", name="Desk Admin", password_hash=hash_password("secret-pass-1"), role="admin"))
+    from app import security
+    security._hits.clear()                 # every test signs in once; don't trip the login rate limit
     c = TestClient(app)
     r = c.post("/login", data={"email": "admin@test", "password": "secret-pass-1"}, follow_redirects=False)
     assert r.status_code == 303 and "sd_session" in c.cookies
