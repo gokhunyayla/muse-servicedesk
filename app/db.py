@@ -29,7 +29,33 @@ class Ticket(Base):
     status: Mapped[str] = mapped_column(String(32), default="open")   # open | waiting_user | resolved
     owner: Mapped[str] = mapped_column(String(8), default="L1")
     verified: Mapped[bool] = mapped_column(default=False)        # identity checked in this ticket
+    resolution: Mapped[str] = mapped_column(Text, default="")
+    rating: Mapped[int | None] = mapped_column(nullable=True)    # 1..5 from the employee
+    incident_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)  # parent, for mass outages
     events: Mapped[list["Event"]] = relationship(back_populates="ticket", order_by="Event.id")
+
+
+class Followup(Base):
+    """Scheduled work on a ticket: confirmation reminders, stability checks, cargo tracking."""
+    __tablename__ = "followups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"))
+    due_at: Mapped[datetime] = mapped_column(DateTime)
+    note: Mapped[str] = mapped_column(Text)
+    done: Mapped[bool] = mapped_column(default=False)
+
+
+class Outbound(Base):
+    """Messages the desk sends on its own (not as a reply): reminders, approvals, incident updates."""
+    __tablename__ = "outbound"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    to: Mapped[str] = mapped_column(String(64))       # phone or employee no
+    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    text: Mapped[str] = mapped_column(Text)
+    sent: Mapped[bool] = mapped_column(default=False)  # flipped by the channel (WhatsApp) once delivered
 
 
 class Event(Base):

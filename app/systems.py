@@ -86,6 +86,33 @@ def rollback(snapshot_id: str) -> bool:
     return True
 
 
+# Allow-listed endpoint scripts. Only these names can run on a laptop; the endpoint agent
+# refuses anything else. Simulated here; the real endpoint agent returns the same shape.
+SCRIPTS = {
+    "vpn-reset":       {"desc": "restart VPN client, flush DNS cache", "needs_consent": False},
+    "dns-reset":       {"desc": "reset DNS settings and cache", "needs_consent": False},
+    "printer-fix":     {"desc": "clear print queue, restart spooler", "needs_consent": False},
+    "perf-report":     {"desc": "CPU/memory/disk/startup report", "needs_consent": False},
+    "driver-rollback": {"desc": "roll back the last updated driver (reboots)", "needs_consent": True},
+    "disk-cleanup":    {"desc": "remove temp files and old updates", "needs_consent": True},
+}
+
+
+def run_script(hostname: str, script: str) -> dict:
+    d = DEVICES.get(hostname)
+    if not d:
+        return {"ok": False, "error": "unknown device"}
+    if not d["online"]:
+        return {"ok": False, "error": "device offline"}
+    if script == "dns-reset":
+        d["dns_ok"] = True
+    if script == "vpn-reset" and d["vpn_profile"] == "valid":
+        d["vpn_connected"] = True
+    out = {"perf-report": "cpu 92% (chrome 41 tabs), ram 15.6/16 GB, disk 97% full, 14 startup apps"}.get(
+        script, "completed")
+    return {"ok": True, "hostname": hostname, "script": script, "output": out}
+
+
 def user_by_phone(phone: str) -> tuple[str, dict] | None:
     for emp, u in USERS.items():
         if u["phone"] == phone:

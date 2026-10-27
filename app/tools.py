@@ -198,6 +198,92 @@ def rollback_patch(ctx: Ctx, snapshot_id: str) -> dict:
     return {"ok": systems.rollback(snapshot_id), "snapshot_id": snapshot_id}
 
 
+# ---- knowledge & learning ------------------------------------------------------------------
+
+@tool("Search this tier's SOP knowledge pool. Do this before acting on any request.", ALL, query=STR)
+def search_knowledge(ctx: Ctx, query: str) -> dict:
+    from app import knowledge
+    return {"ok": True, "results": knowledge.search(ctx.agent, query)}
+
+
+@tool("Write a new SOP into this tier's pool when you solved something the pool did not cover.",
+      ALL, title=STR, content=STR)
+def write_sop(ctx: Ctx, title: str, content: str) -> dict:
+    from app import knowledge
+    sid = knowledge.write(ctx.agent, title, content)
+    log(ctx.db, ctx.ticket.id, ctx.agent, "note", f"new SOP written: {sid}")
+    return {"ok": True, "sop_id": sid}
+
+
+# ---- endpoint & notifications ---------------------------------------------------------------
+
+@tool("Run an allow-listed script on the employee's laptop. Scripts marked needs_consent require the "
+      "employee's explicit OK first.", ("L1", "L2"), hostname=STR, script=STR)
+def run_endpoint_script(ctx: Ctx, hostname: str, script: str) -> dict:
+    if script not in systems.SCRIPTS:
+        return {"ok": False, "error": f"script not allow-listed; available: {list(systems.SCRIPTS)}"}
+    return systems.run_script(hostname, script)
+
+
+@tool("List the scripts that can run on laptops.", ("L1", "L2"))
+def list_endpoint_scripts(ctx: Ctx) -> dict:
+    return {"ok": True, "scripts": systems.SCRIPTS}
+
+
+@tool("Send a message to an employee outside the current reply (status update, approval request, reminder).",
+      ALL, employee_no=STR, text=STR)
+def notify_user(ctx: Ctx, employee_no: str, text: str) -> dict:
+    from app.db import Outbound
+    u = systems.USERS.get(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    ctx.db.add(Outbound(to=u["phone"], ticket_id=ctx.ticket.id, text=text))
+    ctx.db.flush()
+    return {"ok": True, "to": u["name"]}
+
+
+# ---- ticket lifecycle -----------------------------------------------------------------------
+
+@tool("You believe the problem is fixed: ask the employee to confirm. The ticket waits for their answer "
+      "and a reminder goes out if they stay silent. Never close without confirmation.", ("L1",), summary=STR)
+def request_confirmation(ctx: Ctx, summary: str) -> dict:
+    from datetime import timedelta
+    from app.db import Followup, _now
+    ctx.ticket.status = "waiting_user"
+    ctx.ticket.resolution = summary
+    ctx.db.add(Followup(ticket_id=ctx.ticket.id, due_at=_now() + timedelta(hours=4),
+                        note="confirmation reminder"))
+    ctx.db.flush()
+    return {"ok": True, "status": "waiting_user"}
+
+
+@tool("Close the ticket after the employee confirmed the fix. Ask them for a 1-5 rating in your reply.",
+      ("L1",), resolution=STR)
+def close_ticket(ctx: Ctx, resolution: str) -> dict:
+    ctx.ticket.status = "resolved"
+    ctx.ticket.resolution = resolution
+    return {"ok": True, "status": "resolved"}
+
+
+@tool("Store the employee's 1-5 satisfaction rating for this ticket.", ("L1",), rating=INT)
+def record_rating(ctx: Ctx, rating: int) -> dict:
+    if not 1 <= int(rating) <= 5:
+        return {"ok": False, "error": "rating must be 1..5"}
+    ctx.ticket.rating = int(rating)
+    return {"ok": True}
+
+
+@tool("Schedule a follow-up on this ticket (stability check, cargo tracking, temporary-access expiry).",
+      ALL, hours=INT, note=STR)
+def schedule_followup(ctx: Ctx, hours: int, note: str) -> dict:
+    from datetime import timedelta
+    from app.db import Followup, _now
+    f = Followup(ticket_id=ctx.ticket.id, due_at=_now() + timedelta(hours=int(hours)), note=note)
+    ctx.db.add(f)
+    ctx.db.flush()
+    return {"ok": True, "followup_id": f.id, "due_at": f.due_at.isoformat()}
+
+
 @tool("Record a decision or finding on the ticket.", ALL, text=STR)
 def add_note(ctx: Ctx, text: str) -> dict:
     log(ctx.db, ctx.ticket.id, ctx.agent, "note", text)

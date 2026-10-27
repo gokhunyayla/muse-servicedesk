@@ -47,6 +47,33 @@ async def post_image(requester: str = Form(...), text: str = Form(""), image: Up
         return {"ticket_id": ticket.id, "reply": answer}
 
 
+@app.get("/tickets")
+def list_tickets(status: str | None = None) -> list[dict]:
+    with session() as db:
+        q = db.query(Ticket).order_by(Ticket.id.desc())
+        if status:
+            q = q.filter(Ticket.status == status)
+        return [{"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "rating": t.rating,
+                 "created_at": t.created_at.isoformat()} for t in q.limit(100)]
+
+
+@app.get("/outbound")
+def list_outbound(unsent: bool = True) -> list[dict]:
+    """Messages the desk wants to send on its own; a channel (WhatsApp) drains this."""
+    from app.db import Outbound
+    with session() as db:
+        q = db.query(Outbound).order_by(Outbound.id)
+        if unsent:
+            q = q.filter(Outbound.sent.is_(False))
+        return [{"id": o.id, "to": o.to, "ticket_id": o.ticket_id, "text": o.text} for o in q.limit(100)]
+
+
+@app.post("/followups/run")
+def run_followups() -> dict:
+    from app.scheduler import run_due_followups
+    return {"ran": run_due_followups()}
+
+
 @app.get("/tickets/{ticket_id}")
 def get_ticket(ticket_id: int) -> dict:
     with session() as db:

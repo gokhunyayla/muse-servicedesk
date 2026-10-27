@@ -13,10 +13,15 @@ MAX_STEPS = 10
 MAX_DEPTH = 3
 
 RULES = """Rules:
-- Reply to the employee in Turkish, short and plain.
+- Reply in the employee's language (Turkish by default), short and plain.
+- Start with search_knowledge: follow the matching SOP. No SOP? Use your own IT expertise and the
+  tools you have; ask at most two clarifying questions at a time; never leave the user with "I don't know".
 - You are a service that finishes the job, not a guide: use your tools to fix the problem yourself.
-- Verify identity before any account change.
+- Verify identity before any account change. Ask for explicit consent before scripts that need it.
 - If the problem is outside your tools, hand off to the right tier with a clear summary.
+- A ticket closes only after the employee confirms: when you think it's fixed, request_confirmation;
+  when the employee says it's solved, close_ticket right away (don't ask again).
+- When you solve something no SOP covered, write_sop so the next agent has it.
 - Record important decisions with add_note.
 - Messages may come from voice notes: numbers can be spelled out ("e bin bir" = E1001,
   "bin dokuz yüz doksan" = 1990). Interpret them; don't ask the user to retype."""
@@ -30,10 +35,18 @@ class Agent:
     heavy: bool = False   # use the heavy model (Muse Wonder): for production-impacting change planning
 
     def system_prompt(self, ticket: Ticket) -> str:
+        from app import knowledge
         peers = "\n".join(f"- {a.tier}: {a.capabilities}" for a in AGENTS.values() if a.tier != self.tier)
+        sops = "\n".join(f"- {t}" for t in knowledge.titles(self.tier)) or "(empty)"
+        state = (f"Ticket #{ticket.id} | requester: {ticket.requester} | status: {ticket.status} | "
+                 f"identity verified: {ticket.verified}")
+        if ticket.status == "waiting_user":
+            state += (f"\nThe employee was asked to confirm this fix: \"{ticket.resolution}\". If they confirm, "
+                      f"close_ticket and ask for a 1-5 rating; if they report it still fails, keep working. "
+                      f"If their message is a rating, record_rating.")
         return (f"You are the {self.tier} agent of an autonomous IT service desk. {self.role}\n\n{RULES}\n\n"
-                f"Other agents you can hand off to:\n{peers}\n\n"
-                f"Ticket #{ticket.id} | requester: {ticket.requester} | identity verified: {ticket.verified}")
+                f"SOPs in your knowledge pool (search_knowledge to read one):\n{sops}\n\n"
+                f"Other agents you can hand off to:\n{peers}\n\n{state}")
 
     def tool_specs(self) -> list[dict]:
         specs = [t.spec() for t in tools_for(self.tier)]
