@@ -65,10 +65,15 @@ PAGE = """<!doctype html>
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}}
 :root[data-theme=dark]{--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}
 *{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
-header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-h1{font-size:17px;margin:0}h3{margin:14px 0 8px;font-size:14px}small{color:var(--muted)}
-.right{display:flex;align-items:center;gap:10px}
-select{font:inherit;padding:4px 8px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+header{position:sticky;top:0;z-index:5;background:var(--card);padding:10px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}.logo{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center;flex:none}
+.logo svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+h1{font-size:16px;margin:0;line-height:1.1;white-space:nowrap}h1 small{display:block;font-size:11px;font-weight:400}h3{margin:14px 0 8px;font-size:14px}small{color:var(--muted)}
+.right{display:flex;align-items:center;gap:8px}.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
+@media(max-width:600px){.live span{display:none}}
+.ibtn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;display:grid;place-items:center;padding:0}
+.ibtn:hover{background:var(--bg)}.ibtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}
 @media(max-width:900px){main{grid-template-columns:1fr;padding:12px;gap:12px}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
@@ -85,9 +90,11 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 #trail{max-height:70vh;overflow:auto}.ev{padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px;overflow-wrap:anywhere}
 .ev b{color:var(--accent)}.ev.user b{color:var(--ok)}.ev.handoff b{color:var(--bad)}.ev code{font-size:12px;color:var(--muted);white-space:pre-wrap}
 </style></head><body>
-<header><h1>Muse ServiceDesk <small>— service desk console</small></h1>
-<div class="right"><small id="upd"></small>
-<select id="theme" title="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div></header>
+<header>
+<div class="brand"><div class="logo"><svg viewBox="0 0 24 24"><path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg></div>
+<h1>Muse ServiceDesk<small>Service desk console</small></h1></div>
+<div class="right"><span class="live"><i></i><span id="upd">live</span></span>
+<button class="ibtn" id="theme" title="Theme: system" aria-label="Toggle theme"></button></div></header>
 <main>
 <section class="card"><div class="kpis" id="kpis"></div><h3>Top issues</h3><div id="issues"></div>
 <h3>Tier load</h3><div class="tiers" id="tiers"></div></section>
@@ -99,10 +106,15 @@ const $=s=>document.querySelector(s);let cur=null;
 const LABELS={open:'open',waiting_user:'waiting for user',waiting_approval:'waiting for approval',resolved:'resolved',escalated:'escalated'};
 const pill=s=>`<span class="pill ${s}">${LABELS[s]||s}</span>`;
 const esc=x=>String(x).replace(/</g,'&lt;');
-function applyTheme(v){try{localStorage.setItem('theme',v)}catch(e){}
- if(v==='system')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);}
-(function(){let v='system';try{v=localStorage.getItem('theme')||'system'}catch(e){}$('#theme').value=v;applyTheme(v);
- $('#theme').onchange=e=>applyTheme(e.target.value);})();
+const ICONS={system:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+ light:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+ dark:'<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'};
+const ORDER=['system','light','dark'];let theme='system';
+function applyTheme(v){theme=v;try{localStorage.setItem('theme',v)}catch(e){}
+ if(v==='system')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);
+ $('#theme').innerHTML=ICONS[v];$('#theme').title='Theme: '+v+' (click to change)';}
+(function(){let v='system';try{v=localStorage.getItem('theme')||'system'}catch(e){}applyTheme(ORDER.includes(v)?v:'system');
+ $('#theme').onclick=()=>applyTheme(ORDER[(ORDER.indexOf(theme)+1)%3]);})();
 async function load(){
  const s=await (await fetch('/stats')).json(), ts=await (await fetch('/tickets')).json();
  const st=s.by_status||{};
