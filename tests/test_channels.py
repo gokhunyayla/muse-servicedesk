@@ -58,5 +58,5 @@ def test_dashboard_page_and_stats():
     c = TestClient(app)
     c.post("/messages", json={"requester": "+905551110001", "text": "vpn bağlanmıyor"})
     s = c.get("/stats").json()
-    assert s["total"] == 1 and s["auto_resolution_rate"] == 1.0 and s["top_issues"][0][0] == "vpn / ağ"
+    assert s["total"] == 1 and s["auto_resolution_rate"] == 1.0 and s["top_issues"][0][0] == "vpn / network"
     assert "Muse ServiceDesk" in c.get("/").text
