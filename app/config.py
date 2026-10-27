@@ -22,8 +22,6 @@ settings = Settings()
 
 @dataclass(frozen=True)
 class AuthSettings:
-    admin_email: str = os.getenv("ADMIN_EMAIL", "")          # first admin, created on start if no users exist
-    admin_password: str = os.getenv("ADMIN_PASSWORD", "")
     public_url: str = os.getenv("PUBLIC_URL", "http://localhost:1002")   # used in password-reset links
     smtp_host: str = os.getenv("SMTP_HOST", "")
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))

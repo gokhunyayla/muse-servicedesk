@@ -40,15 +40,9 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(candidate, digest)
 
 
-def bootstrap_admin() -> None:
-    """Create the first admin from ADMIN_EMAIL / ADMIN_PASSWORD when the users table is empty."""
-    if not (auth_settings.admin_email and auth_settings.admin_password):
-        return
+def needs_setup() -> bool:
     with session() as db:
-        if db.query(User).count() == 0:
-            db.add(User(email=auth_settings.admin_email.lower(), name="Administrator",
-                        password_hash=hash_password(auth_settings.admin_password), role="admin"))
-            logger.info("created first admin %s", auth_settings.admin_email)
+        return db.query(User).count() == 0
 
 
 def _user_from_request(request: Request) -> User | None:
@@ -103,8 +97,41 @@ def send_mail(to: str, subject: str, body: str) -> bool:
 
 # ---- pages -----------------------------------------------------------------------------------
 
+@router.get("/setup", response_class=HTMLResponse)
+def setup_page(error: str = "") -> str:
+    """First run only: create the first admin. Credentials live in the users table, nowhere else."""
+    if not needs_setup():
+        return RedirectResponse("/login", 303)   # type: ignore[return-value]
+    return _page("Create the first admin", f"""
+<form method="post" action="/setup">
+<p class="muted">No desk users exist yet. Create the first administrator; they can add everyone else at Users.</p>
+<label>Name</label><input name="name" required autofocus>
+<label>E-mail</label><input name="email" type="email" required>
+<label>Password</label><input name="password" type="password" minlength="8" required>
+<label>Repeat</label><input name="password2" type="password" minlength="8" required>
+{_alert(error, "")}
+<button class="btn primary" type="submit">Create admin and sign in</button></form>""")
+
+
+@router.post("/setup")
+def setup(name: str = Form(...), email: str = Form(...), password: str = Form(...), password2: str = Form(...)):
+    if not needs_setup():
+        raise HTTPException(403, "setup already done")
+    if password != password2:
+        return RedirectResponse("/setup?error=Passwords+do+not+match", 303)
+    with session() as db:
+        u = User(email=email.lower().strip(), name=name.strip(), role="admin", password_hash=hash_password(password))
+        db.add(u)
+        db.flush()
+        r = RedirectResponse("/", 303)
+        _sign_in(db, u, r)
+        return r
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, error: str = "", info: str = "") -> str:
+    if needs_setup():
+        return RedirectResponse("/setup", 303)   # type: ignore[return-value]
     if _user_from_request(request):
         return RedirectResponse("/", 303)   # type: ignore[return-value]
     return _page("Sign in", f"""
@@ -120,7 +147,7 @@ def login_page(request: Request, error: str = "", info: str = "") -> str:
 def login(email: str = Form(...), password: str = Form(...)):
     with session() as db:
         u = db.query(User).filter(User.email == email.lower().strip()).first()
-        if u is None or not u.active or not verify_password(password, u.password_hash):
+        if u is None or not u.active or not u.password_hash or not verify_password(password, u.password_hash):
             return RedirectResponse("/login?error=Wrong+e-mail+or+password", 303)
         r = RedirectResponse("/", 303)
         _sign_in(db, u, r)
@@ -193,12 +220,15 @@ def reset(token: str = Form(...), password: str = Form(...), password2: str = Fo
 # ---- user administration (admin only) --------------------------------------------------------
 
 @router.get("/users", response_class=HTMLResponse)
-def users_page(admin: User = Depends(admin_user), info: str = "", error: str = "") -> str:
+def users_page(admin: User = Depends(admin_user), info: str = "", error: str = "", link: str = "") -> str:
     with session() as db:
         rows = "".join(
             f"<tr><td>{_esc(u.name)}</td><td>{_esc(u.email)}</td><td>{u.role}</td>"
             f"<td>{'active' if u.active else 'disabled'}</td><td>"
-            + ("" if u.id == admin.id else
+            + ("<span class='muted'>you</span>" if u.id == admin.id else
+               f"<form method='post' action='/users/{u.id}/role' style='display:inline'>"
+               f"<input type='hidden' name='role' value='{'agent' if u.role == 'admin' else 'admin'}'>"
+               f"<button class='btn'>{'Make agent' if u.role == 'admin' else 'Make admin'}</button></form> "
                f"<form method='post' action='/users/{u.id}/toggle' style='display:inline'>"
                f"<button class='btn'>{'Disable' if u.active else 'Enable'}</button></form>")
             + "</td></tr>"
@@ -211,22 +241,44 @@ def users_page(admin: User = Depends(admin_user), info: str = "", error: str = "
 <div><label>Name</label><input name="name" required></div>
 <div><label>E-mail</label><input name="email" type="email" required></div>
 <div><label>Role</label><select name="role"><option value="agent">Support agent</option><option value="admin">Admin</option></select></div>
-<div><label>Temporary password</label><input name="password" type="text" minlength="8" required placeholder="they change it via Forgot password"></div>
+<div><label>Invitation</label><p class="muted" style="margin:6px 0 0">They receive a link to set their own password (valid 24 h). No passwords are typed or e-mailed by you.</p></div>
 {_alert(error, info)}
-<div><button class="btn primary" type="submit">Add user</button></div></form>
+<div><button class="btn primary" type="submit">Invite user</button></div></form>
+{('<p class="alert ok">Set-password link (SMTP not configured, share it yourself): <a href="'+_esc(link)+'">'+_esc(link)+'</a></p>') if link else ''}
 <p class="links"><a href="/">Back to the console</a></p>""", wide=True, user=admin)
 
 
 @router.post("/users")
 def add_user(admin: User = Depends(admin_user), name: str = Form(...), email: str = Form(...),
-             role: str = Form("agent"), password: str = Form(...)):
+             role: str = Form("agent")):
+    """Invite a desk user: the account is created without a password and a set-password link is sent."""
     if role not in ("admin", "agent"):
         raise HTTPException(422, "role must be admin or agent")
     with session() as db:
         if db.query(User).filter(User.email == email.lower().strip()).first():
             return RedirectResponse("/users?error=That+e-mail+already+exists", 303)
-        db.add(User(email=email.lower().strip(), name=name.strip(), role=role, password_hash=hash_password(password)))
-    return RedirectResponse(f"/users?info={role.title()}+{name.strip().replace(' ', '+')}+added", 303)
+        u = User(email=email.lower().strip(), name=name.strip(), role=role, password_hash="",
+                 reset_token=secrets.token_urlsafe(32), reset_expires=_now() + timedelta(hours=24))
+        db.add(u)
+        link = f"{auth_settings.public_url}/reset?token={u.reset_token}"
+        mailed = send_mail(u.email, "You were invited to Muse ServiceDesk",
+                           f"Hello {u.name},\n\n{admin.name} invited you to the service desk console as {role}. "
+                           f"Set your password here (valid 24 hours):\n{link}\n")
+    q = f"info={role.title()}+{name.strip().replace(' ', '+')}+invited"
+    return RedirectResponse(f"/users?{q}" + ("" if mailed else f"&link={link}"), 303)
+
+
+@router.post("/users/{user_id}/role")
+def set_role(user_id: int, role: str = Form(...), admin: User = Depends(admin_user)):
+    """Any user can be made an admin (or back to agent); you cannot change your own role."""
+    if role not in ("admin", "agent"):
+        raise HTTPException(422, "role must be admin or agent")
+    with session() as db:
+        u = db.get(User, user_id)
+        if u is None or u.id == admin.id:
+            raise HTTPException(400, "cannot change this user")
+        u.role = role
+    return RedirectResponse("/users", 303)
 
 
 @router.post("/users/{user_id}/toggle")
@@ -286,6 +338,7 @@ main{{max-width:{'960px' if wide else '400px'};margin:32px auto;padding:0 16px}}
 .card{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}}h2{{margin:0 0 12px;font-size:18px}}h3{{font-size:14px;margin:20px 0 8px}}
 label{{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}}input,select{{width:100%;font:inherit;padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}}
 .btn{{font:inherit;font-size:13px;padding:7px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-block;margin-top:14px}}
+td .btn{{margin-top:0;padding:4px 9px;font-size:12px}}
 .btn.primary{{background:var(--accent);border-color:var(--accent);color:#fff;width:100%}}.grid .btn.primary{{width:auto}}
 .links{{margin:14px 0 0;font-size:13px}}.links a{{color:var(--accent);text-decoration:none}}.muted{{color:var(--muted);font-size:13px}}
 .alert{{padding:8px 10px;border-radius:6px;font-size:13px;margin-top:12px}}.alert.bad{{background:rgba(228,30,63,.12);color:var(--bad)}}.alert.ok{{background:rgba(49,162,76,.12);color:var(--ok)}}

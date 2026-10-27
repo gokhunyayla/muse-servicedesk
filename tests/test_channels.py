@@ -91,10 +91,15 @@ def test_console_requires_sign_in_and_admin_manages_users(desk):
     assert anon.get("/", headers={"accept": "text/html"}, follow_redirects=False).headers["location"] == "/login"
     assert anon.post("/login", data={"email": "admin@test", "password": "wrong"}, follow_redirects=False).headers["location"].startswith("/login?error")
     # admin adds a support agent; the agent can sign in but cannot manage users
-    r = desk.post("/users", data={"name": "Zeynep", "email": "z@test", "role": "agent", "password": "agent-pass-1"}, follow_redirects=False)
-    assert r.status_code == 303
+    # admin invites an agent: no password typed; the invite link (no SMTP) comes back to the admin
+    r = desk.post("/users", data={"name": "Zeynep", "email": "z@test", "role": "agent"}, follow_redirects=False)
+    assert r.status_code == 303 and "&link=" in r.headers["location"]
+    token = r.headers["location"].split("token=")[1]
     assert [u["name"] for u in desk.get("/users.json").json()] == ["Desk Admin", "Zeynep"]
     agent = TestClient(app)
+    assert agent.post("/login", data={"email": "z@test", "password": "anything"}, follow_redirects=False).headers["location"].startswith("/login?error")   # invited, no password yet
+    r = agent.post("/reset", data={"token": token, "password": "agent-pass-1", "password2": "agent-pass-1"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/login?info")
     agent.post("/login", data={"email": "z@test", "password": "agent-pass-1"}, follow_redirects=False)
     assert agent.get("/me").json()["role"] == "agent"
     assert agent.get("/users").status_code == 403
@@ -110,3 +115,17 @@ def test_console_requires_sign_in_and_admin_manages_users(desk):
     again = TestClient(app)
     again.post("/login", data={"email": "z@test", "password": "new-pass-123"}, follow_redirects=False)
     assert again.get("/me").json()["name"] == "Zeynep"
+
+
+def test_first_run_setup_creates_the_admin_and_roles_can_change(fresh):
+    c = TestClient(app)
+    assert c.get("/login", follow_redirects=False).headers["location"] == "/setup"
+    r = c.post("/setup", data={"name": "Gökhun", "email": "g@test", "password": "first-admin-1", "password2": "first-admin-1"}, follow_redirects=False)
+    assert r.status_code == 303 and c.get("/me").json()["role"] == "admin"
+    assert c.post("/setup", data={"name": "x", "email": "x@test", "password": "12345678", "password2": "12345678"}).status_code == 403
+    c.post("/users", data={"name": "Ali", "email": "a@test", "role": "agent"}, follow_redirects=False)
+    uid = [u for u in c.get("/users.json").json() if u["name"] == "Ali"][0]["id"]
+    c.post(f"/users/{uid}/role", data={"role": "admin"}, follow_redirects=False)
+    assert [u for u in c.get("/users.json").json() if u["name"] == "Ali"][0]["role"] == "admin"
+    me = c.get("/me").json()["id"]
+    assert c.post(f"/users/{me}/role", data={"role": "agent"}).status_code == 400

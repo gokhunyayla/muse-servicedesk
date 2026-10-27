@@ -8,7 +8,7 @@ from app.voice import transcribe
 
 app = FastAPI(title="Muse ServiceDesk")
 
-from app.auth import bootstrap_admin, current_user  # noqa: E402
+from app.auth import current_user, needs_setup  # noqa: E402
 from app.dashboard import router as dashboard_router  # noqa: E402
 from app.whatsapp import router as whatsapp_router    # noqa: E402
 from app.auth import router as auth_router            # noqa: E402
@@ -18,16 +18,11 @@ app.include_router(dashboard_router)
 app.include_router(whatsapp_router)
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    bootstrap_admin()
-
-
 @app.exception_handler(HTTPException)
 async def _auth_redirect(request: Request, exc: HTTPException):
     """Browser page requests without a session go to the sign-in page; API calls get the JSON 401."""
     if exc.status_code == 401 and "text/html" in request.headers.get("accept", ""):
-        return RedirectResponse("/login", 303)
+        return RedirectResponse("/setup" if needs_setup() else "/login", 303)
     from fastapi.responses import JSONResponse
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=getattr(exc, "headers", None))
 
