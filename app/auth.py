@@ -600,27 +600,54 @@ async def settings_supervisor(request: Request, admin: User = Depends(admin_user
 
 
 @router.get("/knowledge", response_class=HTMLResponse)
-def knowledge_page(user: User = Depends(current_user)) -> str:
-    """SOP pools per tier plus the Supervisor's drafts awaiting an admin."""
+def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = "") -> str:
+    """The knowledge base: browse and edit SOPs per tier; drafts from agents and the Supervisor wait here."""
     from app import knowledge
-    from app.db import SopDraft
     admin = user.role == "admin"
-    with session() as db:
-        drafts = db.query(SopDraft).filter(SopDraft.status == "pending").order_by(SopDraft.id.desc()).all()
-        cards = "".join(f"""<div class="draft" id="d{d.id}"><div class="dh"><span class="tag">{d.tier}</span><b>{_esc(d.title)}</b>
-<small>{d.created_at:%d %b %H:%M}{' · tickets ' + ', '.join('#' + str(i) for i in d.ticket_ids) if d.ticket_ids else ''}</small></div>
-<p class="muted">{_esc(d.reason)}</p><details><summary>Read the draft</summary><pre>{_esc(d.content)}</pre>
-{('<small>Sources: ' + ' · '.join(f'<a href="{_esc(u)}" target="_blank" rel="noopener">{_esc(u[:60])}</a>' for u in d.sources) + '</small>') if d.sources else ''}</details>
-{(f'<div class="row end"><button class="btn" onclick="decide({d.id},\'reject\')">Reject</button><button class="btn primary slim" onclick="decide({d.id},\'publish\')">Publish to {d.tier}</button></div>') if admin else ''}</div>"""
-                        for d in drafts) or '<p class="muted">No drafts waiting.</p>'
-        history = db.query(SopDraft).filter(SopDraft.status != "pending").order_by(SopDraft.id.desc()).limit(10).all()
-        hist = "".join(f"<tr><td>{d.created_at:%d %b %H:%M}</td><td><span class='tag'>{d.tier}</span></td><td>{_esc(d.title)}</td><td><span class='tag {'active' if d.status=='published' else 'disabled'}'>{d.status}</span></td><td class='muted'>{_esc(d.decided_by)}</td></tr>" for d in history)
-    pools = "".join(f"<div class='pool'><h4>{tier}</h4><ul>{''.join(f'<li>{_esc(t)}</li>' for t in knowledge.titles(tier)) or '<li class=muted>empty</li>'}</ul></div>"
-                    for tier in ("L1", "L2", "L3", "L4"))
-    body = f"""<div class="tabs"><a class="tab on" href="/knowledge">Drafts from the Supervisor</a></div>{cards}
-<h3>Recent decisions</h3><div class="scroll"><table><thead><tr><th>When</th><th>Tier</th><th>Title</th><th>Status</th><th>By</th></tr></thead><tbody>{hist or '<tr><td colspan=5 class=muted>none yet</td></tr>'}</tbody></table></div>
-<h3>SOP pools</h3><div class="pools">{pools}</div>
-<script>async function decide(id,decision){{const r=await fetch('/sops/drafts/'+id,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{decision}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}</script>"""
+    rows = knowledge.listing()
+    drafts = [r for r in rows if r["status"] == "draft"]
+    live = [r for r in rows if r["status"] != "draft" and (not tier or r["tier"] == tier)
+            and (not q or q.lower() in (r["title"] + r["content"]).lower())]
+    def card(r, draft=False):
+        src = {"seed": "seed", "human": "desk user", "agent": f"agent {r['author']}", "supervisor": "Supervisor"}.get(r["source"], r["source"])
+        meta = f"{src} · v{r['version']} · {r['updated_at'][:16].replace('T', ' ')} · used {r['used']}×" + (f" · tickets {', '.join('#' + str(i) for i in r['ticket_ids'])}" if r["ticket_ids"] else "")
+        srcs = (' · '.join(f'<a href="{_esc(u)}" target="_blank" rel="noopener">{_esc(u[:50])}</a>' for u in r["sources"])) if r["sources"] else ""
+        acts = ""
+        if admin or draft is False:
+            acts += f'<button class="btn" onclick="editSop(\'{_esc(r["key"])}\')">Edit</button> '
+        if admin and draft:
+            acts += f'<button class="btn" onclick="setStatus(\'{_esc(r["key"])}\',\'retired\')">Reject</button> <button class="btn primary slim" onclick="setStatus(\'{_esc(r["key"])}\',\'published\')">Publish to {r["tier"]}</button>'
+        elif admin and r["status"] == "published":
+            acts += f'<button class="btn" onclick="setStatus(\'{_esc(r["key"])}\',\'retired\')">Retire</button>'
+        elif admin and r["status"] == "retired":
+            acts += f'<button class="btn" onclick="setStatus(\'{_esc(r["key"])}\',\'published\')">Restore</button>'
+        return f"""<div class="draft" data-key="{_esc(r['key'])}"><div class="dh"><span class="tag">{r['tier']}</span><b>{_esc(r['title'])}</b>
+<span class="tag {'active' if r['status']=='published' else ('invited' if r['status']=='draft' else 'disabled')}">{r['status']}</span><small>{_esc(meta)}</small></div>
+<details><summary>Read</summary><pre>{_esc(r['content'])}</pre>{('<small>Sources: ' + srcs + '</small>') if srcs else ''}</details>
+<div class="row end" style="margin-top:8px">{acts}</div></div>"""
+    chips = "".join(f'<a class="tab {"on" if tier == t else ""}" href="/knowledge?tier={t}&q={_esc(q)}">{t}</a>' for t in ("", "L1", "L2", "L3", "L4", "shared")).replace('href="/knowledge?tier=&', 'href="/knowledge?tier=&').replace('>​</a>', '>All</a>')
+    chips = chips.replace(f'<a class="tab {"on" if tier == "" else ""}" href="/knowledge?tier=&q={_esc(q)}"></a>', f'<a class="tab {"on" if tier == "" else ""}" href="/knowledge?q={_esc(q)}">All</a>')
+    body = f"""<div class="pagehead"><p class="muted">Procedures the agents follow. Every agent searches its own pool and <b>shared</b>; other pools are reachable too. Agents' and the Supervisor's proposals wait here as drafts until an admin publishes them.</p>
+<button class="btn primary slim" onclick="openModal('sopModal');newSop()">+ Add SOP</button></div>
+{('<h3>Drafts awaiting review (' + str(len(drafts)) + ')</h3>' + ''.join(card(r, True) for r in drafts)) if drafts else ''}
+<h3>Knowledge base</h3><div class="tl" style="margin-bottom:10px"><div class="tabs" style="margin:0;border:0">{chips}</div>
+<form method="get" action="/knowledge" style="display:inline"><input type="hidden" name="tier" value="{_esc(tier)}"><input class="search" name="q" value="{_esc(q)}" placeholder="Search…" style="width:240px"></form></div>
+{''.join(card(r) for r in live) or '<p class="muted">Nothing here yet.</p>'}
+<div class="modal" id="sopModal"><div class="box" style="width:min(720px,100%)"><h3 id="sopTitle">Add a SOP</h3>
+<label>Tier</label><select id="sTier"><option value="L1">L1 · first contact</option><option value="L2">L2 · devices &amp; network</option><option value="L3">L3 · servers &amp; security</option><option value="L4">L4 · vendors &amp; logistics</option><option value="shared">shared · every agent</option></select>
+<label>Title</label><input id="sTitle" placeholder="Symptom or request, e.g. VPN cannot connect from home">
+<label>Procedure</label><textarea id="sBody" rows="12" placeholder="Symptom → checks → fix steps (name the desk's tools/scripts) → when to hand off"></textarea>
+<div class="row end"><button type="button" class="btn" onclick="closeModal('sopModal')">Cancel</button><button type="button" class="btn primary slim" id="sGo" onclick="saveSop()">Save</button></div></div></div>
+<script>
+const SOPS={__import__("json").dumps({r["key"]: {"title": r["title"], "content": r["content"], "tier": r["tier"]} for r in rows})};let editing=null;
+function newSop(){{editing=null;document.getElementById('sopTitle').textContent='Add a SOP';document.getElementById('sTier').value='L1';document.getElementById('sTitle').value='';document.getElementById('sBody').value='';}}
+function editSop(k){{editing=k;const s=SOPS[k];document.getElementById('sopTitle').textContent='Edit '+k;document.getElementById('sTier').value=s.tier;document.getElementById('sTitle').value=s.title;document.getElementById('sBody').value=s.content;openModal('sopModal');}}
+async function saveSop(){{const tier=document.getElementById('sTier').value,title=document.getElementById('sTitle').value.trim(),content=document.getElementById('sBody').value.trim();if(!title||!content)return;
+ const r=editing?await fetch('/sops/'+editing,{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{title,content,tier}})}})
+                :await fetch('/sops',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{tier,title,content}})}});
+ if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
+async function setStatus(k,status){{const r=await fetch('/sops/'+k+'/status',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{status}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
+</script>"""
     return _page("Knowledge", body, wide=True, user=user, active="knowledge")
 
 

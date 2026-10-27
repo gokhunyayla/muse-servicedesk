@@ -378,19 +378,27 @@ def request_manager_approval(ctx: Ctx, employee_no: str, request: str) -> dict:
 
 # ---- knowledge & learning ------------------------------------------------------------------
 
-@tool("Search this tier's SOP knowledge pool. Do this before acting on any request.", ALL, query=STR)
+@tool("Search the knowledge base (your tier's pool, the shared pool, then other tiers). Do this before acting on "
+      "any request. Results carry the full SOP text and a key; follow only what the text says and cite it as "
+      "[SOP:key]. An empty result means the desk has no procedure for this.", ALL, query=STR)
 def search_knowledge(ctx: Ctx, query: str) -> dict:
     from app import knowledge
-    return {"ok": True, "results": knowledge.search(ctx.agent, query)}
+    results = knowledge.search(ctx.agent, query, db=ctx.db)
+    return {"ok": True, "results": results, "matched": bool(results),
+            "note": "" if results else "No SOP covers this; say so to the employee and proceed on general expertise."}
 
 
-@tool("Write a new SOP into this tier's pool when you solved something the pool did not cover.",
+@tool("Propose a new SOP for your tier when you solved something no SOP covered: symptom → checks → fix steps "
+      "with the exact tools you used → when to hand off. It becomes a draft an admin publishes.",
       ALL, title=STR, content=STR)
 def write_sop(ctx: Ctx, title: str, content: str) -> dict:
     from app import knowledge
-    sid = knowledge.write(ctx.agent, title, content)
-    log(ctx.db, ctx.ticket.id, ctx.agent, "note", f"new SOP written: {sid}")
-    return {"ok": True, "sop_id": sid}
+    from app.sla import get_setting
+    auto = get_setting("supervisor", {}).get("auto_publish_sops", False)
+    key = knowledge.write(ctx.agent, title, content, author=ctx.agent, source="agent",
+                          status="published" if auto else "draft", ticket_ids=[ctx.ticket.id] if ctx.ticket else [], db=ctx.db)
+    log(ctx.db, ctx.ticket.id, ctx.agent, "note", f"SOP proposed: {key} ({'published' if auto else 'draft, awaiting an admin'})")
+    return {"ok": True, "sop_id": key, "status": "published" if auto else "draft"}
 
 
 # ---- endpoint & notifications ---------------------------------------------------------------

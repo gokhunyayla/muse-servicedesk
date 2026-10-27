@@ -27,8 +27,11 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   and can only execute its own. Authority lives in code, not in prompts.
 * **Agents find each other.** Each agent gets `handoff_<tier>` tools and the model picks the target
   (`app/agents.py`). L1 can go straight to L4; L2 can pull in L3.
-* **Knowledge pools + learning loop.** Each tier has Markdown SOPs (`data/sops/<tier>/`). Agents search
-  them first (`search_knowledge`) and write new ones when they solve something uncovered (`write_sop`).
+* **Knowledge base + learning loop.** SOPs live in the database: one pool per tier plus a `shared` pool every
+  agent sees (`data/sops/` is only the first seed). Agents search before acting (`search_knowledge` returns the
+  full text with a stable key) and must follow only what the text says, citing `[SOP:key]`; when nothing matches
+  they say so instead of inventing a procedure. Agents and the Supervisor propose new SOPs as drafts; desk
+  users add, edit (versioned) and retire SOPs and publish drafts at `/knowledge`.
 * **General, not scripted.** There is no per-scenario code. The scenarios below are acceptance tests over
   the same tools, SOPs and lifecycle; a problem nobody anticipated goes through the same path.
 * **Supervisor.** A desk-manager agent runs on a schedule (Settings → Supervisor; manual by default, automatic on a cadence if enabled): clusters open tickets into
@@ -84,7 +87,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # database URL, port, time zone — no API keys here
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 72 offline tests with a scripted model
+.venv/bin/python -m pytest      # 75 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.

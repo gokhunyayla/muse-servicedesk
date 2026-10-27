@@ -16,7 +16,7 @@ from datetime import timedelta
 
 import httpx
 
-from app.db import Event, SopDraft, SupervisorRun, Ticket, _now, log, session
+from app.db import Event, Sop, SupervisorRun, Ticket, _now, log, session
 from app.llm import ContentFiltered, get_llm
 from app.sla import DEFAULT_SLA, get_setting, put_setting, timing
 from app.tools import STR, Ctx, run_tool, tool, tools_for
@@ -156,15 +156,18 @@ def fetch_page(ctx: Ctx, url: str) -> dict:
       ticket_ids={"type": "array", "items": {"type": "integer"}})
 def propose_sop(ctx: Ctx, tier: str, title: str, content: str, sources: list[str], reason: str,
                 ticket_ids: list[int] | None = None) -> dict:
-    if tier not in ("L1", "L2", "L3", "L4"):
-        return {"ok": False, "error": "tier must be L1..L4"}
-    d = SopDraft(tier=tier, title=title[:255], content=content, sources=list(sources or []), reason=reason,
-                 ticket_ids=list(ticket_ids or []))
-    ctx.db.add(d)
-    ctx.db.flush()
-    if config().get("auto_publish_sops"):
-        publish_draft(ctx.db, d, by="supervisor")
-    return {"ok": True, "draft_id": d.id, "status": d.status}
+    from app import knowledge
+    if tier not in ("L1", "L2", "L3", "L4", "shared"):
+        return {"ok": False, "error": "tier must be L1..L4 or shared"}
+    auto = bool(config().get("auto_publish_sops"))
+    body = content.strip() + (f"\n\nWhy this SOP exists: {reason}" if reason else "")
+    key = knowledge.write(tier, title, body, author="supervisor", source="supervisor",
+                          status="published" if auto else "draft", ticket_ids=ticket_ids, sources=sources, db=ctx.db)
+    for i in ticket_ids or []:
+        t = ctx.db.get(Ticket, int(i))
+        if t:
+            log(ctx.db, t.id, "supervisor", "note", f"SOP {'published' if auto else 'drafted'} for {tier}: {title} ({key})")
+    return {"ok": True, "sop_id": key, "status": "published" if auto else "draft"}
 
 
 @tool("Only a person can unblock this (access, purchase, policy, on-site work, vendor contact): open a "
@@ -299,19 +302,15 @@ def search_web(query: str, limit: int = 6) -> list[dict]:
 
 # ---- drafts ----------------------------------------------------------------------------------
 
-def publish_draft(db, d: SopDraft, by: str) -> str:
+def publish_draft(db, sop: Sop, by: str) -> str:
+    """Publish a draft SOP (admin decision) and note it on the tickets it came from."""
     from app import knowledge
-    body = d.content.strip()
-    if d.sources:
-        body += "\n\nSources:\n" + "\n".join(f"- {s}" for s in d.sources)
-    body += f"\n\n_Written by the Supervisor from research; published by {by}._"
-    d.sop_id = knowledge.write(d.tier, d.title, body)
-    d.status, d.decided_by = "published", by
-    for i in d.ticket_ids or []:
+    knowledge.set_status(sop.key, "published", by, db=db)
+    for i in sop.ticket_ids or []:
         t = db.get(Ticket, int(i))
         if t:
-            log(db, t.id, "supervisor", "note", f"SOP '{d.title}' published to {d.tier} ({d.sop_id})")
-    return d.sop_id
+            log(db, t.id, "supervisor", "note", f"SOP '{sop.title}' published to {sop.tier} ({sop.key})")
+    return sop.key
 
 
 # ---- the pass --------------------------------------------------------------------------------
@@ -374,7 +373,7 @@ def run(trigger: str = "schedule") -> SupervisorRun:
                 from app import knowledge
                 from app.tools import REGISTRY
                 tool_names = sorted(n for n, t in REGISTRY.items() if any(x in t.tiers for x in ("L1", "L2", "L3", "L4")))
-                sops = {tier: knowledge.titles(tier) for tier in ("L1", "L2", "L3", "L4")}
+                sops = {tier: knowledge.titles(tier, db=db) for tier in ("L1", "L2", "L3", "L4")}
                 prompt = PROMPT.format(max_research=cfg["max_research"], tools=", ".join(tool_names),
                                        sops=json.dumps(sops, ensure_ascii=False), clusters=json.dumps(clusters, ensure_ascii=False),
                                        signals=json.dumps(signals, ensure_ascii=False), open_sup=open_sup,
@@ -437,13 +436,13 @@ def stats(since=None) -> dict:
                 if a.get("ok"):
                     c[a["tool"]] += 1
             c["errors"] += bool(r.error)
-        dq = db.query(SopDraft)
+        dq = db.query(Sop).filter(Sop.source == "supervisor")
         if since:
-            dq = dq.filter(SopDraft.created_at >= since)
+            dq = dq.filter(Sop.created_at >= since)
         drafts = dq.all()
         return {"runs": len(runs), "problems": c["create_problem"], "sops_drafted": len(drafts),
                 "sops_published": sum(d.status == "published" for d in drafts),
-                "sops_pending": sum(d.status == "pending" for d in drafts),
+                "sops_pending": sum(d.status == "draft" for d in drafts),
                 "human_asks": c["open_human_ticket"], "notes": c["note_ticket"],
                 "sla_actions": c["reassign_ticket"] + c["nudge_employee"] + c["remind_approver"] + c["bump_to_human"],
                 "research": c["web_search"] + c["fetch_page"], "errors": c["errors"],

@@ -101,6 +101,8 @@ def init_db(url: str | None = None) -> None:
     _engine = create_engine(url, pool_pre_ping=True)
     Base.metadata.create_all(_engine)
     _Session = sessionmaker(_engine, expire_on_commit=False)
+    from app import knowledge
+    knowledge.seed_from_files()          # first run: load data/sops/*.md into the knowledge base
 
 
 @contextmanager
@@ -194,23 +196,6 @@ class SupervisorRun(Base):
     error: Mapped[str] = mapped_column(Text, default="")
 
 
-class SopDraft(Base):
-    """A SOP the Supervisor wrote from research; an admin publishes or rejects it."""
-    __tablename__ = "sop_drafts"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    tier: Mapped[str] = mapped_column(String(8))
-    title: Mapped[str] = mapped_column(String(255))
-    content: Mapped[str] = mapped_column(Text)
-    sources: Mapped[list] = mapped_column(JSON, default=list)
-    reason: Mapped[str] = mapped_column(Text, default="")        # the gap it fills
-    ticket_ids: Mapped[list] = mapped_column(JSON, default=list)
-    status: Mapped[str] = mapped_column(String(16), default="pending")   # pending | published | rejected
-    decided_by: Mapped[str] = mapped_column(String(255), default="")
-    sop_id: Mapped[str] = mapped_column(String(128), default="")
-
-
 class Report(Base):
     """A generated desk report (daily / weekly / monthly) and whether it was e-mailed."""
     __tablename__ = "reports"
@@ -226,3 +211,38 @@ class Report(Base):
     numbers: Mapped[dict] = mapped_column(JSON, default=dict)
     sent: Mapped[bool] = mapped_column(default=False)
     error: Mapped[str] = mapped_column(String(300), default="")
+
+
+class Sop(Base):
+    """Knowledge base entry: a procedure a tier (or everyone, tier='shared') follows. Drafts wait for an
+    admin; published ones are what agents search; retired ones stay for history."""
+    __tablename__ = "sops"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), unique=True)     # stable id used in citations, e.g. L1/001-vpn
+    tier: Mapped[str] = mapped_column(String(8))                    # L1..L4 | shared
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="published")   # draft | published | retired
+    author: Mapped[str] = mapped_column(String(255), default="")  # agent tier, 'supervisor', or a desk user's e-mail
+    source: Mapped[str] = mapped_column(String(32), default="human")       # seed | human | agent | supervisor
+    version: Mapped[int] = mapped_column(default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    updated_by: Mapped[str] = mapped_column(String(255), default="")
+    ticket_ids: Mapped[list] = mapped_column(JSON, default=list)
+    sources: Mapped[list] = mapped_column(JSON, default=list)      # URLs the content was drawn from
+    used: Mapped[int] = mapped_column(default=0)                   # how often it came up in searches
+
+
+class SopVersion(Base):
+    """Previous content of a SOP, kept on every edit."""
+    __tablename__ = "sop_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sop_id: Mapped[int] = mapped_column(ForeignKey("sops.id"))
+    version: Mapped[int] = mapped_column()
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    saved_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    saved_by: Mapped[str] = mapped_column(String(255), default="")

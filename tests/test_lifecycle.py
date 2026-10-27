@@ -103,6 +103,9 @@ def test_write_sop_adds_to_pool_and_endpoint_scripts_are_allow_listed():
         results = [e.data for e in ticket.events if e.kind == "tool_result"]
     assert results[0]["ok"] is False and "allow-listed" in results[0]["error"]
     assert results[1]["ok"] is True
+    assert results[2]["status"] == "draft"                                  # agents propose; admins publish
+    assert knowledge.search("L1", "yazıcı kuyruğu")[0]["title"] != "Yazıcı kuyruğu takılması"
+    knowledge.set_status(results[2]["sop_id"], "published", "admin")
     assert knowledge.search("L1", "yazıcı kuyruğu")[0]["title"] == "Yazıcı kuyruğu takılması"
 
 

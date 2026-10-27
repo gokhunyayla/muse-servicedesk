@@ -313,41 +313,72 @@ def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
                 for r in db.query(SupervisorRun).order_by(SupervisorRun.id.desc()).limit(min(limit, 100))]
 
 
-@app.get("/sops/drafts")
-def sop_drafts(status: str = "pending", user=Depends(current_user)) -> list[dict]:
-    from app.db import SopDraft
+@app.get("/sops")
+def list_sops(status: str | None = None, user=Depends(current_user)) -> list[dict]:
+    from app import knowledge
+    return knowledge.listing(status)
+
+
+class SopIn(BaseModel):
+    tier: str
+    title: str
+    content: str
+    publish: bool = True
+
+
+@app.post("/sops")
+def create_sop(s: SopIn, request: Request, user=Depends(current_user)) -> dict:
+    """A desk user adds a SOP. Admins publish directly; agents' entries wait for an admin."""
+    from app import knowledge
+    check_origin(request)
+    if s.tier not in knowledge.TIERS:
+        raise HTTPException(422, "tier must be L1..L4 or shared")
+    status = "published" if (s.publish and user.role == "admin") else "draft"
+    key = knowledge.write(s.tier, s.title, s.content, author=user.email, source="human", status=status)
     with session() as db:
-        q = db.query(SopDraft).order_by(SopDraft.id.desc())
-        if status != "all":
-            q = q.filter(SopDraft.status == status)
-        return [{"id": d.id, "tier": d.tier, "title": d.title, "content": d.content, "sources": d.sources, "reason": d.reason,
-                 "ticket_ids": d.ticket_ids, "status": d.status, "created_at": d.created_at.isoformat(), "sop_id": d.sop_id}
-                for d in q.limit(100)]
+        audit(db, user.email, "sop.create", target=key, detail=f"{s.tier}: {s.title} [{status}]")
+    return {"key": key, "status": status}
 
 
-class DraftDecision(BaseModel):
-    decision: str          # publish | reject
+class SopEdit(BaseModel):
+    title: str
+    content: str
+    tier: str | None = None
 
 
-@app.post("/sops/drafts/{draft_id}")
-def decide_draft(draft_id: int, d: DraftDecision, request: Request, user=Depends(current_user)) -> dict:
-    from app.auth import admin_user
-    from app.db import SopDraft
+@app.put("/sops/{key:path}")
+def edit_sop(key: str, s: SopEdit, request: Request, user=Depends(current_user)) -> dict:
+    from app import knowledge
+    check_origin(request)
+    if not knowledge.update(key, s.title, s.content, by=user.email, tier=s.tier):
+        raise HTTPException(404)
+    with session() as db:
+        audit(db, user.email, "sop.edit", target=key, detail=s.title)
+    return {"key": key, "ok": True}
+
+
+class SopStatus(BaseModel):
+    status: str          # published | retired | draft
+
+
+@app.post("/sops/{key:path}/status")
+def sop_status(key: str, s: SopStatus, request: Request, user=Depends(current_user)) -> dict:
+    """Publish / retire (admin only)."""
+    from app import knowledge
     from app.supervisor import publish_draft
     if user.role != "admin":
         raise HTTPException(403, "admin only")
     check_origin(request)
     with session() as db:
-        dr = db.get(SopDraft, draft_id)
-        if dr is None or dr.status != "pending":
-            raise HTTPException(404, "no pending draft")
-        if d.decision == "publish":
-            sop_id = publish_draft(db, dr, by=user.name)
-            audit(db, user.email, "sop.published", target=dr.id, detail=f"{dr.tier}: {dr.title}")
-            return {"id": dr.id, "status": "published", "sop_id": sop_id}
-        dr.status, dr.decided_by = "rejected", user.name
-        audit(db, user.email, "sop.rejected", target=dr.id, detail=dr.title)
-        return {"id": dr.id, "status": "rejected"}
+        sop = knowledge.get(key, db=db)
+        if sop is None:
+            raise HTTPException(404)
+        if s.status == "published":
+            publish_draft(db, sop, by=user.name)
+        elif not knowledge.set_status(key, s.status, user.name, db=db):
+            raise HTTPException(422, "bad status")
+        audit(db, user.email, f"sop.{s.status}", target=key, detail=sop.title)
+    return {"key": key, "status": s.status}
 
 
 @app.post("/approvals/{approval_id}", dependencies=[Depends(api_key)])

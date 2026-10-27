@@ -4,7 +4,7 @@ import pytest
 
 from app import knowledge, supervisor, systems
 from app.agents import handle_message
-from app.db import Outbound, SopDraft, SupervisorRun, Ticket, init_db, session
+from app.db import Outbound, Sop, SupervisorRun, Ticket, init_db, session
 from app.llm import Reply, ScriptedLLM, ToolCall, set_llm
 from app.sla import put_setting
 
@@ -67,23 +67,24 @@ def test_supervisor_merges_a_problem_drafts_a_sop_and_asks_a_human(monkeypatch):
     with session() as db:
         assert db.get(Ticket, 1).title == "[INCIDENT] Exchange outage" and db.get(Ticket, 2).incident_id == 1
         assert db.query(Outbound).count() == 3
-        d = db.query(SopDraft).one()
-        assert d.status == "pending" and d.tier == "L1"
+        d = db.query(Sop).filter(Sop.source == "supervisor").one()
+        assert d.status == "draft" and d.tier == "L1" and d.sources == ["https://vendor.example/kb"]
         h = db.query(Ticket).filter(Ticket.title.like("[Supervisor]%")).one()
         assert h.status == "escalated" and h.owner == "human" and "projektör" in h.title
         assert db.query(SupervisorRun).count() == 1
 
 
-def test_draft_publish_writes_the_sop_and_auto_publish_setting():
+def test_draft_publish_and_auto_publish_setting():
+    from app.tools import Ctx
     with session() as db:
-        d = SopDraft(tier="L2", title="Wi-Fi roaming drops", content="Steps…", sources=["https://x"], reason="gap")
-        db.add(d)
-        db.flush()
-        sop_id = supervisor.publish_draft(db, d, by="Admin")
-        assert d.status == "published" and sop_id
+        ctx = Ctx(db=db, ticket=None, agent="SUP")
+        res = supervisor.propose_sop(ctx, "L2", "Wi-Fi roaming drops", "Steps…", ["https://x"], "gap")
+        assert res["status"] == "draft"
+        assert "Wi-Fi roaming drops" not in knowledge.titles("L2")          # drafts are invisible to agents
+        sop = knowledge.get(res["sop_id"], db=db)
+        supervisor.publish_draft(db, sop, by="Admin")
     assert "Wi-Fi roaming drops" in knowledge.titles("L2")
     put_setting("supervisor", {**supervisor.DEFAULT_SUPERVISOR, "auto_publish_sops": True})
-    from app.tools import Ctx
     with session() as db:
         res = supervisor.propose_sop(Ctx(db=db, ticket=None, agent="SUP"), "L3", "Patch rollback", "…", [], "gap")
         assert res["status"] == "published"

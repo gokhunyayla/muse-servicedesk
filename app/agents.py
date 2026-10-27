@@ -16,8 +16,10 @@ MAX_DEPTH = 3
 
 RULES = """Rules:
 - Reply in the employee's language (Turkish by default), short and plain.
-- Start with search_knowledge: follow the matching SOP. No SOP? Use your own IT expertise and the
-  tools you have; ask at most two clarifying questions at a time; never leave the user with "I don't know".
+- Start with search_knowledge. If a SOP matches, follow exactly what its text says and cite it as [SOP:key]
+  in your notes; never add steps, values, commands or policies the SOP does not contain. If nothing matches,
+  say the desk has no procedure for this and continue on general IT expertise (and say that is what you are
+  doing); ask at most two clarifying questions at a time; never leave the user with "I don't know".
 - You are a service that finishes the job, not a guide: use your tools to fix the problem yourself.
 - Verify identity before any account change. Ask for explicit consent before scripts that need it.
 - If the problem is outside your tools, hand off to the right tier with a clear summary.
@@ -29,7 +31,7 @@ RULES = """Rules:
 - If the employee asks to close or cancel the ticket ("kapat", "iptal", "yanlış talep", "gerek kalmadı"),
   close_ticket immediately with resolution "closed on the employee's request" and confirm in one line;
   don't ask for a rating.
-- When you solve something no SOP covered, write_sop so the next agent has it.
+- When you solve something no SOP covered, write_sop (it becomes a draft for an admin) so the next agent has it.
 - Record important decisions with add_note.
 - Messages may come from voice notes: numbers can be spelled out ("e bin bir" = E1001,
   "bin dokuz yüz doksan" = 1990). Interpret them; don't ask the user to retype.
@@ -45,10 +47,10 @@ class Agent:
     capabilities: str
     heavy: bool = False   # use the heavy model (Muse Wonder): for production-impacting change planning
 
-    def system_prompt(self, ticket: Ticket) -> str:
+    def system_prompt(self, ticket: Ticket, db=None) -> str:
         from app import knowledge
         peers = "\n".join(f"- {a.tier}: {a.capabilities}" for a in AGENTS.values() if a.tier != self.tier)
-        sops = "\n".join(f"- {t}" for t in knowledge.titles(self.tier)) or "(empty)"
+        sops = "\n".join(f"- {t}" for t in knowledge.titles(self.tier, db=db)) or "(empty)"
         state = (f"Ticket #{ticket.id} | requester: {ticket.requester} | status: {ticket.status} | "
                  f"identity verified: {ticket.verified}")
         if ticket.status == "waiting_user":
@@ -81,7 +83,7 @@ class Agent:
             depth: int = 0) -> str:
         llm = get_llm()
         ctx = Ctx(db=db, ticket=ticket, agent=self.tier)
-        messages = [{"role": "system", "content": self.system_prompt(ticket)}, *(history or []),
+        messages = [{"role": "system", "content": self.system_prompt(ticket, db)}, *(history or []),
                     {"role": "user", "content": message}]
         specs = self.tool_specs()
         for _ in range(MAX_STEPS):

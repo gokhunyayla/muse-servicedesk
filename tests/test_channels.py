@@ -229,3 +229,40 @@ def test_secrets_are_managed_in_the_console_and_encrypted(desk, tmp_path, monkey
     assert "EAAtoken" not in page and "…-xyz" in page and "configured" in page
     desk.post("/settings/secrets?tab=channels", data={"clear_DEMO_MANAGER_PHONE": "1"}, follow_redirects=False)
     assert systems.USERS["E1002"]["phone"] == "+905551110002"
+
+
+def test_knowledge_base_search_across_pools_and_human_editing(desk):
+    from app import knowledge
+    # seeds loaded; L2 can reach an L1 SOP (marked) and the shared pool is seen by everyone
+    hits = knowledge.search("L2", "yazıcı kuyruğu takıldı")
+    assert hits and hits[0]["id"].startswith("L1/") and hits[0]["from_other_tier"] is True and hits[0]["content"]
+    r = desk.post("/sops", json={"tier": "shared", "title": "Guest Wi-Fi password", "content": "Ask reception; rotates monthly."}).json()
+    assert r["status"] == "published"
+    assert knowledge.search("L4", "guest wifi password")[0]["tier"] == "shared"
+    assert "Guest Wi-Fi password (shared)" in knowledge.titles("L3")
+    # edit keeps a version; retire hides it from agents; audit records it
+    assert desk.put(f"/sops/{r['key']}", json={"title": "Guest Wi-Fi password", "content": "Ask reception; rotates weekly."}).json()["ok"]
+    assert knowledge.get(r["key"]).version == 2
+    assert desk.post(f"/sops/{r['key']}/status", json={"status": "retired"}).json()["status"] == "retired"
+    assert all(h["id"] != r["key"] for h in knowledge.search("L4", "guest wifi password"))
+    assert any(a["action"] == "sop.retired" for a in desk.get("/audit.json").json())
+    assert "Knowledge base" in desk.get("/knowledge").text
+
+
+def test_agent_written_sops_are_drafts_until_an_admin_publishes(desk):
+    from app import knowledge
+    set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "write_sop", {"title": "Projector HDMI handshake", "content": "Power-cycle the switcher."})]),
+                         Reply(text="Yazdım.")]))
+    desk.post("/messages", json={"requester": "+905551110001", "text": "projektör görüntü vermiyor"})
+    drafts = [s for s in knowledge.listing("draft") if s["source"] == "agent"]
+    assert drafts and drafts[0]["author"] == "L1" and drafts[0]["ticket_ids"] == [1]
+    assert knowledge.search("L1", "projector hdmi") == []                      # not visible until published
+    desk.post(f"/sops/{drafts[0]['key']}/status", json={"status": "published"})
+    assert knowledge.search("L1", "projector hdmi")[0]["title"] == "Projector HDMI handshake"
+
+
+def test_search_result_tells_the_agent_when_nothing_matches():
+    from app.tools import Ctx, run_tool
+    with session() as db:
+        out = run_tool(Ctx(db=db, ticket=None, agent="L1"), "search_knowledge", {"query": "quantum flux capacitor"})
+    assert out["matched"] is False and "No SOP covers this" in out["note"]
