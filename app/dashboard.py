@@ -31,13 +31,16 @@ def period_start(period: str | None):
 
 
 @router.get("/stats")
-def stats(period: str | None = None) -> dict:
+def stats(period: str | None = None, owner: str | None = None) -> dict:
+    """KPIs, top issues and tier load for the selected period; `owner` narrows everything except the
+    per-tier cards, which always show the whole period so the cards stay comparable."""
     with session() as db:
         since = period_start(period)
         q = db.query(Ticket)
         if since:
             q = q.filter(Ticket.created_at >= since)
-        tickets = q.all()
+        all_tickets = q.all()
+        tickets = [t for t in all_tickets if not owner or t.owner == owner]
         ids = {t.id for t in tickets}
         by_status = Counter(t.status for t in tickets)
         resolved = [t for t in tickets if t.status == "resolved"]
@@ -49,8 +52,8 @@ def stats(period: str | None = None) -> dict:
             if e.ticket_id in ids:
                 handoffs[e.content.split(":")[0].strip()] += 1
         tool_calls = Counter(e.actor for e in db.query(Event).filter(Event.kind == "tool_call") if e.ticket_id in ids)
-        by_owner = Counter(t.owner for t in tickets)
-        open_by_owner = Counter(t.owner for t in tickets if t.status != "resolved")
+        by_owner = Counter(t.owner for t in all_tickets)
+        open_by_owner = Counter(t.owner for t in all_tickets if t.status != "resolved")
         cats = Counter()
         for t in tickets:
             title = t.title.lower()
@@ -62,7 +65,8 @@ def stats(period: str | None = None) -> dict:
             "avg_rating": round(sum(rated) / len(rated), 2) if rated else None, "ratings": len(rated),
             "top_issues": cats.most_common(6), "handoffs": dict(handoffs),
             "tool_calls_by_tier": dict(tool_calls), "by_owner": dict(by_owner),
-            "open_by_owner": dict(open_by_owner), "period": period or "all",
+            "open_by_owner": dict(open_by_owner), "period": period or "all", "owner": owner or "",
+            "period_total": len(all_tickets), "period_open": sum(1 for t in all_tickets if t.status != "resolved"),
         }
 
 
@@ -157,12 +161,12 @@ document.querySelectorAll('#period button').forEach(b=>b.onclick=()=>{period=b.d
 function pick(o){owner=owner===o?'':o;load();}
 const TIERS=[['','All tickets'],['L1','L1 · first contact'],['L2','L2 · devices & network'],['L3','L3 · servers & security'],['L4','L4 · vendors & logistics'],['human','Human engineer']];
 async function load(){
- const qp='?period='+period, s=await (await fetch('/stats'+qp)).json(), ts=await (await fetch('/tickets'+qp+(owner?'&owner='+owner:''))).json();
+ const qp='?period='+period+(owner?'&owner='+owner:''), s=await (await fetch('/stats'+qp)).json(), ts=await (await fetch('/tickets'+qp)).json();
  const st=s.by_status||{}, bo=s.by_owner||{}, ob=s.open_by_owner||{};
  $('#cards').innerHTML=TIERS.map(([k,label])=>{const n=k?(bo[k]||0):s.total,o=k?(ob[k]||0):(s.total-(st.resolved||0));
-  return `<button class="tcard ${owner===k?'on':''}" onclick="pick('${k}')"><b>${n}</b><span>${label}</span><br><em>${o} open</em></button>`}).join('');
+  return `<button class="tcard ${owner===k?'on':''}" onclick="pick('${k}')"><b>${k?n:s.period_total}</b><span>${label}</span><br><em>${k?o:s.period_open} open</em></button>`}).join('');
  $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');
- $('#scope').textContent=(period==='all'?'all time':'this '+period.replace('today','day'))+' · '+s.total+' tickets';
+ $('#scope').textContent=(period==='all'?'all time':'this '+period.replace('today','day'))+' · '+s.period_total+' tickets';
  $('#kpis').innerHTML=[['Total',s.total],['Open',(st.open||0)+(st.waiting_user||0)+(st.waiting_approval||0)],['Escalated',st.escalated||0],
   ['Auto-resolved',Math.round(s.auto_resolution_rate*100)+'%'],['Satisfaction',s.avg_rating?s.avg_rating+' / 5':'—']]
   .map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');
