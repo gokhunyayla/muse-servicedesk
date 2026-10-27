@@ -258,7 +258,8 @@ Your duties, in order:
 4. ASK A HUMAN: for (b), open_human_ticket with exactly what is needed (access, purchase, policy decision,
    on-site action, vendor contact) and why, referencing the affected tickets. Don't open duplicates: if a
    [Supervisor] ticket for the same need is already open, note_ticket instead.
-5. Finish with a short summary in English: what you noticed, what you did, what you deliberately skipped.
+5. Finish with a short summary in English, PLAIN TEXT (no markdown, no bullets, no backticks): first one
+   sentence with the outcome, then 2-5 short sentences on what you noticed, did and deliberately skipped.
 
 Desk's own tools agents can use: {tools}
 SOP pools already present: {sops}

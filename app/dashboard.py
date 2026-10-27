@@ -165,7 +165,14 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;color:#fff;white-space:nowrap}
 .open{background:var(--accent)}.waiting_user{background:var(--warn);color:#000}.waiting_approval{background:#8a2be2}.resolved{background:var(--ok)}.escalated{background:#d9480f}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
-.tiers{display:flex;flex-wrap:wrap;gap:6px}.suprun{padding:8px 0;border-bottom:1px solid var(--line);color:var(--fg)}.suprun small{color:var(--muted)}
+.tiers{display:flex;flex-wrap:wrap;gap:6px}
+h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.run{border-bottom:1px solid var(--line)}.run summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:center;padding:9px 4px}
+.run summary::-webkit-details-marker{display:none}.run .when{font-weight:600;white-space:nowrap}.run .first{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
+.run .chips{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.chip{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.run .body{padding:4px 4px 12px}.run .body p{margin:0 0 6px;line-height:1.5}.run .body small{color:var(--muted)}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+@media(max-width:900px){.run summary{grid-template-columns:1fr auto}.run .first,.run .chips{grid-column:1/-1;justify-content:flex-start}}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
 .seg button{font:inherit;font-size:12px;padding:6px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
 .seg button.on{background:var(--accent);color:#fff}@media(max-width:600px){.seg button{padding:6px 7px}}
@@ -215,8 +222,8 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <section class="card"><div class="kpis" id="kpis"></div></section>
 <section class="card"><h3 style="margin-top:0">Top issues</h3><div id="issues"></div></section>
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
-<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor <small id="supMode"></small></h3><div class="actions"><a class="btn" href="/knowledge">Knowledge</a><a class="btn" href="/settings?tab=supervisor">Settings</a><button class="btn primary" id="runBtn" onclick="runSupervisor()">Run now</button></div></div>
-<div class="kpis six" id="supKpis" style="margin-top:10px"></div><div id="sup" class="muted" style="margin-top:10px">—</div></section>
+<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor <small id="supMode"></small></h3><div class="actions"><button class="btn primary" id="runBtn" onclick="runSupervisor()">Run now</button></div></div>
+<div class="kpis six" id="supKpis" style="margin-top:10px"></div><h4 class="sub">Recent runs</h4><div id="sup" class="runs">—</div></section>
 </main>
 <main class="tix only-tickets">
 <section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
@@ -278,9 +285,13 @@ async function load(){
   const h=s.handoffs||{};$('#handoffs').innerHTML=Object.keys(h).length?Object.entries(h).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · '):'none';
   try{const ss=await (await fetch('/supervisor/stats?period='+period)).json();$('#supMode').textContent=ss.mode==='auto'?'· automatic':'· manual';
    $('#supKpis').innerHTML=[['Runs',ss.runs],['Problems merged',ss.problems],['SOPs drafted',ss.sops_drafted],['SOPs published',ss.sops_published],['Human asks',ss.human_asks],['Research calls',ss.research]].map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');}catch(e){}
-  try{const runs=await (await fetch('/supervisor/runs?limit=3')).json();
-   $('#sup').innerHTML=runs.length?runs.map(r=>`<div class="suprun"><b>${fmt(r.started_at)}</b> <small>${r.trigger}</small>${r.error?` <span class="pill escalated">error</span>`:''}
-    <div>${esc(r.summary||r.error||'running…')}</div><small>${(r.findings&&r.findings.clusters||[]).length} clusters · ${(r.findings&&r.findings.signals||[]).length} failure signals · ${(r.actions||[]).length} actions${(r.actions||[]).length?': '+r.actions.map(a=>a.tool).join(', '):''}</small></div>`).join(''):'No runs yet. The scheduler runs it on the cadence set in Settings.';}catch(e){}
+  try{const runs=await (await fetch('/supervisor/runs?limit=5')).json();
+   $('#sup').innerHTML=runs.length?runs.map(r=>{const c={};(r.actions||[]).forEach(a=>{if(a.ok)c[a.tool]=(c[a.tool]||0)+1});
+    const chips=[['create_problem','problem'],['propose_sop','SOP draft'],['open_human_ticket','human ask'],['note_ticket','note'],['read_ticket','ticket read'],['web_search','search'],['fetch_page','page']].filter(([k])=>c[k]).map(([k,l])=>`<span class="chip">${c[k]} ${l}${c[k]>1?'s':''}</span>`).join('');
+    const sig=(r.findings&&r.findings.signals||[]).length,cl=(r.findings&&r.findings.clusters||[]).length;
+    const txt=plain(r.summary||r.error||'running…');const first=txt.split(/(?<=[.!?])\\s+/)[0];
+    return `<details class="run"><summary><span class="when">${fmt(r.started_at)}</span><span class="tag">${r.trigger}</span>${r.error?'<span class="pill escalated">error</span>':''}<span class="first">${esc(first)}</span><span class="chips">${chips||'<span class="chip">no actions</span>'}</span></summary>
+     <div class="body"><p>${esc(txt)}</p><small>Looked at: ${cl} emerging cluster${cl===1?'':'s'}, ${sig} failure signal${sig===1?'':'s'}${r.finished_at?' · took '+dur((new Date(r.finished_at)-new Date(r.started_at))/1000):''}</small></div></details>`}).join(''):'<small>No runs yet. Press Run now, or switch the mode to automatic in Settings.</small>';}catch(e){}
  }else{
   const ts=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
   $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');$('#scope').textContent+=' · '+ts.length+' tickets';
@@ -306,6 +317,7 @@ async function doAssign(){const id=$('#assignModal').dataset.id;$('#aGo').disabl
  await fetch('/tickets/'+id+'/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner:$('#aOwner').value,note:$('#aNote').value.trim(),assignee:$('#aName').value.trim()})});
  $('#aGo').disabled=false;$('#aGo').textContent='Assign';closeModal('assignModal');$('#aNote').value='';await load();show(id);}
 const AGENT_LABEL={L1:'L1 · first contact',L2:'L2 · devices & network',L3:'L3 · servers & security',L4:'L4 · vendors & logistics'};
+function plain(md){return String(md).replace(/\\*\\*/g,'').replace(/`/g,'').replace(/^\\s*[-*]\\s+/gm,'').replace(/\\s*\\n+\\s*/g,' ').trim();}
 function ago(x){const s=(Date.now()-new Date(x))/1000;if(s<60)return 'now';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d';}
 function fmt(x){try{const d=new Date(x);return d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}catch(e){return x}}
 function tstamp(x){try{return new Date(x).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
