@@ -300,3 +300,24 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(16))          # user | assistant
     content: Mapped[str] = mapped_column(Text)
     actions: Mapped[list] = mapped_column(JSON, default=list)   # tool calls made while answering
+
+
+class Connector(Base):
+    """An MCP server the agents may use (Azure/M365, Cisco, a firewall, anything with an MCP endpoint)."""
+    __tablename__ = "connectors"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)     # slug used in tool names: mcp.<name>.<tool>
+    label: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(16))                   # stdio | http
+    command: Mapped[str] = mapped_column(Text, default="")          # stdio: command line
+    url: Mapped[str] = mapped_column(String(500), default="")       # http: endpoint
+    secrets: Mapped[str] = mapped_column(Text, default="")          # encrypted JSON: env (stdio) / headers (http)
+    tiers: Mapped[list] = mapped_column(JSON, default=list)         # which agents may call it
+    enabled: Mapped[bool] = mapped_column(default=True)
+    tools: Mapped[list] = mapped_column(JSON, default=list)         # cached tool list from the last successful test
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_test_ok: Mapped[bool | None] = mapped_column(nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

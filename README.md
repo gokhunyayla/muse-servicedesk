@@ -56,6 +56,10 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 * **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
   approval over chat (`ONAY 12`), confirmation before closing, satisfaction rating, scheduled follow-ups,
   incident linking for mass outages, proactive tickets from inventory checks, escalation to a human engineer when no tier can solve it, desk-side close from the dashboard.
+* **Connectors (MCP).** Admins register MCP servers under Settings → Connectors — Microsoft 365 / Azure (Graph),
+  Cisco Meraki, firewalls, ITSM, anything with an MCP endpoint (HTTP) or a local command (stdio). Credentials are
+  stored encrypted; a connector's tools appear to the chosen tiers as `mcp.<name>.<tool>` and every call lands on the
+  ticket trail with the same authority rules as built-in tools. Tested end to end against a real stdio MCP server.
 * **Simulated enterprise systems** (`app/systems.py`) stand in for Entra/M365, Defender, SAP, the vendor
   portal and the courier, behind the same function shapes a real connector would expose.
 
@@ -98,7 +102,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # database URL, port, time zone — no API keys here
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 84 offline tests with a scripted model
+.venv/bin/python -m pytest      # 87 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.
@@ -158,6 +162,7 @@ app/scheduler.py    follow-ups, reminders, outbound  app/whatsapp.py   Cloud API
 app/supervisor.py   desk-manager agent (problems, research, SOP drafts, human asks)
 app/reports.py      daily/weekly/monthly e-mail reports (Muse Wonder narrative)
 app/chat.py         Desk Chat: the desk's brain for desk users (status + actions)
+app/connectors.py   MCP connectors: real systems as agent tools (Settings → Connectors)
 app/sla.py          timing & SLA from the trail      app/auth.py       console sign-in, users, settings, knowledge
 app/dashboard.py    manager dashboard                app/main.py       HTTP API
 tests/              scenario tests over a scripted model

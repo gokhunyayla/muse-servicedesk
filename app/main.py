@@ -21,9 +21,10 @@ app.include_router(auth_router)
 
 @app.on_event("startup")
 def _apply_console_secrets() -> None:
-    from app import systems, vault
+    from app import connectors, systems, vault
     try:
         systems.apply_demo_phone(vault.get("DEMO_MANAGER_PHONE"))
+        connectors.register_all()
     except Exception:          # database may not exist yet on a very first run
         pass
 app.include_router(dashboard_router)
@@ -312,6 +313,108 @@ def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
         return [{"id": r.id, "started_at": r.started_at.isoformat(), "finished_at": r.finished_at.isoformat() if r.finished_at else None,
                  "trigger": r.trigger, "summary": r.summary, "findings": r.findings, "actions": r.actions, "error": r.error}
                 for r in db.query(SupervisorRun).order_by(SupervisorRun.id.desc()).limit(min(limit, 100))]
+
+
+# ---- Connectors (MCP) ------------------------------------------------------------------------
+
+class ConnectorIn(BaseModel):
+    name: str
+    label: str = ""
+    kind: str = "http"            # stdio | http
+    command: str = ""
+    url: str = ""
+    secrets: dict = {}            # env (stdio) or headers (http); values never echoed back
+    tiers: list[str] = ["L1", "L2", "L3", "L4"]
+    enabled: bool = True
+
+
+def _admin(user):
+    if user.role != "admin":
+        raise HTTPException(403, "admin only")
+
+
+@app.get("/connectors")
+def list_connectors(user=Depends(current_user)) -> list[dict]:
+    from app import connectors
+    return connectors.listing()
+
+
+@app.post("/connectors")
+def create_connector(c: ConnectorIn, request: Request, user=Depends(current_user)) -> dict:
+    import re
+    from app import connectors
+    from app.db import Connector
+    _admin(user)
+    check_origin(request)
+    name = re.sub(r"[^a-z0-9_-]", "-", c.name.lower()).strip("-")[:64]
+    if not name or c.kind not in ("stdio", "http"):
+        raise HTTPException(422, "name and kind (stdio|http) are required")
+    tiers = [t for t in c.tiers if t in ("L1", "L2", "L3", "L4", "SUP", "DESK")]
+    with session() as db:
+        if db.query(Connector).filter(Connector.name == name).first():
+            raise HTTPException(409, "a connector with that name exists")
+        row = Connector(name=name, label=c.label or c.name, kind=c.kind, command=c.command.strip(), url=c.url.strip(),
+                        secrets=connectors.encrypt_secrets({k: v for k, v in c.secrets.items() if v}), tiers=tiers,
+                        enabled=c.enabled, created_by=user.email)
+        db.add(row)
+        db.flush()
+        audit(db, user.email, "connector.create", target=name, detail=f"{c.kind} {c.url or c.command} tiers={tiers}")
+        cid = row.id
+    return connectors.test(cid) | {"id": cid, "name": name}
+
+
+@app.put("/connectors/{cid}")
+def update_connector(cid: int, c: ConnectorIn, request: Request, user=Depends(current_user)) -> dict:
+    from app import connectors
+    from app.db import Connector
+    _admin(user)
+    check_origin(request)
+    with session() as db:
+        row = db.get(Connector, cid)
+        if row is None:
+            raise HTTPException(404)
+        row.label, row.kind, row.command, row.url = c.label or row.label, c.kind, c.command.strip(), c.url.strip()
+        row.tiers = [t for t in c.tiers if t in ("L1", "L2", "L3", "L4", "SUP", "DESK")]
+        row.enabled = c.enabled
+        if c.secrets:                                   # only replace when new values are given
+            merged = connectors.decrypt_secrets(row.secrets) | {k: v for k, v in c.secrets.items() if v}
+            row.secrets = connectors.encrypt_secrets(merged)
+        db.flush()
+        connectors.register(row)
+        audit(db, user.email, "connector.update", target=row.name, detail=f"enabled={c.enabled} tiers={row.tiers}")
+    return {"id": cid, "ok": True}
+
+
+@app.post("/connectors/{cid}/test")
+def test_connector(cid: int, request: Request, user=Depends(current_user)) -> dict:
+    from app import connectors
+    _admin(user)
+    check_origin(request)
+    with session() as db:
+        audit(db, user.email, "connector.test", target=cid)
+    return connectors.test(cid)
+
+
+@app.delete("/connectors/{cid}")
+def delete_connector(cid: int, request: Request, user=Depends(current_user)) -> dict:
+    from app import connectors
+    from app.db import Connector
+    _admin(user)
+    check_origin(request)
+    with session() as db:
+        row = db.get(Connector, cid)
+        if row is None:
+            raise HTTPException(404)
+        connectors.unregister(row.name)
+        audit(db, user.email, "connector.delete", target=row.name)
+        db.delete(row)
+    return {"id": cid, "deleted": True}
+
+
+@app.get("/connectors/presets")
+def connector_presets(user=Depends(current_user)) -> dict:
+    from app.connectors import PRESETS
+    return PRESETS
 
 
 # ---- Desk Chat -------------------------------------------------------------------------------

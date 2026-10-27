@@ -467,7 +467,7 @@ SLA_FIELDS = [("first_response", "First response", "Time until the employee gets
 def settings_page(user: User = Depends(current_user), tab: str = "sla", info: str = "") -> str:
     from app.sla import sla_targets
     admin = user.role == "admin"
-    tabs = [("sla", "SLA"), ("supervisor", "Supervisor"), ("reports", "Reports"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
+    tabs = [("sla", "SLA"), ("supervisor", "Supervisor"), ("reports", "Reports"), ("connectors", "Connectors"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
     nav = "".join(f'<a class="tab {"on" if tab == k else ""}" href="/settings?tab={k}">{v}</a>' for k, v in tabs)
     if tab == "sla":
         t = sla_targets()
@@ -545,6 +545,46 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <script>async function sendTest(b){{b.disabled=true;b.textContent='Sending…';const o=document.getElementById('repOut');o.style.display='';o.textContent='Writing the daily report with Muse Wonder…';
  try{{const r=await (await fetch('/reports/send',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{kind:'daily'}})}})).json();
  o.textContent=(r.sent?'Sent: ':'Not sent ('+r.error+'): ')+r.subject+String.fromCharCode(10,10)+r.narrative;}}catch(e){{o.textContent='Failed: '+e}}b.disabled=false;b.textContent='Send test report';}}</script>"""
+    elif tab == "connectors":
+        from app import connectors
+        rows = connectors.listing()
+        def ccard(c):
+            st = ('<span class="tag active">connected</span>' if c["last_test_ok"] else ('<span class="tag disabled">failed</span>' if c["last_test_ok"] is False else '<span class="tag">untested</span>'))
+            tools = ", ".join(c["tools"][:12]) + (f" … +{len(c['tools']) - 12}" if len(c["tools"]) > 12 else "")
+            return f"""<div class="draft" data-id="{c['id']}"><div class="dh"><span class="tag">{c['kind']}</span><b>{_esc(c['label'])}</b><code>mcp.{_esc(c['name'])}.*</code>{st}{'' if c['enabled'] else '<span class="tag disabled">disabled</span>'}
+<small>{_esc(c['url'] or c['command'])} · tiers {', '.join(c['tiers']) or '—'} · {'secrets set' if c['has_secrets'] else 'no secrets'}{(' · tested ' + c['last_test_at'][:16].replace('T', ' ')) if c['last_test_at'] else ''}</small></div>
+{('<p class="muted" style="margin:6px 0 0">Tools: ' + _esc(tools) + '</p>') if c['tools'] else ''}{('<p class="alert bad" style="margin-top:6px">' + _esc(c['last_error']) + '</p>') if c['last_error'] else ''}
+<div class="row end" style="margin-top:8px">{('<button class="btn" onclick="testConn(' + str(c['id']) + ',this)">Test</button> <button class="btn" onclick="editConn(' + str(c['id']) + ')">Edit</button> <button class="btn" onclick="toggleConn(' + str(c['id']) + ',' + ('false' if c['enabled'] else 'true') + ')">' + ('Disable' if c['enabled'] else 'Enable') + '</button> <button class="btn" onclick="delConn(' + str(c['id']) + ')">Remove</button>') if admin else ''}</div></div>"""
+        body = f"""<p class="muted">MCP servers the agents may use as tools: Microsoft 365 / Azure, Cisco, firewalls, ITSM — anything with an MCP endpoint. A connector's tools appear to the chosen tiers as <code>mcp.&lt;name&gt;.&lt;tool&gt;</code>; every call lands on the ticket trail. Credentials are stored encrypted.</p>
+<div class="pagehead" style="margin-bottom:10px"><small class="muted">{len(rows)} connector(s)</small>{('<button class="btn primary slim" onclick="newConn()">+ Add connector</button>') if admin else ''}</div>
+{''.join(ccard(c) for c in rows) or '<p class="muted">No connectors yet.</p>'}
+<div class="modal" id="connModal"><div class="box" style="width:min(680px,100%)"><h3 id="cTitle">Add connector</h3>
+<label>Start from</label><select id="cPreset" onchange="applyPreset()"></select><p class="muted" id="cHint" style="margin:4px 0 0"></p>
+<div class="grid"><div><label>Name (slug)</label><input id="cName" placeholder="m365"></div><div><label>Label</label><input id="cLabel" placeholder="Microsoft 365"></div>
+<div><label>Transport</label><select id="cKind" onchange="kindUI()"><option value="http">HTTP (streamable) URL</option><option value="stdio">Local command (stdio)</option></select></div>
+<div><label>Allowed tiers</label><div class="seg2" id="cTiers">{''.join(f'<label class="check"><input type="checkbox" value="{t}" checked> {t}</label>' for t in ("L1", "L2", "L3", "L4"))}<label class="check"><input type="checkbox" value="DESK"> Desk Chat</label><label class="check"><input type="checkbox" value="SUP"> Supervisor</label></div></div></div>
+<div id="cUrlRow"><label>Endpoint URL</label><input id="cUrl" placeholder="https://host/mcp"></div>
+<div id="cCmdRow" style="display:none"><label>Command</label><input id="cCmd" placeholder="npx -y some-mcp-server"></div>
+<label>Secrets <small>(one per line, KEY=value — sent as request headers for HTTP, as environment for stdio; stored encrypted, never shown again)</small></label><textarea id="cSecrets" rows="3" placeholder="Authorization=Bearer …"></textarea>
+<div class="row end"><button type="button" class="btn" onclick="closeModal('connModal')">Cancel</button><button type="button" class="btn primary slim" id="cGo" onclick="saveConn()">Save &amp; test</button></div></div></div>
+<script>
+const CONNS={__import__("json").dumps({c["id"]: c for c in rows})};let PRESETS={{}},editingConn=null;
+fetch('/connectors/presets').then(r=>r.json()).then(p=>{{PRESETS=p;const s=document.getElementById('cPreset');s.innerHTML=Object.entries(p).map(([k,v])=>`<option value="${{k}}">${{v.label}}</option>`).join('');}});
+function kindUI(){{const k=document.getElementById('cKind').value;document.getElementById('cUrlRow').style.display=k==='http'?'':'none';document.getElementById('cCmdRow').style.display=k==='stdio'?'':'none';}}
+function applyPreset(){{const p=PRESETS[document.getElementById('cPreset').value];if(!p)return;document.getElementById('cHint').textContent=p.hint||'';document.getElementById('cKind').value=p.kind;document.getElementById('cUrl').value=p.url||'';document.getElementById('cCmd').value=p.command||'';if(!editingConn){{document.getElementById('cLabel').value=p.label;document.getElementById('cName').value=document.getElementById('cPreset').value==='custom'?'':document.getElementById('cPreset').value;}}kindUI();}}
+function newConn(){{editingConn=null;document.getElementById('cTitle').textContent='Add connector';document.getElementById('cSecrets').value='';document.getElementById('cPreset').value='custom';applyPreset();openModal('connModal');}}
+function editConn(id){{const c=CONNS[id];editingConn=id;document.getElementById('cTitle').textContent='Edit '+c.label;document.getElementById('cName').value=c.name;document.getElementById('cLabel').value=c.label;document.getElementById('cKind').value=c.kind;document.getElementById('cUrl').value=c.url;document.getElementById('cCmd').value=c.command;document.getElementById('cSecrets').value='';
+ document.querySelectorAll('#cTiers input').forEach(i=>i.checked=c.tiers.includes(i.value));document.getElementById('cHint').textContent=c.has_secrets?'Secrets are set; leave the box empty to keep them.':'';kindUI();openModal('connModal');}}
+function tiers(){{return [...document.querySelectorAll('#cTiers input:checked')].map(i=>i.value);}}
+function secrets(){{const o={{}};document.getElementById('cSecrets').value.split('\n').forEach(l=>{{const i=l.indexOf('=');if(i>0)o[l.slice(0,i).trim()]=l.slice(i+1).trim();}});return o;}}
+async function saveConn(){{const b=document.getElementById('cGo');b.disabled=true;b.textContent='Connecting…';
+ const body={{name:document.getElementById('cName').value.trim(),label:document.getElementById('cLabel').value.trim(),kind:document.getElementById('cKind').value,url:document.getElementById('cUrl').value.trim(),command:document.getElementById('cCmd').value.trim(),secrets:secrets(),tiers:tiers(),enabled:true}};
+ const r=editingConn?await fetch('/connectors/'+editingConn,{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}):await fetch('/connectors',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
+ b.disabled=false;b.textContent='Save & test';if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
+async function testConn(id,b){{b.disabled=true;b.textContent='Testing…';const r=await (await fetch('/connectors/'+id+'/test',{{method:'POST'}})).json();alert(r.ok?('Connected. Tools: '+r.tools.join(', ')):('Failed: '+r.error));location.reload();}}
+async function toggleConn(id,on){{const c=CONNS[id];await fetch('/connectors/'+id,{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{name:c.name,label:c.label,kind:c.kind,url:c.url,command:c.command,secrets:{{}},tiers:c.tiers,enabled:on}})}});location.reload();}}
+async function delConn(id){{if(!confirm('Remove this connector?'))return;await fetch('/connectors/'+id,{{method:'DELETE'}});location.reload();}}
+</script>"""
     elif tab in ("channels", "models"):
         from app import vault
         from app.config import settings as cfg
