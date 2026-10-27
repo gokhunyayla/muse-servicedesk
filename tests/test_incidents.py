@@ -69,3 +69,28 @@ def test_history_is_replayed_to_the_model_on_follow_up_messages():
         handle_message(db, "+905551110001", "ikinci mesaj")
     roles = [(m["role"], m["content"]) for m in llm.requests[1][1:]]
     assert roles == [("user", "ilk mesaj"), ("assistant", "İlk cevap"), ("user", "ikinci mesaj")]
+
+
+def test_unrelated_message_opens_a_separate_ticket_when_the_model_says_new():
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    with session() as db:
+        first, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor, evden çalışamıyorum")
+        fid = first.id
+    set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Yazıcıya bakıyorum.")]))
+    with session() as db:
+        second, _ = handle_message(db, "+905551110001", "Bir de yazıcı hiç çıktı vermiyor, kuyrukta kalıyor")
+        assert second.id != fid and second.title.startswith("Bir de yazıcı")
+        assert db.get(Ticket, fid).status == "open"
+    set_llm(ScriptedLLM([Reply(text="SAME"), Reply(text="Tamam.")]))
+    with session() as db:
+        third, _ = handle_message(db, "+905551110001", "yazıcı hâlâ aynı, kuyruk temizlenmedi sanırım")
+        assert third.id == second.id
+
+
+def test_short_replies_never_trigger_classification():
+    llm = ScriptedLLM([Reply(text="?"), Reply(text="kapandı")])
+    set_llm(llm)
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", "vpn yok")
+        handle_message(db, "+905551110001", "evet çözüldü")
+    assert len(llm.requests) == 2          # no extra SAME/NEW call for a 2-word message

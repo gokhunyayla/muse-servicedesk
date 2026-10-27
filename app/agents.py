@@ -124,6 +124,24 @@ AGENTS: dict[str, Agent] = {a.tier: a for a in [
 ]}
 
 
+def _belongs_to(ticket: Ticket, text: str) -> bool:
+    """Does this message continue the open ticket, or is it a new problem? The model decides;
+    very short messages (confirmations, ratings, approvals) always continue the ticket."""
+    if len(text.split()) <= 3 or text.startswith("["):
+        return True
+    recent = [e.content for e in ticket.events if e.kind == "message"][-4:]
+    prompt = (f"Open ticket #{ticket.id}: \"{ticket.title}\"\nRecent exchange:\n" +
+              "\n".join(f"- {m[:200]}" for m in recent) +
+              f"\n\nNew message from the same employee: \"{text[:400]}\"\n\n"
+              "Is the new message about the SAME problem (a follow-up, more detail, confirmation, or an answer "
+              "to our question), or a NEW, unrelated problem? Answer with one word: SAME or NEW.")
+    try:
+        reply = get_llm().chat([{"role": "user", "content": prompt}], [])
+    except ContentFiltered:
+        return True
+    return "NEW" not in reply.text.upper()
+
+
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
                    mime: str = "image/jpeg", extra_images: list[bytes] | None = None) -> tuple[Ticket, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
@@ -131,6 +149,9 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     from app.llm import image_message
     ticket = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
               .order_by(Ticket.id.desc()).first())
+    if ticket is not None and not _belongs_to(ticket, text):
+        log(db, ticket.id, "system", "note", f"new unrelated request from requester, opened a separate ticket: {text[:80]}")
+        ticket = None
     if ticket is None:
         ticket = Ticket(requester=requester, title=text[:255])
         db.add(ticket)
