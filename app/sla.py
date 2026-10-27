@@ -34,6 +34,19 @@ def sla_targets() -> dict:
     return get_setting("sla", DEFAULT_SLA)
 
 
+def _ends_wait(e) -> bool:
+    """Waiting for the employee ends when they answer, the desk writes, an approver decides, or an agent
+    starts real work again (a tool call or handoff). The agent's own closing message and system reminders
+    do not end it."""
+    if e.actor == "user" or e.actor.startswith("desk:"):
+        return True
+    if e.actor == "system":
+        return False
+    if e.kind in ("tool_call", "handoff"):
+        return True
+    return e.kind == "note" and not e.actor.startswith("L")      # e.g. an approver's decision
+
+
 def timing(ticket, events) -> dict:
     """Walk the trail: the active tier changes on handoffs (and back when the handoff tool returns);
     time between a confirmation request and the employee's next message is 'waiting for employee'.
@@ -60,8 +73,8 @@ def timing(ticket, events) -> dict:
     for e in events:
         if first_response is None and e.kind == "message" and e.actor != "user":
             first_response = (e.at - start).total_seconds()
-        if paused and e.actor != "system" and not (e.kind == "tool_result" and e.content == "request_confirmation"):
-            charge(e.at)                 # whatever happens next ends the wait (employee answered, approval, follow-up)
+        if paused and _ends_wait(e):
+            charge(e.at)
             paused = False
         if e.kind == "handoff":
             m = _HANDOFF.match(e.content)
