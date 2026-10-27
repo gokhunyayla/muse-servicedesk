@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 from app.db import Ticket, log
+from app.i18n import detect, t as tr_, ticket_lang
 from app.llm import ContentFiltered, get_llm
 from app.tools import Ctx, run_tool, tools_for
 
@@ -89,8 +90,7 @@ class Agent:
             except ContentFiltered:
                 # the provider's safety filter is fuzzy; keep the ticket alive and ask for a rephrase
                 log(db, ticket.id, self.tier, "note", "model request blocked by provider content filter")
-                return ("Mesajınızı bu haliyle işleyemedim. Sorunu bir cümleyle, başka kelimelerle "
-                        "yazar mısınız? (Örn. 'X sunucusunda Y hatası alıyorum')")
+                return tr_("filtered", ticket_lang(ticket))
             if not reply.tool_calls:
                 return reply.text.strip()
             messages.append({"role": "assistant", "content": reply.text or None, "tool_calls": [
@@ -112,7 +112,7 @@ class Agent:
             run_tool(ctx, "escalate_to_human", {"reason": "agent could not finish within its step budget",
                                                 "tried": f"{MAX_STEPS} tool steps on {self.tier}"})
             log(db, ticket.id, self.tier, "tool_call", "escalate_to_human", {"reason": "step budget exhausted"})
-        return "Bu adımda ilerleyemedim; talebiniz bir destek mühendisine aktarıldı, sizinle iletişime geçilecek."
+        return tr_("escalated", ticket_lang(ticket))
 
     def _handoff(self, db, ticket: Ticket, target: str, summary: str, depth: int) -> dict:
         if target not in AGENTS:
@@ -247,7 +247,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
             text = re.sub(rf"#?{ticket.id}", "", text, count=1).strip() or text
         else:
             choices = "\n".join(f"#{t.id}: {t.title[:60]}" for t in open_tickets)
-            answer = f"Birden fazla açık talebiniz var, hangisi için?\n{choices}\n(Örn. \"#{open_tickets[0].id} çözüldü\")"
+            answer = tr_("which_ticket", detect(text, None) or ticket_lang(open_tickets[0]), choices=choices, first=open_tickets[0].id)
             log(db, open_tickets[0].id, "user", "message", text)
             log(db, open_tickets[0].id, "L1", "message", answer)
             db.refresh(open_tickets[0])
@@ -271,7 +271,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         run_tool(Ctx(db=db, ticket=ticket, agent="L1"), "close_ticket",
                  {"resolution": "closed on the employee's request"})
         log(db, ticket.id, "L1", "tool_call", "close_ticket", {"resolution": "closed on the employee's request"})
-        answer = f"Talebiniz (#{ticket.id}) isteğiniz üzerine kapatıldı. Yeni bir sorun olursa yazmanız yeterli."
+        answer = tr_("closed_on_request", detect(text, None) or ticket_lang(ticket), id=ticket.id)
         log(db, ticket.id, "L1", "message", answer)
         db.refresh(ticket)
         return ticket, answer

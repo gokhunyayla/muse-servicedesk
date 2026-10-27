@@ -96,7 +96,8 @@ def desk_close(ticket_id: int, d: DeskClose, request: Request, user=Depends(curr
         t.resolution, t.owner = d.resolution, "desk"
         log(db, t.id, by, "note", f"closed by the desk: {d.resolution}")
         audit(db, user.email, "ticket.close", target=t.id, detail=d.resolution)
-        text = f"Talebiniz (#{t.id}) servis masası tarafından kapatıldı: {d.resolution}"
+        from app.i18n import t as tr_, ticket_lang
+        text = tr_("closed_by_desk", ticket_lang(t), id=t.id, note=d.resolution)
         if t.requester.startswith("+"):
             db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
         log(db, t.id, "L1", "message", text)

@@ -27,16 +27,40 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {ACCESS_TOKEN}"}
 
 
+PERMANENT = {131030, 131026, 131021, 100}   # not in test allow-list, not a WhatsApp user, same number, bad param
+
+
+class SendError(Exception):
+    def __init__(self, code: int, message: str, permanent: bool):
+        super().__init__(message)
+        self.code, self.permanent = code, permanent
+
+
 def send(to: str, text: str) -> bool:
+    """Deliver one text. Raises SendError on a provider error (permanent ones should not be retried)."""
     if not ACCESS_TOKEN or not PHONE_NUMBER_ID:
         logger.warning("WhatsApp not configured; would send to %s: %s", to, text[:80])
         return False
     r = httpx.post(f"{GRAPH}/{PHONE_NUMBER_ID}/messages", headers=_headers(), timeout=30,
                    json={"messaging_product": "whatsapp", "to": to.lstrip("+"), "type": "text", "text": {"body": text}})
     if r.status_code >= 400:
-        logger.error("WhatsApp send failed %s: %s", r.status_code, r.text[:200])
-        return False
+        try:
+            err = r.json().get("error", {})
+        except ValueError:
+            err = {}
+        code = int(err.get("code", r.status_code))
+        msg = err.get("message", r.text[:200])
+        raise SendError(code, msg, permanent=code in PERMANENT)
     return True
+
+
+def try_send(to: str, text: str) -> bool:
+    """Reply path: log and swallow errors (the ticket keeps the text; the employee can re-ask)."""
+    try:
+        return send(to, text)
+    except SendError as e:
+        logger.error("WhatsApp send to %s failed (%s): %s", to, e.code, e)
+        return False
 
 
 def download_media(media_id: str) -> tuple[bytes, str]:
@@ -46,12 +70,21 @@ def download_media(media_id: str) -> tuple[bytes, str]:
 
 
 def drain_outbound() -> int:
+    """Send queued messages. Permanent failures (e.g. a number outside the test allow-list) are marked
+    with the error and never retried, so the log stays quiet; transient ones are retried next tick."""
     sent = 0
     with session() as db:
-        for o in db.query(Outbound).filter(Outbound.sent.is_(False)).limit(50):
-            if send(o.to, o.text):
-                o.sent = True
-                sent += 1
+        for o in db.query(Outbound).filter(Outbound.sent.is_(False), Outbound.error == "").limit(50):
+            try:
+                if send(o.to, o.text):
+                    o.sent = True
+                    sent += 1
+            except SendError as e:
+                if e.permanent:
+                    o.error = f"{e.code}: {e}"[:255]
+                    logger.warning("outbound #%s to %s dropped (%s)", o.id, o.to, o.error)
+                else:
+                    logger.error("outbound #%s to %s failed, will retry: %s", o.id, o.to, e)
     return sent
 
 
@@ -86,7 +119,8 @@ async def inbound(request: Request) -> dict:
             data, amime = download_media(m["audio"]["id"])
             text = transcribe(data, amime)
             if not text:
-                send(frm, "Sesli mesajı anlayamadım, yazar mısınız?")
+                from app.i18n import t as tr_
+                try_send(frm, tr_("voice_failed", "tr"))
                 continue
         elif kind == "image":
             image, mime = download_media(m["image"]["id"])
@@ -101,6 +135,6 @@ async def inbound(request: Request) -> dict:
             continue
         with session() as db:
             _, answer = handle_message(db, frm, text, image, mime, extra_images=extra)
-        send(frm, answer)
+        try_send(frm, answer)
         handled += 1
     return {"handled": handled}

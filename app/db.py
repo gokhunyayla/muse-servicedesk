@@ -69,6 +69,7 @@ class Outbound(Base):
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
     text: Mapped[str] = mapped_column(Text)
     sent: Mapped[bool] = mapped_column(default=False)  # flipped by the channel (WhatsApp) once delivered
+    error: Mapped[str] = mapped_column(String(255), default="")   # set when delivery failed for good (not retried)
 
 
 class Event(Base):

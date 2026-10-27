@@ -25,10 +25,10 @@ def run_due_followups() -> int:
             if ticket is None or ticket.status == "resolved":
                 continue
             if f.note == "confirmation reminder":
+                from app.i18n import t as tr_, ticket_lang
                 db.add(Outbound(to=ticket.requester, ticket_id=ticket.id,
-                                text=f"Merhaba, #{ticket.id} numaralı talebiniz için uyguladığımız çözüm işe yaradı mı? "
-                                     f"({ticket.resolution}) 'Çözüldü' derseniz kaydı kapatıyoruz; "
-                                     f"{AUTO_CLOSE_HOURS} saat içinde yanıt gelmezse kaydı çözüldü kabul edeceğiz."))
+                                text=tr_("reminder", ticket_lang(ticket), id=ticket.id, resolution=ticket.resolution,
+                                         hours=AUTO_CLOSE_HOURS)))
                 log(db, ticket.id, "system", "note", "confirmation reminder sent")
                 db.add(Followup(ticket_id=ticket.id, due_at=_now() + timedelta(hours=AUTO_CLOSE_HOURS),
                                 note="auto-close if no reply"))
@@ -39,9 +39,9 @@ def run_due_followups() -> int:
                     resolve(ticket)
                     ticket.resolution = f"{ticket.resolution} (auto-closed: no reply from the employee)"
                     log(db, ticket.id, "system", "note", "auto-closed: no reply after reminder")
+                    from app.i18n import t as tr_, ticket_lang
                     db.add(Outbound(to=ticket.requester, ticket_id=ticket.id,
-                                    text=f"#{ticket.id} numaralı talebiniz yanıt gelmediği için çözüldü olarak "
-                                         f"kapatıldı. Sorun sürüyorsa yazmanız yeterli, yeni kayıt açarız."))
+                                    text=tr_("auto_closed", ticket_lang(ticket), id=ticket.id)))
                 continue
             log(db, ticket.id, "system", "note", f"scheduled follow-up: {f.note}")
             answer = AGENTS["L1"].run(db, ticket, f"[Scheduled follow-up] {f.note}. Check and act; "

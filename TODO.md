@@ -12,14 +12,13 @@
       so messages sent while the app is offline still arrive once it is back.
 - [x] **Emerging-incident awareness** → the Supervisor merges clusters into problem records and updates everyone.
       Still open: tell *new* reporters of a known problem immediately at intake (before the next Supervisor pass).
-- [ ] Stable public URL for the webhook (ngrok static domain or a named Cloudflare tunnel).
+- [ ] Deploy to a small public server with a fixed domain + HTTPS (no tunnels, no third-party tunnel accounts).
 - [ ] 3-minute demo video; link in README; tag `v1.0.0`.
 
 ## Should
 - [ ] SSO (OIDC — Microsoft Entra / Google) and passkeys for the console; TOTP as a fallback.
 - [ ] Session rotation on privilege change.
-- [ ] Localise fixed system texts (which-ticket question, close/auto-close notices, reminders) to the ticket's language.
-- [ ] Unsubscribe the legacy app from the test WhatsApp account; stop retrying outbound to numbers outside the test allow-list.
+- [ ] Unsubscribe the legacy app from the test WhatsApp account (Meta panel, legacy app → Webhooks). Outbound retries: done.
 - [ ] Dashboard: escalated queue view, per-tier latency, incident panel.
 
 ## Later
