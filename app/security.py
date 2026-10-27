@@ -46,13 +46,16 @@ def cookie_secure() -> bool:
 
 # ---- API key for the integration endpoints (/messages, /voice, ...) ---------------------------
 
-API_KEY = os.getenv("API_KEY", "")
+API_KEY = ""     # tests may monkeypatch this; otherwise the console/.env value is used
 
 
 def api_key(request: Request) -> None:
-    """When API_KEY is set, machine endpoints require `X-API-Key`; unset means open (local dev)."""
-    if not API_KEY:
+    """When an integration API key is set (Settings → Channels or .env), machine endpoints require
+    `X-API-Key`; unset means open (local dev)."""
+    from app import vault
+    key = API_KEY or vault.get("API_KEY")
+    if not key:
         return
     given = request.headers.get("x-api-key", "")
-    if not hmac.compare_digest(given, API_KEY):
+    if not hmac.compare_digest(given, key):
         raise HTTPException(401, "invalid API key")

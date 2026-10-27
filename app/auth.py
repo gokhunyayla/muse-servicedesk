@@ -544,11 +544,31 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <script>async function sendTest(b){{b.disabled=true;b.textContent='Sending…';const o=document.getElementById('repOut');o.style.display='';o.textContent='Writing the daily report with Muse Wonder…';
  try{{const r=await (await fetch('/reports/send',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{kind:'daily'}})}})).json();
  o.textContent=(r.sent?'Sent: ':'Not sent ('+r.error+'): ')+r.subject+String.fromCharCode(10,10)+r.narrative;}}catch(e){{o.textContent='Failed: '+e}}b.disabled=false;b.textContent='Send test report';}}</script>"""
-    elif tab == "channels":
-        body = '<p class="muted">WhatsApp Cloud API settings are read from <code>.env</code> (WA_PHONE_NUMBER_ID, WA_ACCESS_TOKEN, WA_VERIFY_TOKEN). An editable form lands here next.</p>'
-    elif tab == "models":
+    elif tab in ("channels", "models"):
+        from app import vault
         from app.config import settings as cfg
-        body = f'<p class="muted">Meta Model API</p><dl class="kv"><dt>Agents</dt><dd>{_esc(cfg.meta_model)}</dd><dt>Heavy (L3)</dt><dd>{_esc(cfg.meta_model_heavy)}</dd><dt>Reasoning effort</dt><dd>{_esc(cfg.reasoning_effort)}</dd><dt>Base URL</dt><dd>{_esc(cfg.meta_base_url)}</dd></dl>'
+        dis = "" if admin else "disabled"
+        def secret_row(name, hint=""):
+            st = vault.status(name)
+            masked = name in vault.SECRET
+            state = (f'<span class="tag active">configured</span> <small class="muted">{"…" + _esc(st["hint"]) if masked else _esc(st["hint"])} · from {st["source"]}</small>'
+                     if st["configured"] else '<span class="tag disabled">not set</span>')
+            return (f'<div class="srow"><div><b>{_esc(st["label"])}</b><small>{_esc(hint)}</small><div style="margin-top:4px">{state}</div></div>'
+                    f'<div class="min"><input name="{name}" type="{"password" if masked else "text"}" autocomplete="new-password" placeholder="{"enter a new value to replace" if masked else "value"}" style="width:260px" {dis}>'
+                    + (f'<label class="check" style="margin:0 0 0 8px"><input type="checkbox" name="clear_{name}" value="1" {dis}> clear</label>' if st["source"] == "console" else "")
+                    + '</div></div>')
+        if tab == "models":
+            rows = secret_row("META_API_KEY", "From dev.meta.ai; used by every agent, voice, vision and SAM call")
+            body = f"""<p class="muted">Keys live encrypted in the database and are managed here; <code>.env</code> is only a fallback for first run.</p>
+<form method="post" action="/settings/secrets?tab=models">{rows}
+<dl class="kv" style="margin-top:14px"><dt>Agents</dt><dd>{_esc(cfg.meta_model)}</dd><dt>Heavy (L3, Supervisor, reports)</dt><dd>{_esc(cfg.meta_model_heavy)}</dd><dt>Reasoning effort</dt><dd>{_esc(cfg.reasoning_effort)}</dd><dt>Base URL</dt><dd>{_esc(cfg.meta_base_url)}</dd></dl>
+{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>"""
+        else:
+            rows = (secret_row("WA_PHONE_NUMBER_ID", "Meta for Developers → WhatsApp → API Setup") + secret_row("WA_ACCESS_TOKEN", "System-user token (never expires)")
+                    + secret_row("WA_VERIFY_TOKEN", "Must match the webhook configuration at Meta") + secret_row("DEMO_MANAGER_PHONE", "Seeded managers E1002/E1003 answer approvals from this number")
+                    + secret_row("API_KEY", "Required as X-API-Key on /messages, /voice, /image, … when set") + secret_row("TAVILY_API_KEY", "Optional; DuckDuckGo needs no key"))
+            body = f"""<p class="muted">Channel and integration secrets, encrypted in the database. Changes apply immediately, no restart.</p>
+<form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>"""
     else:
         body = '<p class="muted">Muse ServiceDesk — autonomous multi-tier IT service desk on Meta Model API. Built for the Meta Global AI Developer Hackathon 2026.</p>'
     return _page("Settings", f'<div class="tabs">{nav}</div>{body}', wide=True, user=user, active="settings")
@@ -631,6 +651,24 @@ async def settings_reports(request: Request, admin: User = Depends(admin_user)):
     with session() as db:
         audit(db, admin.email, "settings.reports", detail=f"{rep['recipients']} daily={rep['daily']} weekly={rep['weekly']} monthly={rep['monthly']} smtp={smtp['host']}", ip=_ip(request))
     return RedirectResponse("/settings?tab=reports&info=Report+settings+saved", 303)
+
+
+@router.post("/settings/secrets")
+async def settings_secrets(request: Request, admin: User = Depends(admin_user), tab: str = "channels"):
+    from app import vault
+    check_origin(request)
+    form = await request.form()
+    changes: dict = {}
+    for name in vault.SPEC:
+        if form.get(f"clear_{name}") == "1":
+            changes[name] = None
+        elif str(form.get(name, "")).strip():
+            changes[name] = str(form.get(name)).strip()
+    if changes:
+        vault.set_many(changes)
+        with session() as db:
+            audit(db, admin.email, "settings.secrets", detail=", ".join(f"{k}:{'cleared' if v is None else 'set'}" for k, v in changes.items()), ip=_ip(request))
+    return RedirectResponse(f"/settings?tab={tab}&info={'Saved' if changes else 'Nothing+changed'}", 303)
 
 
 @router.post("/settings/sla")

@@ -17,6 +17,15 @@ from app.whatsapp import router as whatsapp_router    # noqa: E402
 from app.auth import router as auth_router            # noqa: E402
 
 app.include_router(auth_router)
+
+
+@app.on_event("startup")
+def _apply_console_secrets() -> None:
+    from app import systems, vault
+    try:
+        systems.apply_demo_phone(vault.get("DEMO_MANAGER_PHONE"))
+    except Exception:          # database may not exist yet on a very first run
+        pass
 app.include_router(dashboard_router)
 app.include_router(whatsapp_router)
 

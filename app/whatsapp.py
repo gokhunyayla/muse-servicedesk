@@ -18,13 +18,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 GRAPH = "https://graph.facebook.com/v21.0"
-VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "muse-servicedesk")
-ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN", "")
-PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID", "")
+def _cfg() -> tuple[str, str, str]:
+    """Console-managed (Settings → Channels) with .env fallback; read per call so changes apply at once."""
+    from app import vault
+    return (vault.get("WA_ACCESS_TOKEN"), vault.get("WA_PHONE_NUMBER_ID"), vault.get("WA_VERIFY_TOKEN", "muse-servicedesk"))
 
 
 def _headers() -> dict:
-    return {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+    return {"Authorization": f"Bearer {_cfg()[0]}"}
 
 
 PERMANENT = {131030, 131026, 131021, 100}   # not in test allow-list, not a WhatsApp user, same number, bad param
@@ -38,10 +39,11 @@ class SendError(Exception):
 
 def send(to: str, text: str) -> bool:
     """Deliver one text. Raises SendError on a provider error (permanent ones should not be retried)."""
-    if not ACCESS_TOKEN or not PHONE_NUMBER_ID:
+    token, phone_id, _ = _cfg()
+    if not token or not phone_id:
         logger.warning("WhatsApp not configured; would send to %s: %s", to, text[:80])
         return False
-    r = httpx.post(f"{GRAPH}/{PHONE_NUMBER_ID}/messages", headers=_headers(), timeout=30,
+    r = httpx.post(f"{GRAPH}/{phone_id}/messages", headers=_headers(), timeout=30,
                    json={"messaging_product": "whatsapp", "to": to.lstrip("+"), "type": "text", "text": {"body": text}})
     if r.status_code >= 400:
         try:
@@ -91,7 +93,7 @@ def drain_outbound() -> int:
 @router.get("/webhook")
 def verify(hub_mode: str = Query("", alias="hub.mode"), hub_token: str = Query("", alias="hub.verify_token"),
            hub_challenge: str = Query("", alias="hub.challenge")):
-    if hub_mode == "subscribe" and hub_token == VERIFY_TOKEN:
+    if hub_mode == "subscribe" and hub_token == _cfg()[2]:
         return int(hub_challenge) if hub_challenge.isdigit() else hub_challenge
     raise HTTPException(403, "verification failed")
 

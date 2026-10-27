@@ -17,10 +17,17 @@ USERS = {
               "sap_roles": ["FI_DISPLAY", "FI_POST"], "enabled": True},
 }
 
-# Demo: point the seeded managers' phones at a real number so approval requests land on your WhatsApp.
-# DEMO_MANAGER_PHONE=+90... in .env (never committed) rewires E1002 and E1003.
-if os.getenv("DEMO_MANAGER_PHONE"):
-    USERS["E1002"]["phone"] = USERS["E1003"]["phone"] = os.environ["DEMO_MANAGER_PHONE"]
+_SEED_PHONES = {"E1002": USERS["E1002"]["phone"], "E1003": USERS["E1003"]["phone"]}
+
+
+def apply_demo_phone(phone: str | None) -> None:
+    """Demo: point the seeded managers' phones at a real number so approval requests land on your WhatsApp
+    (Settings → Channels, or DEMO_MANAGER_PHONE in .env). Empty restores the seed numbers."""
+    for emp, seed in _SEED_PHONES.items():
+        USERS[emp]["phone"] = phone or seed
+
+
+apply_demo_phone(os.getenv("DEMO_MANAGER_PHONE"))
 
 LICENSE_CATALOG = {   # license -> needs manager approval?
     "M365-E3": False, "Teams-Phone": False, "Visio": False, "Project": True, "Adobe-CC": True, "AutoCAD": True,

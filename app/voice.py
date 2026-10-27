@@ -30,7 +30,7 @@ def meta_transcribe(wav: bytes) -> str:
     request = {"model": TRANSCRIBE_MODEL, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK"}
     r = httpx.post(
         f"{settings.meta_base_url}/asr/transcribe",
-        headers={"Authorization": f"Bearer {settings.meta_api_key}", "Accept": "application/json"},
+        headers={"Authorization": f"Bearer {__import__("app.vault", fromlist=["get"]).get("META_API_KEY")}", "Accept": "application/json"},
         files={"request": (None, json.dumps(request), "application/json"),
                "audio": ("audio.wav", wav, "audio/wav")},
         timeout=120)

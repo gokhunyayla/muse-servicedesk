@@ -209,3 +209,23 @@ def test_timing_and_sla_settings(desk):
     tm = desk.get("/tickets/1").json()["timing"]
     assert tm["first_response_breached"] is False and tm["first_response_target_minutes"] == 15
     assert "SLA" in desk.get("/settings").text
+
+
+def test_secrets_are_managed_in_the_console_and_encrypted(desk, tmp_path, monkeypatch):
+    from app import vault, systems, whatsapp
+    from app.db import Setting, session
+    monkeypatch.setattr(vault, "KEY_FILE", tmp_path / "k")
+    monkeypatch.delenv("WA_ACCESS_TOKEN", raising=False)
+    assert vault.get("WA_ACCESS_TOKEN") == ""
+    r = desk.post("/settings/secrets?tab=channels", data={"WA_ACCESS_TOKEN": "EAAtoken-xyz", "WA_PHONE_NUMBER_ID": "123",
+                                                          "DEMO_MANAGER_PHONE": "+905000000000"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert vault.get("WA_ACCESS_TOKEN") == "EAAtoken-xyz" and whatsapp._cfg()[1] == "123"
+    assert systems.USERS["E1002"]["phone"] == "+905000000000"
+    with session() as db:                                   # encrypted at rest
+        raw = db.get(Setting, "secrets").value["WA_ACCESS_TOKEN"]
+    assert "EAAtoken" not in raw
+    page = desk.get("/settings?tab=channels").text
+    assert "EAAtoken" not in page and "…-xyz" in page and "configured" in page
+    desk.post("/settings/secrets?tab=channels", data={"clear_DEMO_MANAGER_PHONE": "1"}, follow_redirects=False)
+    assert systems.USERS["E1002"]["phone"] == "+905551110002"

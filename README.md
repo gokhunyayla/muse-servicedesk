@@ -78,10 +78,10 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 ## Run
 
 ```bash
-cp .env.example .env            # add META_API_KEY (and WhatsApp tokens when you have them)
+cp .env.example .env            # database URL, port; API keys are entered in the console (Settings)
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 70 offline tests with a scripted model
+.venv/bin/python -m pytest      # 71 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.
@@ -90,6 +90,10 @@ Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is create
 `users` table (PBKDF2 hashes). Admins invite support agents or admins at `/users` (they set their own password via a link) and can change anyone's role; everyone
 can reset a password via `/forgot` (SMTP optional — without it the reset link is written to the server log).
 Employees never sign in; they use WhatsApp.
+
+**Secrets:** the Meta API key, WhatsApp token/phone ID/verify token, the integration API key and the Tavily key are
+managed by admins under Settings → Models / Channels and stored encrypted (Fernet; key in `data/.secret_key`,
+git-ignored). `.env` values are only a fallback for first run. Changes apply immediately.
 
 **Hardening:** PBKDF2 password hashes, HttpOnly/SameSite (Secure on HTTPS) session cookies, login and reset rate limits,
 Origin checks on every form post, `X-API-Key` on the integration endpoints when `API_KEY` is set, and an `audit_log`

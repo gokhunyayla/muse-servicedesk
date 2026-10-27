@@ -25,7 +25,7 @@ def parse_boxes(text: str) -> list[dict]:
 
 def meta_segment(image: bytes, prompt: str, mime: str = "image/jpeg") -> list[dict]:
     from openai import OpenAI
-    client = OpenAI(api_key=settings.meta_api_key, base_url=settings.meta_base_url)
+    client = OpenAI(api_key=__import__("app.vault", fromlist=["get"]).get("META_API_KEY"), base_url=settings.meta_base_url)
     data_url = f"data:{mime};base64,{base64.b64encode(image).decode()}"
     res = client.responses.create(model=SAM_MODEL, input=[{"role": "user", "content": [
         {"type": "input_text", "text": prompt},

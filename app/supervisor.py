@@ -201,9 +201,11 @@ def _readable(page: str) -> str:
 def search_web(query: str, limit: int = 6) -> list[dict]:
     provider = config().get("search_provider", "ddg")
     try:
-        if provider == "tavily" and os.getenv("TAVILY_API_KEY"):
+        from app import vault
+        tavily = vault.get("TAVILY_API_KEY")
+        if provider == "tavily" and tavily:
             r = httpx.post("https://api.tavily.com/search", timeout=20,
-                           json={"api_key": os.environ["TAVILY_API_KEY"], "query": query, "max_results": limit})
+                           json={"api_key": tavily, "query": query, "max_results": limit})
             return [{"title": x.get("title", ""), "url": x.get("url", ""), "snippet": x.get("content", "")[:300]}
                     for x in r.json().get("results", [])]
         r = httpx.get("https://html.duckduckgo.com/html/", params={"q": query}, timeout=20,

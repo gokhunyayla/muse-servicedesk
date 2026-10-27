@@ -37,9 +37,20 @@ class MetaLLM:
     def __init__(self) -> None:
         from openai import OpenAI
 
-        if not settings.meta_api_key:
+        from app import vault
+        if not vault.get("META_API_KEY"):
             raise RuntimeError("META_API_KEY is empty; add it to .env")
-        self.client = OpenAI(api_key=settings.meta_api_key, base_url=settings.meta_base_url)
+        self._key = None
+        self._client = None
+
+    @property
+    def client(self) -> OpenAI:
+        """Rebuilt whenever the admin changes the key in Settings (no restart)."""
+        from app import vault
+        key = vault.get("META_API_KEY")
+        if self._client is None or key != self._key:
+            self._key, self._client = key, OpenAI(api_key=key, base_url=settings.meta_base_url)
+        return self._client
 
     def chat(self, messages: list[dict], tools: list[dict], heavy: bool = False) -> Reply:
         from openai import BadRequestError

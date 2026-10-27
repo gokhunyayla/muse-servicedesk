@@ -5,3 +5,6 @@ __pycache__/
 *.db
 .pytest_cache/
 .DS_Store
+
+# encryption key for console-managed secrets
+data/.secret_key
