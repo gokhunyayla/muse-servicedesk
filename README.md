@@ -82,6 +82,23 @@ Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is create
 **WhatsApp:** expose port 1002 (e.g. `cloudflared tunnel --url http://localhost:1002`), set the webhook to
 `https://<tunnel>/webhook` with `WA_VERIFY_TOKEN`, subscribe to `messages`.
 
+### Test users (simulated directory, `app/systems.py`)
+
+Identity checks ask for employee no + birth year. Say e.g. *"Ayşe Demir, E1001, 1990, TR-LT-101"*.
+
+| Employee no | Name | Birth year | Device | Dept | Manager | Seeded state |
+|---|---|---|---|---|---|---|
+| E1001 | Ayşe Demir | 1990 | TR-LT-101 | Sales | E1002 | VPN profile expired |
+| E1002 | Mehmet Kaya | 1985 | TR-LT-102 | Sales | E1003 | disk 97% full, SAP `SD_DISPLAY` |
+| E1003 | Zeynep Arslan | 1994 | TR-LT-103 | Finance | — | SAP `FI_DISPLAY`, `FI_POST` |
+
+Useful seeds: licenses `M365-E3`, `Teams-Phone`, `Visio` are self-service; `Project`, `Adobe-CC`, `AutoCAD` need manager
+approval (`ONAY <id>` over chat). SAP roles: `SD_CREATE`, `MM_PURCHASE` go through L3 + approval. Advisory
+`CVE-2026-4411` ("php2shell") has vulnerable servers in the CMDB. Endpoint scripts: `vpn-reset`, `dns-reset`,
+`printer-fix`, `perf-report`, `driver-rollback`, `disk-cleanup`, `lock-screen`. Cameras: `CAM-SALES-01` (E1001),
+`CAM-FIN-01` (E1003). Manager approval requests go to the manager's seeded phone; point one at your own number to
+answer them from WhatsApp.
+
 **API without WhatsApp:** `POST /messages {requester, text}` · `POST /voice` · `POST /image` · `POST /video` ·
 `POST /camera/{camera_id}` · `POST /approvals/{id}` · `GET /tickets/{id}`.
 
