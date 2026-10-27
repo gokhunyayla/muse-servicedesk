@@ -1,0 +1,125 @@
+"""Tools the agents can call. Authority is enforced here, in code: a tool lists the tiers
+allowed to run it, and an agent only ever sees (and can only execute) its own tools."""
+from __future__ import annotations
+
+import inspect
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from app import systems
+from app.db import Ticket, log
+
+
+@dataclass
+class Ctx:
+    db: Any
+    ticket: Ticket
+    agent: str
+
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    tiers: tuple[str, ...]
+    params: dict
+    func: Callable
+
+    def spec(self) -> dict:
+        required = [k for k, v in self.params.items() if not v.get("optional")]
+        props = {k: {kk: vv for kk, vv in v.items() if kk != "optional"} for k, v in self.params.items()}
+        return {"type": "function", "function": {
+            "name": self.name, "description": self.description,
+            "parameters": {"type": "object", "properties": props, "required": required}}}
+
+
+REGISTRY: dict[str, Tool] = {}
+
+
+def tool(description: str, tiers: tuple[str, ...], **params: dict):
+    def wrap(func: Callable) -> Callable:
+        REGISTRY[func.__name__] = Tool(func.__name__, description, tiers, params, func)
+        return func
+    return wrap
+
+
+def tools_for(tier: str) -> list[Tool]:
+    return [t for t in REGISTRY.values() if tier in t.tiers]
+
+
+def run_tool(ctx: Ctx, name: str, args: dict) -> dict:
+    t = REGISTRY.get(name)
+    if t is None or ctx.agent not in t.tiers:
+        return {"ok": False, "error": f"{ctx.agent} is not allowed to use '{name}'"}
+    try:
+        inspect.signature(t.func).bind(ctx, **args)
+    except TypeError as e:
+        return {"ok": False, "error": f"bad arguments: {e}"}
+    try:
+        return t.func(ctx, **args)
+    except Exception as e:  # a failing tool must not end the conversation
+        return {"ok": False, "error": str(e)}
+
+
+STR = {"type": "string"}
+INT = {"type": "integer"}
+ALL = ("L1", "L2", "L3", "L4")
+
+
+@tool("Look up the employee who owns this phone number.", ("L1",), phone=STR)
+def find_user(ctx: Ctx, phone: str) -> dict:
+    hit = systems.user_by_phone(phone)
+    if not hit:
+        return {"ok": False, "error": "no employee with this phone"}
+    emp, u = hit
+    return {"ok": True, "employee_no": emp, "name": u["name"], "device": u["device"]}
+
+
+@tool("Verify identity with employee number and birth year. Required before account changes.",
+      ("L1",), employee_no=STR, birth_year=INT)
+def verify_identity(ctx: Ctx, employee_no: str, birth_year: int) -> dict:
+    u = systems.USERS.get(employee_no)
+    ok = bool(u) and u["birth_year"] == int(birth_year)
+    if ok:
+        ctx.ticket.verified = True
+    return {"ok": ok}
+
+
+@tool("Reset the employee's password; returns a one-time temporary password.", ("L1", "L3"), employee_no=STR)
+def reset_password(ctx: Ctx, employee_no: str) -> dict:
+    if not ctx.ticket.verified:
+        return {"ok": False, "error": "identity not verified in this ticket"}
+    return {"ok": True, "temporary_password": systems.reset_password(employee_no), "must_change": True}
+
+
+@tool("Read the VPN profile state of a laptop.", ("L1", "L2"), hostname=STR)
+def vpn_status(ctx: Ctx, hostname: str) -> dict:
+    d = systems.DEVICES.get(hostname)
+    if not d:
+        return {"ok": False, "error": "unknown device"}
+    return {"ok": True, "hostname": hostname, "vpn_profile": d["vpn_profile"], "online": d["online"]}
+
+
+@tool("Push a fresh VPN profile to a laptop.", ("L1", "L2"), hostname=STR)
+def renew_vpn_profile(ctx: Ctx, hostname: str) -> dict:
+    d = systems.DEVICES.get(hostname)
+    if not d:
+        return {"ok": False, "error": "unknown device"}
+    if not d["online"]:
+        return {"ok": False, "error": "device offline; cannot push profile"}
+    d["vpn_profile"] = "valid"
+    return {"ok": True, "hostname": hostname, "vpn_profile": "valid"}
+
+
+@tool("Run network diagnostics (reachability, DNS) on a laptop.", ("L2",), hostname=STR)
+def network_diagnostics(ctx: Ctx, hostname: str) -> dict:
+    d = systems.DEVICES.get(hostname)
+    if not d:
+        return {"ok": False, "error": "unknown device"}
+    return {"ok": True, "online": d["online"], "dns_ok": d["dns_ok"]}
+
+
+@tool("Record a decision or finding on the ticket.", ALL, text=STR)
+def add_note(ctx: Ctx, text: str) -> dict:
+    log(ctx.db, ctx.ticket.id, ctx.agent, "note", text)
+    return {"ok": True}

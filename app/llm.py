@@ -1,0 +1,83 @@
+"""Model access. One interface, two implementations:
+
+- MetaLLM talks to Meta Model API (OpenAI-compatible chat completions).
+- ScriptedLLM replays fixed responses so tests run offline and deterministically.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Protocol
+
+from app.config import settings
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class Reply:
+    text: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+
+
+class LLM(Protocol):
+    def chat(self, messages: list[dict], tools: list[dict]) -> Reply: ...
+
+
+class MetaLLM:
+    def __init__(self) -> None:
+        from openai import OpenAI
+
+        if not settings.meta_api_key:
+            raise RuntimeError("META_API_KEY is empty; add it to .env")
+        self.client = OpenAI(api_key=settings.meta_api_key, base_url=settings.meta_base_url)
+
+    def chat(self, messages: list[dict], tools: list[dict]) -> Reply:
+        res = self.client.chat.completions.create(
+            model=settings.meta_model,
+            messages=messages,
+            tools=tools or None,
+            # reasoning tokens count against this budget, so keep it generous
+            max_tokens=4000,
+            extra_body={"reasoning_effort": settings.reasoning_effort},
+        )
+        msg = res.choices[0].message
+        calls = [
+            ToolCall(id=c.id, name=c.function.name, arguments=json.loads(c.function.arguments or "{}"))
+            for c in (msg.tool_calls or [])
+        ]
+        return Reply(text=msg.content or "", tool_calls=calls)
+
+
+class ScriptedLLM:
+    """Returns the queued replies in order; records every request for assertions."""
+
+    def __init__(self, replies: list[Reply]) -> None:
+        self.replies = list(replies)
+        self.requests: list[list[dict]] = []
+
+    def chat(self, messages: list[dict], tools: list[dict]) -> Reply:
+        self.requests.append([dict(m) for m in messages])
+        if not self.replies:
+            return Reply(text="(script exhausted)")
+        return self.replies.pop(0)
+
+
+_llm: LLM | None = None
+
+
+def get_llm() -> LLM:
+    global _llm
+    if _llm is None:
+        _llm = MetaLLM()
+    return _llm
+
+
+def set_llm(llm: LLM) -> None:
+    global _llm
+    _llm = llm
