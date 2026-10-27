@@ -171,3 +171,18 @@ def test_profile_name_and_password_change(desk):
     assert again.get("/me").json()["name"] == "Desk Boss"
     assert desk.get("/audit.json").json()[0]["action"] == "login.ok"
     assert "Profile" in desk.get("/profile").text and "Audit log" in desk.get("/audit").text
+
+
+def test_desk_can_reply_and_change_status(desk):
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    desk.post("/messages", json={"requester": "+905551110001", "text": "projektör açılmıyor"})
+    r = desk.post("/tickets/1/reply", json={"text": "Teknisyen 14:00'te gelecek."}).json()
+    assert r == {"id": 1, "sent": True}
+    with session() as db:
+        assert db.query(Outbound).filter_by(ticket_id=1).one().text == "Teknisyen 14:00'te gelecek."
+    t = desk.get("/tickets/1").json()
+    assert t["events"][-1]["actor"] == "desk:Desk Admin" and t["events"][-1]["kind"] == "message"
+    assert desk.post("/tickets/1/status", json={"status": "escalated"}).json()["owner"] == "human"
+    assert desk.post("/tickets/1/status", json={"status": "resolved", "note": "yerinde çözüldü"}).json()["status"] == "resolved"
+    assert desk.get("/tickets/1").json()["resolution"] == "yerinde çözüldü"
+    assert desk.post("/tickets/1/status", json={"status": "weird"}).status_code == 422

@@ -161,6 +161,10 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 .meta{border-left:1px solid var(--line);padding-left:18px;font-size:13px}@media(max-width:900px){.meta{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:10px}}
 .meta dl{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:0}.meta dt{color:var(--muted)}.meta dd{margin:0;overflow-wrap:anywhere}
 .meta h4{margin:14px 0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.tagok{color:var(--ok)}.meta a{color:var(--accent);text-decoration:none}
+.composer{display:flex;gap:8px;margin-top:10px;align-items:flex-end}.composer textarea{flex:1;font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);resize:vertical}
+.msg.desk{align-self:flex-start;background:rgba(49,162,76,.14);border:1px solid rgba(49,162,76,.35);border-bottom-left-radius:4px}
+.meta select{width:100%;font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.tool summary small,.sys small{color:var(--muted);font-weight:400;margin-left:4px}
 </style></head><body class="app">
 <!--RAIL--><div class="page">
 <div class="toolbar"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
@@ -172,7 +176,9 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <section class="card"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn primary" id="mergeBtn" disabled onclick="openMerge()">Merge into problem</button></div></div>
 <div class="scroll"><table><thead><tr><th class="sel"></th><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
 <section class="card detail" style="grid-column:1/-1" id="detail"><div class="thead"><h3 id="ttitle">Ticket</h3><div class="actions" id="tactions"></div></div>
-<div class="dcols"><div id="trail" class="timeline"><small>Select a ticket to see its conversation and what the agents did.</small></div><aside id="meta" class="meta"></aside></div></section>
+<div class="dcols"><div><div id="trail" class="timeline"><small>Select a ticket to see its conversation and what the agents did.</small></div>
+<form class="composer" id="composer" style="display:none" onsubmit="sendReply(event)"><textarea id="replyText" rows="2" placeholder="Write to the employee… (sent over WhatsApp)"></textarea><button class="btn primary" type="submit">Send</button></form></div>
+<aside id="meta" class="meta"></aside></div></section>
 </main></div>
 <div class="modal" id="mergeModal"><div class="box"><h3>Merge into a problem record</h3><small id="mergeList"></small>
 <label>Problem title</label><input id="mTitle" placeholder="e.g. Exchange connectivity outage">
@@ -244,33 +250,38 @@ function renderTimeline(events){
  const out=[];const calls=new Map();
  for(const e of events){
   if(e.kind==='message'){
-   const who=e.actor==='user'?'user':'agent';
-   out.push(`<div class="msg ${who}">${esc(e.content)}<small>${who==='user'?'employee':esc(AGENT_LABEL[e.actor]||e.actor)} · ${tstamp(e.at)}</small></div>`);
+   const who=e.actor==='user'?'user':(e.actor.startsWith('desk:')?'desk':'agent');
+   const label=who==='user'?'employee':(who==='desk'?'desk · '+e.actor.slice(5):(AGENT_LABEL[e.actor]||e.actor));
+   out.push(`<div class="msg ${who}">${esc(e.content)}<small>${esc(label)} · ${tstamp(e.at)}</small></div>`);
   }else if(e.kind==='tool_call'){
    calls.set(e.content+'|'+e.actor,{args:e.data,actor:e.actor,at:e.at});
-   out.push(`<details class="tool" data-k="${esc(e.content+'|'+e.actor)}"><summary><i>${esc(e.actor)}</i> · <b>${esc(e.content)}</b> <span class="pending">…</span></summary><pre>${esc(JSON.stringify(e.data,null,1))}</pre></details>`);
+   out.push(`<details class="tool" data-k="${esc(e.content+'|'+e.actor)}"><summary><i>${esc(e.actor)}</i> · <b>${esc(e.content)}</b> <span class="pending">…</span><small>${tstamp(e.at)}</small></summary><pre>${esc(JSON.stringify(e.data,null,1))}</pre></details>`);
   }else if(e.kind==='tool_result'){
    const ok=!(e.data&&e.data.ok===false);const k=e.content+'|'+e.actor;
    for(let i=out.length-1;i>=0;i--){if(out[i].startsWith(`<details class="tool" data-k="${esc(k)}"`)&&out[i].includes('class="pending"')){
     out[i]=out[i].replace('<span class="pending">…</span>',ok?'<span class="ok">✓</span>':'<span class="err">✗</span>').replace('</pre></details>',`</pre><pre>→ ${esc(JSON.stringify(e.data,null,1).slice(0,1500))}</pre></details>`);break;}}
-  }else if(e.kind==='handoff'){out.push(`<div class="sys handoff">⇄ ${esc(e.content)}</div>`);}
-  else if(e.kind==='note'){out.push(`<div class="sys note"><b>${esc(e.actor)}</b> · ${esc(e.content)}</div>`);}
-  else{out.push(`<div class="sys">${esc(e.actor)} · ${esc(e.kind)} · ${esc(e.content)}</div>`);}
+  }else if(e.kind==='handoff'){out.push(`<div class="sys handoff">⇄ ${esc(e.content)}<small>${tstamp(e.at)}</small></div>`);}
+  else if(e.kind==='note'){out.push(`<div class="sys note"><b>${esc(e.actor)}</b> · ${esc(e.content)}<small>${tstamp(e.at)}</small></div>`);}
+  else{out.push(`<div class="sys">${esc(e.actor)} · ${esc(e.kind)} · ${esc(e.content)}<small>${tstamp(e.at)}</small></div>`);}
  }
  return out.join('');
 }
 async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id)).json();
  $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} ${pill(t.status)}`;
  $('#tactions').innerHTML=`<button class="btn" onclick="openAssign(${t.id})">Assign</button>`+(t.status!=='resolved'?` <button class="btn" onclick="closeTicket(${t.id})">Close</button>`:'');
- $('#meta').innerHTML=`<h4>Details</h4><dl><dt>Requester</dt><dd>${esc(t.requester||'')}</dd><dt>Status</dt><dd>${pill(t.status)}</dd><dt>Owner</dt><dd>${esc(AGENT_LABEL[t.owner]||t.owner||'')}</dd>
+ $('#meta').innerHTML=`<h4>Details</h4><dl><dt>Requester</dt><dd>${esc(t.requester||'')}</dd><dt>Status</dt><dd><select onchange="setStatus(${t.id},this.value)">${['open','waiting_user','waiting_approval','escalated','resolved'].map(x=>`<option value="${x}" ${x===t.status?'selected':''}>${LABELS[x]}</option>`).join('')}</select></dd><dt>Owner</dt><dd>${esc(AGENT_LABEL[t.owner]||t.owner||'')}</dd>
   <dt>Identity</dt><dd>${t.verified?'<span class="tagok">verified</span>':'not verified'}</dd><dt>Opened</dt><dd>${fmt(t.created_at)}</dd>
   ${t.rating?`<dt>Rating</dt><dd>${'★'.repeat(t.rating)}${'☆'.repeat(5-t.rating)}</dd>`:''}
   ${t.incident_id?`<dt>Problem</dt><dd><a href="#" onclick="show(${t.incident_id});return false">#${t.incident_id}</a></dd>`:''}
   ${t.linked&&t.linked.length?`<dt>Linked</dt><dd>${t.linked.map(i=>`<a href="#" onclick="show(${i});return false">#${i}</a>`).join(', ')}</dd>`:''}</dl>
   ${t.resolution?`<h4>Resolution</h4><div>${esc(t.resolution)}</div>`:''}
   <h4>Activity</h4><div class="muted">${t.events.filter(e=>e.kind==='tool_call').length} tool calls · ${t.events.filter(e=>e.kind==='handoff').length} handoffs · ${t.events.filter(e=>e.kind==='message').length} messages</div>`;
- $('#trail').innerHTML=renderTimeline(t.events);
+ $('#trail').innerHTML=renderTimeline(t.events);$('#composer').style.display='';
  if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#detail').scrollIntoView({behavior:'smooth'});}}
+async function sendReply(ev){ev.preventDefault();const text=$('#replyText').value.trim();if(!text||!cur)return;
+ await fetch('/tickets/'+cur+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});$('#replyText').value='';show(cur);}
+async function setStatus(id,status){if(status==='resolved'){closeTicket(id);return;}
+ await fetch('/tickets/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});await load();show(id,true);}
 function closeTicket(id){$('#cTitle').textContent='Close #'+id;$('#closeModal').dataset.id=id;$('#closeModal').classList.add('on');$('#cNote').focus();}
 async function doClose(){const id=$('#closeModal').dataset.id;await fetch('/tickets/'+id+'/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution:$('#cNote').value.trim()||'closed by the service desk'})});
  closeModal('closeModal');await load();show(id);}

@@ -172,6 +172,57 @@ def assign_ticket(ticket_id: int, a: Assignment, request: Request, user=Depends(
         return {"id": t.id, "status": t.status, "owner": t.owner, "reply": answer}
 
 
+class DeskReply(BaseModel):
+    text: str
+
+
+@app.post("/tickets/{ticket_id}/reply")
+def desk_reply(ticket_id: int, r: DeskReply, request: Request, user=Depends(current_user)) -> dict:
+    """A desk user writes to the employee directly; it goes out over WhatsApp and into the trail."""
+    from app.db import Outbound
+    text = r.text.strip()
+    if not text:
+        raise HTTPException(422, "empty message")
+    with session() as db:
+        t = db.get(Ticket, ticket_id)
+        if t is None:
+            raise HTTPException(404)
+        check_origin(request)
+        log(db, t.id, f"desk:{user.name}", "message", text)
+        if t.requester.startswith("+"):
+            db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
+        if t.status == "waiting_user":
+            pass                                   # still waiting for the employee
+        audit(db, user.email, "ticket.reply", target=t.id, detail=text)
+        return {"id": t.id, "sent": t.requester.startswith("+")}
+
+
+class StatusChange(BaseModel):
+    status: str
+    note: str = ""
+
+
+@app.post("/tickets/{ticket_id}/status")
+def desk_status(ticket_id: int, s: StatusChange, request: Request, user=Depends(current_user)) -> dict:
+    """A desk user changes the ticket status by hand."""
+    if s.status not in ("open", "waiting_user", "waiting_approval", "escalated", "resolved"):
+        raise HTTPException(422, "unknown status")
+    with session() as db:
+        t = db.get(Ticket, ticket_id)
+        if t is None:
+            raise HTTPException(404)
+        check_origin(request)
+        old = t.status
+        t.status = s.status
+        if s.status == "escalated":
+            t.owner = "human"
+        if s.status == "resolved" and s.note:
+            t.resolution = s.note
+        log(db, t.id, f"desk:{user.name}", "note", f"status {old} → {s.status}" + (f": {s.note}" if s.note else ""))
+        audit(db, user.email, "ticket.status", target=t.id, detail=f"{old} -> {s.status} {s.note}".strip())
+        return {"id": t.id, "status": t.status, "owner": t.owner}
+
+
 @app.post("/approvals/{approval_id}", dependencies=[Depends(api_key)])
 def decide_approval(approval_id: int, d: Decision) -> dict:
     from app.agents import handle_approval
