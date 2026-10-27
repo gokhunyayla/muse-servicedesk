@@ -69,9 +69,30 @@ def test_only_the_assigned_manager_can_approve():
     with session() as db:
         t, _ = handle_message(db, "+905551110001", "x")
         aid = db.query(Approval).one().id
-    with pytest.raises(PermissionError):
-        with session() as db:
-            handle_message(db, "+905551110003", f"ONAY {aid}")
+    set_llm(ScriptedLLM([Reply(text="?")]))
+    with session() as db:                       # someone else's "ONAY" is just a message, not a decision
+        handle_message(db, "+905551110003", f"ONAY {aid}")
+        assert db.get(Approval, aid).decision is None
+
+
+def test_decision_inside_a_sentence_wins_over_open_tickets_of_the_manager():
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("request_manager_approval", employee_no="E1001", request="Project lisansı")]),
+                         Reply(text="bekliyor")]))
+    with session() as db:
+        handle_message(db, "+905551110001", "Project lisansı lazım")
+        aid = db.query(Approval).one().id
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum."), Reply(text="NEW"), Reply(text="Bakıyorum.")]))
+    with session() as db:                       # the manager has two open tickets of their own
+        handle_message(db, "+905551110002", "benim de vpn bağlanmıyor")
+        handle_message(db, "+905551110002", "ayrıca yazıcı kağıt sıkıştırıyor sürekli")
+        n = db.query(Ticket).count()
+    set_llm(ScriptedLLM([Reply(text="Talebiniz reddedildi.")]))
+    with session() as db:
+        t, answer = handle_message(db, "+905551110002", f"reddetmek için RET {aid}")
+        assert db.get(Approval, aid).decision == "denied"
+        assert t.requester == "+905551110001"   # the employee's ticket, continued by L1
+        assert db.query(Ticket).count() == n     # no stray ticket for the manager
+
 
 
 def test_sap_role_goes_through_l3_and_needs_approval():

@@ -186,11 +186,43 @@ def _closing_exchange(db, requester: str, text: str) -> Ticket | None:
     return last
 
 
+APPROVAL_RE = re.compile(r"\b(onay|onayl[ıi]yorum|approve[d]?|ret|reddet|reddediyorum|deny|denied)\b\s*#?(\d+)?", re.I)
+
+
+def _approval_decision(db, requester: str, text: str):
+    """If the sender has pending approvals and the message carries ONAY/RET (with or without a number),
+    return (approval, decision). A number must match one of their pending approvals; without a number,
+    only an unambiguous single pending approval is taken."""
+    from app import systems
+    from app.db import Approval
+    m = APPROVAL_RE.search(text)
+    if not m:
+        return None
+    mine = [e for e, u in systems.USERS.items() if u.get("phone") == requester]
+    if not mine:
+        return None
+    pending = (db.query(Approval).filter(Approval.approver.in_(mine), Approval.decision.is_(None))
+               .order_by(Approval.id.desc()).all())
+    if not pending:
+        return None
+    decision = "approved" if m.group(1).lower().startswith(("onay", "approve")) else "denied"
+    if m.group(2):
+        hit = [a for a in pending if a.id == int(m.group(2))]
+        return (hit[0], decision) if hit else None
+    return (pending[0], decision) if len(pending) == 1 else None
+
+
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
                    mime: str = "image/jpeg", extra_images: list[bytes] | None = None) -> tuple[Ticket, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
     or open a new one, then run L1."""
     from app.llm import image_message
+    # 1) Is this an approver answering a pending approval? That wins over everything else, and the
+    #    decision may sit inside a sentence ("tamam, ONAY 3" / "reddetmek için RET 1").
+    decided = _approval_decision(db, requester, text)
+    if decided is not None:
+        approval, decision = decided
+        return handle_approval(db, approval.id, decision, requester)
     open_tickets = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
                     .order_by(Ticket.id.desc()).all())
     ticket = open_tickets[0] if open_tickets else None
@@ -223,11 +255,6 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     for e in ticket.events:
         if e.kind == "message":
             history.append({"role": "user" if e.actor == "user" else "assistant", "content": e.content})
-    # a manager answering "ONAY 3" / "RET 3" is an approval decision, not a new problem
-    m = re.match(r"^\s*(onay|ret|approve|deny)\s+#?(\d+)\s*$", text, re.I)
-    if m:
-        decision = "approved" if m.group(1).lower() in ("onay", "approve") else "denied"
-        return handle_approval(db, int(m.group(2)), decision, requester)
     log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
     # a plain "kapat" / "iptal" closes the ticket without a model round-trip
     if ticket.status != "resolved" and CLOSE_RE.match(text):
