@@ -30,5 +30,3 @@ Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is create
 ## Built during the hackathon
 
 All code in this repository was written during the event, starting Oct 27, 2026.
-Before the event I sketched the idea and an early prototype in a separate repository;
-no code from it is used here.
