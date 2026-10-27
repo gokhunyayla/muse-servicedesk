@@ -119,3 +119,28 @@ def session():
 def log(db, ticket_id: int, actor: str, kind: str, content: str = "", data: dict | None = None) -> None:
     db.add(Event(ticket_id=ticket_id, actor=actor, kind=kind, content=content, data=data))
     db.flush()
+
+
+class User(Base):
+    """A person who may sign in to the service desk console: an admin or a support agent."""
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="agent")     # admin | agent
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    reset_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reset_expires: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Session(Base):
+    """A signed-in browser session (HttpOnly cookie carries the token)."""
+    __tablename__ = "sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)

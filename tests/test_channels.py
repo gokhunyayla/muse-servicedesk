@@ -53,18 +53,18 @@ def test_outbound_queue_is_drained_to_whatsapp(fresh):
         assert db.query(Outbound).one().sent is True
 
 
-def test_dashboard_page_and_stats():
+def test_dashboard_page_and_stats(desk):
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "close_ticket", {"resolution": "ok"})]), Reply(text="kapandı")]))
-    c = TestClient(app)
+    c = desk
     c.post("/messages", json={"requester": "+905551110001", "text": "vpn bağlanmıyor"})
     s = c.get("/stats").json()
     assert s["total"] == 1 and s["auto_resolution_rate"] == 1.0 and s["top_issues"][0][0] == "vpn / network"
     assert "Muse ServiceDesk" in c.get("/").text
 
 
-def test_desk_merges_tickets_into_a_problem_and_assigns_it(fresh):
+def test_desk_merges_tickets_into_a_problem_and_assigns_it(fresh, desk):
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")] * 3))
-    c = TestClient(app)
+    c = desk
     for who, text in (("+905551110001", "Outlook açılmıyor"), ("+905551110002", "mail sunucusu hata veriyor"),
                       ("+905551110003", "e-posta gelmiyor")):
         c.post("/messages", json={"requester": who, "text": text})
@@ -83,3 +83,30 @@ def test_desk_merges_tickets_into_a_problem_and_assigns_it(fresh):
     r = c.post("/tickets/2/assign", json={"owner": "human", "assignee": "Mehmet"}).json()
     assert r == {"id": 2, "status": "escalated", "owner": "human"}
     assert c.post("/problems", json={"ticket_ids": [1], "title": "x"}).status_code == 422
+
+
+def test_console_requires_sign_in_and_admin_manages_users(desk):
+    anon = TestClient(app)
+    assert anon.get("/stats").status_code == 401
+    assert anon.get("/", headers={"accept": "text/html"}, follow_redirects=False).headers["location"] == "/login"
+    assert anon.post("/login", data={"email": "admin@test", "password": "wrong"}, follow_redirects=False).headers["location"].startswith("/login?error")
+    # admin adds a support agent; the agent can sign in but cannot manage users
+    r = desk.post("/users", data={"name": "Zeynep", "email": "z@test", "role": "agent", "password": "agent-pass-1"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert [u["name"] for u in desk.get("/users.json").json()] == ["Desk Admin", "Zeynep"]
+    agent = TestClient(app)
+    agent.post("/login", data={"email": "z@test", "password": "agent-pass-1"}, follow_redirects=False)
+    assert agent.get("/me").json()["role"] == "agent"
+    assert agent.get("/users").status_code == 403
+    # forgot / reset: token is issued, password changes, old sessions die
+    from app.db import User, session
+    desk.post("/forgot", data={"email": "z@test"}, follow_redirects=False)
+    with session() as db:
+        token = db.query(User).filter_by(email="z@test").one().reset_token
+    assert token
+    r = agent.post("/reset", data={"token": token, "password": "new-pass-123", "password2": "new-pass-123"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/login?info")
+    assert agent.get("/me").status_code == 401
+    again = TestClient(app)
+    again.post("/login", data={"email": "z@test", "password": "new-pass-123"}, follow_redirects=False)
+    assert again.get("/me").json()["name"] == "Zeynep"

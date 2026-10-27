@@ -1,4 +1,5 @@
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.agents import handle_message
@@ -7,11 +8,28 @@ from app.voice import transcribe
 
 app = FastAPI(title="Muse ServiceDesk")
 
+from app.auth import bootstrap_admin, current_user  # noqa: E402
 from app.dashboard import router as dashboard_router  # noqa: E402
 from app.whatsapp import router as whatsapp_router    # noqa: E402
+from app.auth import router as auth_router            # noqa: E402
 
+app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(whatsapp_router)
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    bootstrap_admin()
+
+
+@app.exception_handler(HTTPException)
+async def _auth_redirect(request: Request, exc: HTTPException):
+    """Browser page requests without a session go to the sign-in page; API calls get the JSON 401."""
+    if exc.status_code == 401 and "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse("/login", 303)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=getattr(exc, "headers", None))
 
 
 class Incoming(BaseModel):
@@ -64,7 +82,7 @@ class DeskClose(BaseModel):
 
 
 @app.post("/tickets/{ticket_id}/close")
-def desk_close(ticket_id: int, d: DeskClose) -> dict:
+def desk_close(ticket_id: int, d: DeskClose, user=Depends(current_user)) -> dict:
     """A human on the desk closes a ticket (e.g. an escalated one); the employee is told over WhatsApp."""
     from app.db import Outbound
     with session() as db:
@@ -73,8 +91,9 @@ def desk_close(ticket_id: int, d: DeskClose) -> dict:
             raise HTTPException(404)
         if t.status == "resolved":
             return {"id": t.id, "status": t.status}
-        t.status, t.resolution, t.owner = "resolved", d.resolution, d.by
-        log(db, t.id, d.by, "note", f"closed by the desk: {d.resolution}")
+        by = f"desk:{user.name}"
+        t.status, t.resolution, t.owner = "resolved", d.resolution, "desk"
+        log(db, t.id, by, "note", f"closed by the desk: {d.resolution}")
         text = f"Talebiniz (#{t.id}) servis masası tarafından kapatıldı: {d.resolution}"
         if t.requester.startswith("+"):
             db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
@@ -90,7 +109,7 @@ class Problem(BaseModel):
 
 
 @app.post("/problems")
-def merge_into_problem(p: Problem) -> dict:
+def merge_into_problem(p: Problem, user=Depends(current_user)) -> dict:
     """The desk merges several tickets into one problem record. The oldest selected ticket becomes the
     record; the others link to it and close with it. An optional update goes out to everyone."""
     from app.db import Outbound
@@ -104,7 +123,7 @@ def merge_into_problem(p: Problem) -> dict:
         head.title, head.owner = f"[INCIDENT] {p.title}", p.owner
         if head.status == "resolved":
             head.status = "open"
-        log(db, head.id, "desk", "note", f"problem record created by the desk from tickets {[t.id for t in ts]}")
+        log(db, head.id, f"desk:{user.name}", "note", f"problem record created by the desk from tickets {[t.id for t in ts]}")
         for t in rest:
             t.incident_id = head.id
             log(db, t.id, "desk", "note", f"linked to problem #{head.id} by the desk")
@@ -122,7 +141,7 @@ class Assignment(BaseModel):
 
 
 @app.post("/tickets/{ticket_id}/assign")
-def assign_ticket(ticket_id: int, a: Assignment) -> dict:
+def assign_ticket(ticket_id: int, a: Assignment, user=Depends(current_user)) -> dict:
     """The desk assigns a ticket. To an agent tier: that agent takes over right away with the desk's note.
     To a human: the ticket is escalated and waits for that person."""
     from app.agents import AGENTS
@@ -133,14 +152,14 @@ def assign_ticket(ticket_id: int, a: Assignment) -> dict:
         if a.owner == "human":
             t.status, t.owner = "escalated", "human"
             who = f" to {a.assignee}" if a.assignee else ""
-            log(db, t.id, "desk", "note", f"assigned{who} by the desk. {a.note}".strip())
+            log(db, t.id, f"desk:{user.name}", "note", f"assigned{who} by the desk. {a.note}".strip())
             return {"id": t.id, "status": t.status, "owner": t.owner}
         if a.owner not in AGENTS:
             raise HTTPException(422, "owner must be L1, L2, L3, L4 or human")
         t.owner = a.owner
         if t.status in ("escalated", "resolved"):
             t.status = "open"
-        log(db, t.id, "desk", "note", f"assigned to {a.owner} by the desk. {a.note}".strip())
+        log(db, t.id, f"desk:{user.name}", "note", f"assigned to {a.owner} by the desk. {a.note}".strip())
         answer = AGENTS[a.owner].run(db, t, f"[Assigned to you by the service desk] {a.note or 'Take over this ticket.'} "
                                             f"Review the trail, act with your tools, and report what you did.")
         log(db, t.id, a.owner, "message", answer)
@@ -190,7 +209,7 @@ async def post_camera_frame(camera_id: str, image: UploadFile = File(...)) -> di
 
 
 @app.get("/tickets")
-def list_tickets(status: str | None = None, owner: str | None = None, period: str | None = None) -> list[dict]:
+def list_tickets(status: str | None = None, owner: str | None = None, period: str | None = None, user=Depends(current_user)) -> list[dict]:
     from app.dashboard import period_start
     with session() as db:
         q = db.query(Ticket).order_by(Ticket.id.desc())
@@ -229,7 +248,7 @@ def run_followups() -> dict:
 
 
 @app.get("/tickets/{ticket_id}")
-def get_ticket(ticket_id: int) -> dict:
+def get_ticket(ticket_id: int, user=Depends(current_user)) -> dict:
     with session() as db:
         t = db.get(Ticket, ticket_id)
         if t is None:

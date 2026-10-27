@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections import Counter
 from datetime import timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
+from app.auth import current_user
 from app.db import Event, Ticket, _now, session
 
 router = APIRouter()
@@ -31,7 +32,7 @@ def period_start(period: str | None):
 
 
 @router.get("/stats")
-def stats(period: str | None = None, owner: str | None = None) -> dict:
+def stats(period: str | None = None, owner: str | None = None, user=Depends(current_user)) -> dict:
     """KPIs, top issues and tier load for the selected period; `owner` narrows everything except the
     per-tier cards, which always show the whole period so the cards stay comparable."""
     with session() as db:
@@ -83,7 +84,7 @@ CATEGORIES = {   # English labels; keywords cover Turkish and English ticket tit
 
 
 @router.get("/", response_class=HTMLResponse)
-def page() -> str:
+def page(user=Depends(current_user)) -> str:
     return PAGE
 
 
@@ -101,6 +102,7 @@ header{position:sticky;top:0;z-index:5;background:var(--card);padding:10px 16px;
 h1{font-size:16px;margin:0;line-height:1.1;white-space:nowrap}h1 small{display:block;font-size:11px;font-weight:400}h3{margin:14px 0 8px;font-size:14px}small{color:var(--muted)}
 .right{display:flex;align-items:center;gap:8px}.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .live i{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
+.who{font-size:12px;color:var(--muted);white-space:nowrap}@media(max-width:600px){.who{display:none}}
 @media(max-width:600px){.live span{display:none}}
 .ibtn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;display:grid;place-items:center;padding:0}
 .ibtn:hover{background:var(--bg)}.ibtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -141,7 +143,9 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 <div class="brand"><div class="logo"><svg viewBox="0 0 24 24"><path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg></div>
 <h1>Muse ServiceDesk<small>Service desk console</small></h1></div>
 <div class="right"><span class="live"><i></i><span id="upd">live</span></span>
-<button class="ibtn" id="theme" title="Theme: system" aria-label="Toggle theme"></button></div></header>
+<span class="who" id="who"></span><a class="ibtn" id="usersLink" href="/users" title="Desk users" style="display:none"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg></a>
+<button class="ibtn" id="theme" title="Theme: system" aria-label="Toggle theme"></button>
+<a class="ibtn" href="/logout" title="Sign out"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></a></div></header>
 <div class="toolbar"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
 <small id="scope"></small></div>
 <div class="cards" id="cards"></div>
@@ -159,7 +163,7 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 <div class="row"><button class="btn" onclick="closeModal('mergeModal')">Cancel</button><button class="btn primary" onclick="doMerge()">Create problem</button></div></div></div>
 <div class="modal" id="assignModal"><div class="box"><h3 id="aTitle">Assign ticket</h3>
 <label>Assign to</label><select id="aOwner"><option>L1</option><option>L2</option><option>L3</option><option>L4</option><option value="human">Human engineer</option></select>
-<div id="aWho"><label>Person (optional)</label><input id="aName" placeholder="e.g. Mehmet, network team"></div>
+<div id="aWho"><label>Person</label><select id="aName"><option value="">— anyone on the desk —</option></select></div>
 <label>Note to the assignee</label><textarea id="aNote" rows="2" placeholder="What should they do?"></textarea>
 <div class="row"><button class="btn" onclick="closeModal('assignModal')">Cancel</button><button class="btn primary" id="aGo" onclick="doAssign()">Assign</button></div></div></div>
 <script>
@@ -174,6 +178,8 @@ const ORDER=['system','light','dark'];let theme='system';
 function applyTheme(v){theme=v;try{localStorage.setItem('theme',v)}catch(e){}
  if(v==='system')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);
  $('#theme').innerHTML=ICONS[v];$('#theme').title='Theme: '+v+' (click to change)';}
+(async function(){try{const me=await (await fetch('/me')).json();$('#who').textContent=me.name+' · '+me.role;if(me.role==='admin')$('#usersLink').style.display='';
+ const us=await (await fetch('/users.json')).json();$('#aName').innerHTML='<option value="">— anyone on the desk —</option>'+us.map(u=>`<option>${esc(u.name)}</option>`).join('');}catch(e){}})();
 (function(){let v='system';try{v=localStorage.getItem('theme')||'system'}catch(e){}applyTheme(ORDER.includes(v)?v:'system');
  $('#theme').onclick=()=>applyTheme(ORDER[(ORDER.indexOf(theme)+1)%3]);})();
 let period='all',owner='';

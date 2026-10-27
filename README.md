@@ -73,10 +73,14 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # add META_API_KEY (and WhatsApp tokens when you have them)
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 53 offline tests with a scripted model
+.venv/bin/python -m pytest      # 54 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.
+
+**Console sign-in:** set `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env`; the first admin is created on start. Admins add
+support agents at `/users`; everyone can reset a password via `/forgot` (SMTP optional — without it the reset link
+is written to the server log). Employees never sign in; they use WhatsApp.
 `ffmpeg` is used for voice-note and video conversion.
 
 **WhatsApp:** expose port 1002 (e.g. `cloudflared tunnel --url http://localhost:1002`), set the webhook to

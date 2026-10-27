@@ -213,10 +213,20 @@ def _approval_decision(db, requester: str, text: str):
 
 
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
-                   mime: str = "image/jpeg", extra_images: list[bytes] | None = None) -> tuple[Ticket, str]:
+                   mime: str = "image/jpeg", extra_images: list[bytes] | None = None,
+                   force_new: bool = False) -> tuple[Ticket, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
-    or open a new one, then run L1."""
+    or open a new one, then run L1. `force_new` skips the routing (system-generated tickets)."""
     from app.llm import image_message
+    if force_new:
+        ticket = Ticket(requester=requester, title=text[:255])
+        db.add(ticket)
+        db.flush()
+        log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
+        answer = AGENTS["L1"].run(db, ticket, text)
+        log(db, ticket.id, "L1", "message", answer)
+        db.refresh(ticket)
+        return ticket, answer
     # 1) Is this an approver answering a pending approval? That wins over everything else, and the
     #    decision may sit inside a sentence ("tamam, ONAY 3" / "reddetmek için RET 1").
     decided = _approval_decision(db, requester, text)

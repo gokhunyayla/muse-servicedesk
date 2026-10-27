@@ -127,9 +127,7 @@ def test_employee_can_close_the_ticket_directly_without_a_model_call():
     assert not CLOSE_RE.match("kapatmayın, hâlâ bağlanamıyorum")
 
 
-def test_unsolvable_request_is_escalated_to_a_human_and_desk_can_close_it():
-    from fastapi.testclient import TestClient
-    from app.main import app
+def test_unsolvable_request_is_escalated_to_a_human_and_desk_can_close_it(desk):
     set_llm(ScriptedLLM([
         Reply(tool_calls=[call("escalate_to_human", reason="projektör fiziksel arızalı, yerinde müdahale gerek",
                                tried="uzaktan teşhis, sürücü kontrolü")]),
@@ -139,7 +137,7 @@ def test_unsolvable_request_is_escalated_to_a_human_and_desk_can_close_it():
         t, answer = handle_message(db, "+905551110001", "toplantı odası projektörü hiç açılmıyor, lambası yanmıyor")
         assert t.status == "escalated" and t.owner == "human" and "aktarıldı" in answer
         tid = t.id
-    r = TestClient(app).post(f"/tickets/{tid}/close", json={"resolution": "lamba değiştirildi"})
+    r = desk.post(f"/tickets/{tid}/close", json={"resolution": "lamba değiştirildi"})
     assert r.json() == {"id": tid, "status": "resolved"}
     with session() as db:
         assert db.get(Ticket, tid).resolution == "lamba değiştirildi"

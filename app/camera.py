@@ -70,7 +70,7 @@ def process_frame(camera_id: str, image: bytes, mime: str = "image/jpeg") -> lis
                 f"Policy: {f['policy']}. Desk owner: {cam['employee_no']} ({owner['name']}). "
                 f"Notify the owner, ask them to fix it, revoke any exposed credential, and schedule a re-check.")
         with session() as db:
-            ticket, answer = handle_message(db, owner["phone"], text, image, mime)
+            ticket, answer = handle_message(db, owner["phone"], text, image, mime, force_new=True)
             ticket.title = f"[Compliance:{f['kind']}] {camera_id}"
             results.append({"ticket_id": ticket.id, "kind": f["kind"], "boxes": f["boxes"], "reply": answer})
     return results
