@@ -553,8 +553,11 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
             masked = name in vault.SECRET
             state = (f'<span class="tag active">configured</span> <small class="muted">{"…" + _esc(st["hint"]) if masked else _esc(st["hint"])} · from {st["source"]}</small>'
                      if st["configured"] else '<span class="tag disabled">not set</span>')
+            shown = ("" if not st["configured"] else ("•" * 28 + st["hint"] if masked else st["hint"]))
             return (f'<div class="srow"><div><b>{_esc(st["label"])}</b><small>{_esc(hint)}</small><div style="margin-top:4px">{state}</div></div>'
-                    f'<div class="min"><input name="{name}" type="{"password" if masked else "text"}" autocomplete="new-password" placeholder="{"enter a new value to replace" if masked else "value"}" style="width:260px" {dis}>'
+                    f'<div class="min"><input name="{name}" type="text" autocomplete="off" spellcheck="false" value="{_esc(shown)}" data-shown="{_esc(shown)}" '
+                    f'onfocus="if(this.value===this.dataset.shown)this.value=\'\'" onblur="if(!this.value)this.value=this.dataset.shown" '
+                    f'placeholder="{"paste a new key to replace" if masked else "value"}" style="width:260px;font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}>'
                     + (f'<label class="check" style="margin:0 0 0 8px"><input type="checkbox" name="clear_{name}" value="1" {dis}> clear</label>' if st["source"] == "console" else "")
                     + '</div></div>')
         if tab == "models":
@@ -660,10 +663,11 @@ async def settings_secrets(request: Request, admin: User = Depends(admin_user), 
     form = await request.form()
     changes: dict = {}
     for name in vault.SPEC:
+        val = str(form.get(name, "")).strip()
         if form.get(f"clear_{name}") == "1":
             changes[name] = None
-        elif str(form.get(name, "")).strip():
-            changes[name] = str(form.get(name)).strip()
+        elif val and not val.startswith("•") and val != vault.get(name):
+            changes[name] = val
     if changes:
         vault.set_many(changes)
         with session() as db:
