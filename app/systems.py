@@ -2,6 +2,7 @@
 connector (Entra ID, Intune, VPN gateway) would expose, so swapping one in is local."""
 from __future__ import annotations
 
+import os
 import secrets
 
 USERS = {
@@ -15,6 +16,11 @@ USERS = {
               "department": "Finance", "manager": None, "licenses": ["M365-E3"], "groups": ["finance", "managers"],
               "sap_roles": ["FI_DISPLAY", "FI_POST"], "enabled": True},
 }
+
+# Demo: point the seeded managers' phones at a real number so approval requests land on your WhatsApp.
+# DEMO_MANAGER_PHONE=+90... in .env (never committed) rewires E1002 and E1003.
+if os.getenv("DEMO_MANAGER_PHONE"):
+    USERS["E1002"]["phone"] = USERS["E1003"]["phone"] = os.environ["DEMO_MANAGER_PHONE"]
 
 LICENSE_CATALOG = {   # license -> needs manager approval?
     "M365-E3": False, "Teams-Phone": False, "Visio": False, "Project": True, "Adobe-CC": True, "AutoCAD": True,
