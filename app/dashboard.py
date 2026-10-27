@@ -154,6 +154,9 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <label>First update to everyone affected (optional)</label><textarea id="mUpdate" rows="2" placeholder="We are aware of the issue and working on it."></textarea>
 <label>Owner</label><select id="mOwner"><option>L1</option><option>L2</option><option>L3</option><option>L4</option><option value="human">Human engineer</option></select>
 <div class="row"><button class="btn" onclick="closeModal('mergeModal')">Cancel</button><button class="btn primary" onclick="doMerge()">Create problem</button></div></div></div>
+<div class="modal" id="closeModal"><div class="box"><h3 id="cTitle">Close ticket</h3><p class="muted" style="margin:4px 0 0">The employee is told over WhatsApp.</p>
+<label>Closing note</label><textarea id="cNote" rows="2" placeholder="e.g. resolved on site, lamp replaced"></textarea>
+<div class="row"><button class="btn" onclick="closeModal('closeModal')">Cancel</button><button class="btn primary" onclick="doClose()">Close ticket</button></div></div></div>
 <div class="modal" id="assignModal"><div class="box"><h3 id="aTitle">Assign ticket</h3>
 <label>Assign to</label><select id="aOwner"><option>L1</option><option>L2</option><option>L3</option><option>L4</option><option value="human">Human engineer</option></select>
 <div id="aWho"><label>Person</label><select id="aName"><option value="">— anyone on the desk —</option></select></div>
@@ -166,7 +169,7 @@ const pill=s=>`<span class="pill ${s}">${LABELS[s]||s}</span>`;
 const esc=x=>String(x).replace(/</g,'&lt;');
 function toggleMenu(b){const m=$('#userMenu'),on=!m.classList.contains('on');m.classList.toggle('on',on);b.setAttribute('aria-expanded',on);}
 document.addEventListener('click',e=>{const m=$('#userMenu');if(m&&!e.target.closest('.menu'))m.classList.remove('on');});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){const m=$('#userMenu');if(m)m.classList.remove('on');}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){const m=$('#userMenu');if(m)m.classList.remove('on');document.querySelectorAll('.modal.on').forEach(x=>x.classList.remove('on'));}});
 (function(){const b=$('#theme');if(!b)return;const I={system:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
  light:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
  dark:'<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'};
@@ -214,7 +217,8 @@ async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id))
  $('#tactions').innerHTML=`<button class="btn" onclick="openAssign(${t.id})">Assign</button>`+(t.status!=='resolved'?` <button class="btn" onclick="closeTicket(${t.id})">Close</button>`:'');
  $('#trail').innerHTML=t.events.map(e=>`<div class="ev ${e.actor==='user'?'user':''} ${e.kind}"><b>${esc(e.actor)}</b> <small>${e.kind}</small> ${esc(e.content)}${e.data?`<br><code>${esc(JSON.stringify(e.data).slice(0,300))}</code>`:''}</div>`).join('');
  if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#ttitle').scrollIntoView({behavior:'smooth'});}}
-async function closeTicket(id){const r=prompt('Closing note (sent to the employee):','closed by the service desk');
- if(r===null)return;await fetch('/tickets/'+id+'/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution:r})});load();}
+function closeTicket(id){$('#cTitle').textContent='Close #'+id;$('#closeModal').dataset.id=id;$('#closeModal').classList.add('on');$('#cNote').focus();}
+async function doClose(){const id=$('#closeModal').dataset.id;await fetch('/tickets/'+id+'/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution:$('#cNote').value.trim()||'closed by the service desk'})});
+ closeModal('closeModal');await load();show(id);}
 load();setInterval(load,5000);
 </script></body></html>"""
