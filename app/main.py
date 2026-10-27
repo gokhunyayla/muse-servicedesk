@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.agents import handle_message
-from app.db import Ticket, session
+from app.db import Ticket, log, session
+from app.voice import transcribe
 
 app = FastAPI(title="Muse ServiceDesk")
 
@@ -22,6 +23,18 @@ def post_message(msg: Incoming) -> dict:
     with session() as db:
         ticket, answer = handle_message(db, msg.requester, msg.text)
         return {"ticket_id": ticket.id, "reply": answer}
+
+
+@app.post("/voice")
+async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) -> dict:
+    """A voice note: transcribe it, then handle it like a text message."""
+    text = transcribe(await audio.read(), audio.content_type or "audio/wav")
+    if not text:
+        raise HTTPException(422, "could not transcribe audio")
+    with session() as db:
+        ticket, answer = handle_message(db, requester, text)
+        log(db, ticket.id, "user", "note", f"voice note transcribed: {text}")
+        return {"ticket_id": ticket.id, "transcript": text, "reply": answer}
 
 
 @app.get("/tickets/{ticket_id}")

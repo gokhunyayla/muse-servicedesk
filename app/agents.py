@@ -17,7 +17,9 @@ RULES = """Rules:
 - You are a service that finishes the job, not a guide: use your tools to fix the problem yourself.
 - Verify identity before any account change.
 - If the problem is outside your tools, hand off to the right tier with a clear summary.
-- Record important decisions with add_note."""
+- Record important decisions with add_note.
+- Messages may come from voice notes: numbers can be spelled out ("e bin bir" = E1001,
+  "bin dokuz yüz doksan" = 1990). Interpret them; don't ask the user to retype."""
 
 
 @dataclass
