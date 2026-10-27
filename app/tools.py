@@ -491,11 +491,13 @@ def escalate_to_human(ctx: Ctx, reason: str, tried: str) -> dict:
 @tool("Close the ticket after the employee confirmed the fix. Ask them for a 1-5 rating in your reply.",
       ("L1",), resolution=STR)
 def close_ticket(ctx: Ctx, resolution: str) -> dict:
-    ctx.ticket.status = "resolved"
+    from app.db import resolve
+    resolve(ctx.ticket)
     ctx.ticket.resolution = resolution
     closed = 0
     for child in ctx.db.query(Ticket).filter(Ticket.incident_id == ctx.ticket.id, Ticket.status != "resolved"):
-        child.status, child.resolution = "resolved", f"incident #{ctx.ticket.id}: {resolution}"
+        resolve(child)
+        child.resolution = f"incident #{ctx.ticket.id}: {resolution}"
         closed += 1
     return {"ok": True, "status": "resolved", "linked_closed": closed}
 

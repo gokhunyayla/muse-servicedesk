@@ -186,3 +186,26 @@ def test_desk_can_reply_and_change_status(desk):
     assert desk.post("/tickets/1/status", json={"status": "resolved", "note": "yerinde çözüldü"}).json()["status"] == "resolved"
     assert desk.get("/tickets/1").json()["resolution"] == "yerinde çözüldü"
     assert desk.post("/tickets/1/status", json={"status": "weird"}).status_code == 422
+
+
+def test_timing_and_sla_settings(desk):
+    from datetime import timedelta
+    from app.db import Event, Ticket, session
+    set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "close_ticket", {"resolution": "ok"})]), Reply(text="kapandı")]))
+    desk.post("/messages", json={"requester": "+905551110001", "text": "vpn bağlanmıyor"})
+    with session() as db:      # stretch the trail: created 10 min before the first reply, resolved 20 min in
+        t = db.get(Ticket, 1)
+        t.created_at = t.created_at - timedelta(minutes=10)
+        t.resolved_at = t.created_at + timedelta(minutes=20)
+        for e in db.query(Event).filter_by(ticket_id=1):
+            e.at = t.created_at + timedelta(minutes=10)
+    tm = desk.get("/tickets/1").json()["timing"]
+    assert tm["resolved"] and tm["total_seconds"] == 1200 and tm["first_response_seconds"] == 600
+    assert tm["first_response_breached"] is True            # default target is 5 min
+    assert tm["tiers"][0]["tier"] == "L1" and tm["tiers"][0]["seconds"] == 1200
+    # admin raises the SLA; the same ticket is now within target
+    r = desk.post("/settings/sla", data={"first_response": "15", "L1": "60", "total": "60"}, follow_redirects=False)
+    assert r.status_code == 303
+    tm = desk.get("/tickets/1").json()["timing"]
+    assert tm["first_response_breached"] is False and tm["first_response_target_minutes"] == 15
+    assert "SLA" in desk.get("/settings").text

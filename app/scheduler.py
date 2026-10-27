@@ -35,7 +35,8 @@ def run_due_followups() -> int:
                 continue
             if f.note == "auto-close if no reply":
                 if ticket.status == "waiting_user":     # still unanswered: assume fixed, close, tell them
-                    ticket.status = "resolved"
+                    from app.db import resolve
+                    resolve(ticket)
                     ticket.resolution = f"{ticket.resolution} (auto-closed: no reply from the employee)"
                     log(db, ticket.id, "system", "note", "auto-closed: no reply after reminder")
                     db.add(Outbound(to=ticket.requester, ticket_id=ticket.id,

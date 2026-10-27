@@ -32,6 +32,7 @@ class Ticket(Base):
     resolution: Mapped[str] = mapped_column(Text, default="")
     rating: Mapped[int | None] = mapped_column(nullable=True)    # 1..5 from the employee
     incident_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)  # parent, for mass outages
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     events: Mapped[list["Event"]] = relationship(back_populates="ticket", order_by="Event.id")
 
 
@@ -161,3 +162,18 @@ class Audit(Base):
 
 def audit(db, user: str, action: str, target: str = "", detail: str = "", ip: str = "") -> None:
     db.add(Audit(user=user, action=action, target=str(target), detail=detail[:2000], ip=ip))
+
+
+class Setting(Base):
+    """Console settings as JSON documents keyed by section (sla, channels, ...)."""
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+def resolve(ticket) -> None:
+    """Mark a ticket resolved and stamp the time (used by every path that closes a ticket)."""
+    ticket.status = "resolved"
+    ticket.resolved_at = _now()

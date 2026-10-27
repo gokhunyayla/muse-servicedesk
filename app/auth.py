@@ -446,6 +446,56 @@ def _initials(name: str) -> str:
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
 
+# ---- settings (tabbed; SLA first) -----------------------------------------------------------
+
+SLA_FIELDS = [("first_response", "First response", "Time until the employee gets the first reply"),
+              ("L1", "L1 · first contact", "Time L1 may hold a ticket"), ("L2", "L2 · devices & network", ""),
+              ("L3", "L3 · servers & security", ""), ("L4", "L4 · vendors & logistics", ""),
+              ("human", "Human engineer", "Time an escalated ticket may wait for a person"),
+              ("total", "Total resolution", "Open → resolved, excluding time waiting for the employee")]
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(user: User = Depends(current_user), tab: str = "sla", info: str = "") -> str:
+    from app.sla import sla_targets
+    admin = user.role == "admin"
+    tabs = [("sla", "SLA"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
+    nav = "".join(f'<a class="tab {"on" if tab == k else ""}" href="/settings?tab={k}">{v}</a>' for k, v in tabs)
+    if tab == "sla":
+        t = sla_targets()
+        rows = "".join(f'<div class="srow"><div><b>{label}</b><small>{hint}</small></div>'
+                       f'<div class="min"><input name="{k}" type="number" min="1" step="1" value="{t.get(k, "")}" {"" if admin else "disabled"}> <span>min</span></div></div>'
+                       for k, label, hint in SLA_FIELDS)
+        body = f"""<p class="muted">Targets in minutes. Tickets show green/red against these on their Timing panel.</p>
+<form method="post" action="/settings/sla">{rows}{_alert('', info)}
+{('<div class="row end"><button class="btn primary slim" type="submit">Save SLA targets</button></div>' if admin else '<p class="muted">Only admins can change these.</p>')}</form>"""
+    elif tab == "channels":
+        body = '<p class="muted">WhatsApp Cloud API settings are read from <code>.env</code> (WA_PHONE_NUMBER_ID, WA_ACCESS_TOKEN, WA_VERIFY_TOKEN). An editable form lands here next.</p>'
+    elif tab == "models":
+        from app.config import settings as cfg
+        body = f'<p class="muted">Meta Model API</p><dl class="kv"><dt>Agents</dt><dd>{_esc(cfg.meta_model)}</dd><dt>Heavy (L3)</dt><dd>{_esc(cfg.meta_model_heavy)}</dd><dt>Reasoning effort</dt><dd>{_esc(cfg.reasoning_effort)}</dd><dt>Base URL</dt><dd>{_esc(cfg.meta_base_url)}</dd></dl>'
+    else:
+        body = '<p class="muted">Muse ServiceDesk — autonomous multi-tier IT service desk on Meta Model API. Built for the Meta Global AI Developer Hackathon 2026.</p>'
+    return _page("Settings", f'<div class="tabs">{nav}</div>{body}', wide=True, user=user, active="settings")
+
+
+@router.post("/settings/sla")
+async def settings_sla(request: Request, admin: User = Depends(admin_user)):
+    from app.sla import DEFAULT_SLA, put_setting
+    check_origin(request)
+    form = await request.form()
+    value = {}
+    for k in DEFAULT_SLA:
+        try:
+            value[k] = max(1, int(form.get(k, DEFAULT_SLA[k])))
+        except (TypeError, ValueError):
+            value[k] = DEFAULT_SLA[k]
+    put_setting("sla", value)
+    with session() as db:
+        audit(db, admin.email, "settings.sla", detail=str(value), ip=_ip(request))
+    return RedirectResponse("/settings?tab=sla&info=SLA+targets+saved", 303)
+
+
 def _ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
@@ -469,6 +519,7 @@ ICONS = {
     "tickets": '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg>',
     "users": '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>',
     "audit": '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h8"/></svg>',
+    "settings": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
     "system": '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
     "light": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
     "dark": '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
@@ -545,6 +596,9 @@ td.act{text-align:right;width:40px}.kebab{border:1px solid transparent;backgroun
 .dropdown form{margin:0}.dropdown form button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:transparent;color:var(--fg);font:inherit;font-size:13px;border-radius:6px;cursor:pointer}
 .dropdown form button:hover{background:var(--bg)}.dropdown form button.danger{color:var(--bad)}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:30;padding:16px}.modal.on{display:grid}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 16px}.tab{padding:8px 12px;color:var(--muted);text-decoration:none;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}.tab.on{color:var(--accent);border-color:var(--accent)}
+.srow{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--line)}.srow b{display:block;font-size:13px}.srow small{color:var(--muted)}
+.min{display:flex;align-items:center;gap:6px}.min input{width:110px;text-align:right}.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px}.kv dt{color:var(--muted)}.kv dd{margin:0}
 .modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(480px,100%)}.modal h3{margin:0 0 6px}
 """ + RAIL_CSS
 
@@ -587,7 +641,7 @@ def rail(user: User | None, active: str = "") -> str:
     if admin:
         nav += item("users", "/users", "Desk users") + item("audit", "/audit", "Audit log")
     return (f'<aside class="rail"><a class="logo" href="/" title="Muse ServiceDesk">{LOGO}</a><nav>{nav}</nav>'
-            f'<div class="rail-bottom"><button class="nav ibtn" id="theme" title="Theme" aria-label="Toggle theme"></button>'
+            f'<div class="rail-bottom">{item("settings", "/settings", "Settings")}<button class="nav ibtn" id="theme" title="Theme" aria-label="Toggle theme"></button>'
             f'<div class="menu"><button class="avatar" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" '
             f'onclick="toggleMenu(this)">{_initials(user.name)}</button>'
             f'<div class="dropdown up" id="userMenu" role="menu">'

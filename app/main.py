@@ -11,6 +11,7 @@ app = FastAPI(title="Muse ServiceDesk")
 from app.auth import current_user, needs_setup  # noqa: E402
 from app.security import api_key, check_origin  # noqa: E402
 from app.db import audit  # noqa: E402
+from app.sla import timing  # noqa: E402
 from app.dashboard import router as dashboard_router  # noqa: E402
 from app.whatsapp import router as whatsapp_router    # noqa: E402
 from app.auth import router as auth_router            # noqa: E402
@@ -90,7 +91,9 @@ def desk_close(ticket_id: int, d: DeskClose, request: Request, user=Depends(curr
             return {"id": t.id, "status": t.status}
         check_origin(request)
         by = f"desk:{user.name}"
-        t.status, t.resolution, t.owner = "resolved", d.resolution, "desk"
+        from app.db import resolve
+        resolve(t)
+        t.resolution, t.owner = d.resolution, "desk"
         log(db, t.id, by, "note", f"closed by the desk: {d.resolution}")
         audit(db, user.email, "ticket.close", target=t.id, detail=d.resolution)
         text = f"Talebiniz (#{t.id}) servis masası tarafından kapatıldı: {d.resolution}"
@@ -214,6 +217,11 @@ def desk_status(ticket_id: int, s: StatusChange, request: Request, user=Depends(
         check_origin(request)
         old = t.status
         t.status = s.status
+        if s.status == "resolved":
+            from app.db import resolve
+            resolve(t)
+        elif t.resolved_at and s.status != "resolved":
+            t.resolved_at = None                 # reopened
         if s.status == "escalated":
             t.owner = "human"
         if s.status == "resolved" and s.note:
@@ -294,5 +302,6 @@ def get_ticket(ticket_id: int, user=Depends(current_user)) -> dict:
         return {"id": t.id, "title": t.title, "status": t.status, "verified": t.verified, "owner": t.owner, "incident_id": t.incident_id,
                 "requester": t.requester, "created_at": t.created_at.isoformat(), "resolution": t.resolution, "rating": t.rating,
                 "linked": [c.id for c in db.query(Ticket).filter(Ticket.incident_id == t.id)],
+                "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None, "timing": timing(t, t.events),
                 "events": [{"at": e.at.isoformat(), "actor": e.actor, "kind": e.kind,
                             "content": e.content, "data": e.data} for e in t.events]}

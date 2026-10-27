@@ -191,7 +191,9 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 .tool pre{margin:6px 0 0 8px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}
 .meta{border-left:1px solid var(--line);padding-left:18px;font-size:13px}@media(max-width:900px){.meta{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:10px}}
 .meta dl{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:0}.meta dt{color:var(--muted)}.meta dd{margin:0;overflow-wrap:anywhere}
-.meta h4{margin:14px 0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.tagok{color:var(--ok)}.meta a{color:var(--accent);text-decoration:none}
+.meta h4{margin:14px 0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.sla{display:flex;flex-direction:column;gap:4px}.srow2{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:baseline;padding:4px 8px;border-radius:6px;border-left:3px solid var(--line)}
+.srow2.ok{border-left-color:var(--ok)}.srow2.bad{border-left-color:var(--bad);background:rgba(228,30,63,.08)}.srow2 b{font-variant-numeric:tabular-nums}.srow2 small{color:var(--muted)}.tagok{color:var(--ok)}.meta a{color:var(--accent);text-decoration:none}
 .composer{display:flex;gap:8px;margin-top:10px;align-items:flex-end}.composer textarea{flex:1;font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);resize:vertical}
 .msg.desk{align-self:flex-start;background:rgba(49,162,76,.14);border:1px solid rgba(49,162,76,.35);border-bottom-left-radius:4px}
 .meta select{width:100%;font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
@@ -305,13 +307,23 @@ function renderTimeline(events){
    const ok=!(e.data&&e.data.ok===false);const k=e.content+'|'+e.actor;
    for(let i=out.length-1;i>=0;i--){if(out[i].startsWith(`<details class="tool" data-k="${esc(k)}"`)&&out[i].includes('class="pending"')){
     out[i]=out[i].replace('<span class="pending">…</span>',ok?'<span class="ok">✓</span>':'<span class="err">✗</span>').replace('</pre></details>',`</pre><pre>→ ${esc(JSON.stringify(e.data,null,1).slice(0,1500))}</pre></details>`);break;}}
-  }else if(e.kind==='handoff'){const m=/^(\w+)\s*->\s*(\w+):\s*(.*)$/s.exec(e.content)||[];
+  }else if(e.kind==='handoff'){const m=/^([A-Za-z0-9]+)\\s*->\\s*([A-Za-z0-9]+):\\s*([^]*)$/.exec(e.content)||[];
    out.push(`<div class="sys handoff"><b>${esc(m[1]||'')} → ${esc(m[2]||'')}</b> handoff<small>${tstamp(e.at)}</small><br>${esc(m[3]||e.content)}</div>`);}
   else if(e.kind==='note'){out.push(`<div class="sys note"><b>${esc(e.actor)}</b> · ${esc(e.content)}<small>${tstamp(e.at)}</small></div>`);}
   else{out.push(`<div class="sys">${esc(e.actor)} · ${esc(e.kind)} · ${esc(e.content)}<small>${tstamp(e.at)}</small></div>`);}
  }
  return out.join('');
 }
+function dur(sec){if(sec==null)return '—';sec=Math.round(sec);if(sec<60)return sec+'s';const m=Math.floor(sec/60),h=Math.floor(m/60),d=Math.floor(h/24);
+ if(h<1)return m+'m';if(d<1)return h+'h '+(m%60)+'m';return d+'d '+(h%24)+'h';}
+function slaRow(label,sec,target,breached){return `<div class="srow2 ${breached?'bad':(target?'ok':'')}"><span>${label}</span><b>${dur(sec)}</b><small>${target?'/ '+dur(target*60):''}</small></div>`;}
+function renderTiming(tm){if(!tm)return '';
+ let h='<h4>Timing &amp; SLA</h4><div class="sla">';
+ h+=slaRow('First response',tm.first_response_seconds,tm.first_response_target_minutes,tm.first_response_breached);
+ for(const x of tm.tiers)h+=slaRow((AGENT_LABEL[x.tier]||x.tier).split(' · ')[0]+' handling',x.seconds,x.target_minutes,x.breached);
+ if(tm.waiting_for_employee_seconds)h+=slaRow('Waiting for employee',tm.waiting_for_employee_seconds,null,false);
+ h+=slaRow(tm.resolved?'Total (resolved)':'Total (running)',tm.total_seconds,tm.total_target_minutes,tm.total_breached);
+ return h+'</div>';}
 async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id)).json();
  $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} ${pill(t.status)}`;
  $('#tactions').innerHTML=`<button class="btn" onclick="openAssign(${t.id})">Assign</button>`+(t.status!=='resolved'?` <button class="btn" onclick="closeTicket(${t.id})">Close</button>`:'');
@@ -320,6 +332,7 @@ async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id))
   ${t.rating?`<dt>Rating</dt><dd>${'★'.repeat(t.rating)}${'☆'.repeat(5-t.rating)}</dd>`:''}
   ${t.incident_id?`<dt>Problem</dt><dd><a href="#" onclick="show(${t.incident_id});return false">#${t.incident_id}</a></dd>`:''}
   ${t.linked&&t.linked.length?`<dt>Linked</dt><dd>${t.linked.map(i=>`<a href="#" onclick="show(${i});return false">#${i}</a>`).join(', ')}</dd>`:''}</dl>
+  ${renderTiming(t.timing)}
   ${t.resolution?`<h4>Resolution</h4><div>${esc(t.resolution)}</div>`:''}
   <h4>Activity</h4><div class="muted">${t.events.filter(e=>e.kind==='tool_call').length} tool calls · ${t.events.filter(e=>e.kind==='handoff').length} handoffs · ${t.events.filter(e=>e.kind==='message').length} messages</div>`;
  $('#trail').innerHTML=renderTimeline(t.events);$('#composer').style.display='';
