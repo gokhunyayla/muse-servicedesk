@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import timedelta
 
 from app.agents import AGENTS
 from app.db import Followup, Outbound, Ticket, _now, log, session
 
 logger = logging.getLogger(__name__)
+AUTO_CLOSE_HOURS = 48
 
 
 def run_due_followups() -> int:
@@ -25,8 +27,20 @@ def run_due_followups() -> int:
             if f.note == "confirmation reminder":
                 db.add(Outbound(to=ticket.requester, ticket_id=ticket.id,
                                 text=f"Merhaba, #{ticket.id} numaralı talebiniz için uyguladığımız çözüm işe yaradı mı? "
-                                     f"({ticket.resolution}) 'Çözüldü' derseniz kaydı kapatıyoruz."))
+                                     f"({ticket.resolution}) 'Çözüldü' derseniz kaydı kapatıyoruz; "
+                                     f"{AUTO_CLOSE_HOURS} saat içinde yanıt gelmezse kaydı çözüldü kabul edeceğiz."))
                 log(db, ticket.id, "system", "note", "confirmation reminder sent")
+                db.add(Followup(ticket_id=ticket.id, due_at=_now() + timedelta(hours=AUTO_CLOSE_HOURS),
+                                note="auto-close if no reply"))
+                continue
+            if f.note == "auto-close if no reply":
+                if ticket.status == "waiting_user":     # still unanswered: assume fixed, close, tell them
+                    ticket.status = "resolved"
+                    ticket.resolution = f"{ticket.resolution} (auto-closed: no reply from the employee)"
+                    log(db, ticket.id, "system", "note", "auto-closed: no reply after reminder")
+                    db.add(Outbound(to=ticket.requester, ticket_id=ticket.id,
+                                    text=f"#{ticket.id} numaralı talebiniz yanıt gelmediği için çözüldü olarak "
+                                         f"kapatıldı. Sorun sürüyorsa yazmanız yeterli, yeni kayıt açarız."))
                 continue
             log(db, ticket.id, "system", "note", f"scheduled follow-up: {f.note}")
             answer = AGENTS["L1"].run(db, ticket, f"[Scheduled follow-up] {f.note}. Check and act; "

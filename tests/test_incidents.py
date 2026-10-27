@@ -94,3 +94,24 @@ def test_short_replies_never_trigger_classification():
         t, _ = handle_message(db, "+905551110001", "vpn yok")
         handle_message(db, "+905551110001", "evet çözüldü")
     assert len(llm.requests) == 2          # no extra SAME/NEW call for a 2-word message
+
+
+def test_short_reply_with_two_open_tickets_asks_which_one_then_routes_by_number():
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    with session() as db:
+        a, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor, evden çalışamıyorum")
+    set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Yazıcıya bakıyorum.")]))
+    with session() as db:
+        b, _ = handle_message(db, "+905551110001", "Bir de yazıcı hiç çıktı vermiyor, kuyrukta kalıyor")
+        aid, bid = a.id, b.id
+    llm = ScriptedLLM([Reply(text="should not be called")])
+    set_llm(llm)
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "evet çözüldü")
+        assert "hangisi" in answer and f"#{aid}" in answer and f"#{bid}" in answer
+    assert llm.requests == []                      # no model call for the disambiguation
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("close_ticket", resolution="VPN ok")]), Reply(text="Kapandı.")]))
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", f"#{aid} çözüldü")
+        assert t.id == aid and t.status == "resolved"
+        assert db.get(Ticket, bid).status == "open"

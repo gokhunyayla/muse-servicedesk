@@ -76,7 +76,7 @@ def test_due_reminder_becomes_outbound_message():
     with session() as db:
         out = db.query(Outbound).one()
         assert out.to == "+905551110001" and "işe yaradı mı" in out.text
-        assert db.query(Followup).one().done is True
+        assert db.query(Followup).filter_by(note="confirmation reminder").one().done is True
 
 
 def test_scheduled_followup_runs_l1_with_tools():
@@ -152,3 +152,22 @@ def test_step_budget_exhaustion_escalates_instead_of_looping():
     with session() as db:
         t, answer = handle_message(db, "+905551110001", "garip bir hata")
         assert t.status == "escalated" and "aktarıldı" in answer
+
+
+def test_unanswered_confirmation_is_auto_closed_after_the_reminder():
+    from app.scheduler import AUTO_CLOSE_HOURS
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("request_confirmation", summary="x")]), Reply(text="?")]))
+    with session() as db:
+        ticket, _ = handle_message(db, "+905551110001", "vpn")
+        tid = ticket.id
+        db.query(Followup).filter_by(ticket_id=tid).one().due_at = _now() - timedelta(minutes=1)
+    assert run_due_followups() == 1                # reminder goes out, auto-close is scheduled
+    with session() as db:
+        f = db.query(Followup).filter_by(ticket_id=tid, note="auto-close if no reply").one()
+        assert f.due_at > _now() + timedelta(hours=AUTO_CLOSE_HOURS - 1)
+        f.due_at = _now() - timedelta(minutes=1)
+    assert run_due_followups() == 1
+    with session() as db:
+        t = db.get(Ticket, tid)
+        assert t.status == "resolved" and "auto-closed" in t.resolution
+        assert "yanıt gelmediği" in db.query(Outbound).filter_by(ticket_id=tid).order_by(Outbound.id.desc()).first().text

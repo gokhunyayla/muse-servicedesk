@@ -164,6 +164,7 @@ def _belongs_to(ticket: Ticket, text: str) -> bool:
 
 
 RATING_WINDOW_HOURS = 24
+RATING_RE = re.compile(r"^\s*[1-5]\s*(?:/\s*5)?\s*(?:puan)?\s*$", re.I)
 # "kapat", "iptal", "yanlış talep, kapat", "bileti kapatın", "close", "cancel"
 CLOSE_RE = re.compile(r"^\s*(?:(?:yanlış|hatalı)\s+talep[\s,.]*)?(?:bileti\s+|talebi\s+)?"
                       r"(?:kapat(?:ın|ınız)?|iptal(?:\s+et(?:in)?)?|close|cancel)[\s.!]*$", re.I)
@@ -190,9 +191,26 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
     or open a new one, then run L1."""
     from app.llm import image_message
-    ticket = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
-              .order_by(Ticket.id.desc()).first())
-    if ticket is not None and not _belongs_to(ticket, text):
+    open_tickets = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
+                    .order_by(Ticket.id.desc()).all())
+    ticket = open_tickets[0] if open_tickets else None
+    short = len(text.split()) <= 3 and not text.startswith("[")
+    if short and RATING_RE.match(text) and _closing_exchange(db, requester, text) is not None:
+        ticket = _closing_exchange(db, requester, text)      # a bare "5" right after a close is the rating
+    elif len(open_tickets) > 1 and short:
+        # several tickets open and a short answer: it must name the ticket, otherwise ask
+        named = [t for t in open_tickets if re.search(rf"(?<!\d)#?{t.id}(?!\d)", text)]
+        if named:
+            ticket = named[0]
+            text = re.sub(rf"#?{ticket.id}", "", text, count=1).strip() or text
+        else:
+            choices = "\n".join(f"#{t.id}: {t.title[:60]}" for t in open_tickets)
+            answer = f"Birden fazla açık talebiniz var, hangisi için?\n{choices}\n(Örn. \"#{open_tickets[0].id} çözüldü\")"
+            log(db, open_tickets[0].id, "user", "message", text)
+            log(db, open_tickets[0].id, "L1", "message", answer)
+            db.refresh(open_tickets[0])
+            return open_tickets[0], answer
+    elif ticket is not None and not _belongs_to(ticket, text):
         log(db, ticket.id, "system", "note", f"new unrelated request from requester, opened a separate ticket: {text[:80]}")
         ticket = None
     if ticket is None:
