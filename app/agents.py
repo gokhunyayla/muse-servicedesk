@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 
 from app.db import Ticket, log
-from app.llm import get_llm
+from app.llm import ContentFiltered, get_llm
 from app.tools import Ctx, run_tool, tools_for
 
 MAX_STEPS = 10
@@ -27,6 +27,7 @@ class Agent:
     tier: str
     role: str
     capabilities: str
+    heavy: bool = False   # use the heavy model (Muse Wonder): for production-impacting change planning
 
     def system_prompt(self, ticket: Ticket) -> str:
         peers = "\n".join(f"- {a.tier}: {a.capabilities}" for a in AGENTS.values() if a.tier != self.tier)
@@ -53,7 +54,13 @@ class Agent:
                     {"role": "user", "content": message}]
         specs = self.tool_specs()
         for _ in range(MAX_STEPS):
-            reply = llm.chat(messages, specs)
+            try:
+                reply = llm.chat(messages, specs, heavy=self.heavy)
+            except ContentFiltered:
+                # the provider's safety filter is fuzzy; keep the ticket alive and ask for a rephrase
+                log(db, ticket.id, self.tier, "note", "model request blocked by provider content filter")
+                return ("Mesajınızı bu haliyle işleyemedim. Sorunu bir cümleyle, başka kelimelerle "
+                        "yazar mısınız? (Örn. 'X sunucusunda Y hatası alıyorum')")
             if not reply.tool_calls:
                 return reply.text.strip()
             messages.append({"role": "assistant", "content": reply.text or None, "tool_calls": [
@@ -91,8 +98,13 @@ AGENTS: dict[str, Agent] = {a.tier: a for a in [
           "the employee sends (e.g. blue screen stop codes)"),
     Agent("L2", "You diagnose devices and networks. You never talk to the employee; return a clear result.",
           "device and network diagnosis, VPN deep analysis, performance problems"),
-    Agent("L3", "You handle servers, business applications and security changes, always with a rollback plan.",
-          "servers, SAP and directory permissions, vulnerability patching"),
+    Agent("L3", "You handle servers, business applications and security changes. Every production change "
+                "follows this order: 1) find_vulnerable_servers to set the scope, 2) add_note with the change "
+                "plan AND the rollback plan, 3) apply_patch host by host (a snapshot is taken for you), "
+                "4) verify_patch each host; if verification fails, rollback_patch to its snapshot, "
+                "5) add_note with the evidence (versions before/after, snapshot ids). Return a structured summary.",
+          "servers, SAP and directory permissions, vulnerability (CVE) analysis and patching with rollback",
+          heavy=True),
     Agent("L4", "You handle vendors and logistics: service cases, loaner devices, shipping.",
           "hardware repair cases, warranty, loaners, courier shipments"),
 ]}

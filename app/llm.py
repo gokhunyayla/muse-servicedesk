@@ -26,7 +26,11 @@ class Reply:
 
 
 class LLM(Protocol):
-    def chat(self, messages: list[dict], tools: list[dict]) -> Reply: ...
+    def chat(self, messages: list[dict], tools: list[dict], heavy: bool = False) -> Reply: ...
+
+
+class ContentFiltered(Exception):
+    """The provider refused the request on content-policy grounds (HTTP 400, no model output)."""
 
 
 class MetaLLM:
@@ -37,15 +41,22 @@ class MetaLLM:
             raise RuntimeError("META_API_KEY is empty; add it to .env")
         self.client = OpenAI(api_key=settings.meta_api_key, base_url=settings.meta_base_url)
 
-    def chat(self, messages: list[dict], tools: list[dict]) -> Reply:
-        res = self.client.chat.completions.create(
-            model=settings.meta_model,
-            messages=messages,
-            tools=tools or None,
-            # reasoning tokens count against this budget, so keep it generous
-            max_tokens=4000,
-            extra_body={"reasoning_effort": settings.reasoning_effort},
-        )
+    def chat(self, messages: list[dict], tools: list[dict], heavy: bool = False) -> Reply:
+        from openai import BadRequestError
+
+        try:
+            res = self.client.chat.completions.create(
+                model=settings.meta_model_heavy if heavy else settings.meta_model,
+                messages=messages,
+                tools=tools or None,
+                # reasoning tokens count against this budget, so keep it generous
+                max_tokens=4000,
+                extra_body={"reasoning_effort": settings.reasoning_effort},
+            )
+        except BadRequestError as e:
+            if "content management policy" in str(e):
+                raise ContentFiltered(str(e)) from e
+            raise
         msg = res.choices[0].message
         calls = [
             ToolCall(id=c.id, name=c.function.name, arguments=json.loads(c.function.arguments or "{}"))
@@ -60,9 +71,11 @@ class ScriptedLLM:
     def __init__(self, replies: list[Reply]) -> None:
         self.replies = list(replies)
         self.requests: list[list[dict]] = []
+        self.heavy_calls = 0
 
-    def chat(self, messages: list[dict], tools: list[dict]) -> Reply:
+    def chat(self, messages: list[dict], tools: list[dict], heavy: bool = False) -> Reply:
         self.requests.append([dict(m) for m in messages])
+        self.heavy_calls += heavy
         if not self.replies:
             return Reply(text="(script exhausted)")
         return self.replies.pop(0)

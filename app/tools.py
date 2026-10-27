@@ -153,6 +153,51 @@ def create_shipment(ctx: Ctx, employee_no: str, device: str, case_no: str) -> di
     return {"ok": True, **systems.create_shipment(u["name"], device, case_no)}
 
 
+@tool("Look up a vulnerability advisory by CVE id or nickname (e.g. 'php2shell').", ("L1", "L3"), query=STR)
+def lookup_advisory(ctx: Ctx, query: str) -> dict:
+    q = query.strip().upper()
+    for cve, adv in systems.ADVISORIES.items():
+        if q == cve or q == adv["name"].upper():
+            return {"ok": True, "cve": cve, **adv}
+    return {"ok": False, "error": "no advisory found"}
+
+
+@tool("Scan the server inventory for hosts affected by a CVE.", ("L3",), cve=STR)
+def find_vulnerable_servers(ctx: Ctx, cve: str) -> dict:
+    hosts = systems.find_vulnerable(cve.upper())
+    return {"ok": True, "cve": cve.upper(), "affected": hosts, "count": len(hosts)}
+
+
+@tool("Upgrade a package on a server. Takes a snapshot first so the change can be rolled back.",
+      ("L3",), hostname=STR, package=STR, version=STR)
+def apply_patch(ctx: Ctx, hostname: str, package: str, version: str) -> dict:
+    srv = systems.SERVERS.get(hostname)
+    if not srv or package not in srv["packages"]:
+        return {"ok": False, "error": "unknown host or package"}
+    sid = systems.snapshot(hostname)
+    before = srv["packages"][package]
+    srv["packages"][package] = version
+    return {"ok": True, "hostname": hostname, "package": package, "from": before, "to": version, "snapshot_id": sid}
+
+
+@tool("Verify a server after patching: package version, service health, and whether the CVE still applies.",
+      ("L3",), hostname=STR, cve=STR)
+def verify_patch(ctx: Ctx, hostname: str, cve: str) -> dict:
+    srv = systems.SERVERS.get(hostname)
+    adv = systems.ADVISORIES.get(cve.upper())
+    if not srv or not adv:
+        return {"ok": False, "error": "unknown host or CVE"}
+    version = srv["packages"].get(adv["package"])
+    still_vulnerable = version is not None and systems._version_lt(version, adv["vulnerable_below"])
+    return {"ok": True, "hostname": hostname, "package": adv["package"], "version": version,
+            "service_healthy": True, "still_vulnerable": still_vulnerable}
+
+
+@tool("Roll a server back to a snapshot taken before a patch.", ("L3",), snapshot_id=STR)
+def rollback_patch(ctx: Ctx, snapshot_id: str) -> dict:
+    return {"ok": systems.rollback(snapshot_id), "snapshot_id": snapshot_id}
+
+
 @tool("Record a decision or finding on the ticket.", ALL, text=STR)
 def add_note(ctx: Ctx, text: str) -> dict:
     log(ctx.db, ctx.ticket.id, ctx.agent, "note", text)

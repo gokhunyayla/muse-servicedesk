@@ -44,6 +44,48 @@ def create_shipment(to_name: str, device: str, case_no: str) -> dict:
     return s
 
 
+SERVERS = {   # CMDB: hostname -> software inventory
+    "TR-WEB-01": {"role": "intranet web", "os": "Ubuntu 22.04", "packages": {"php": "8.1.2", "nginx": "1.18.0"}},
+    "TR-WEB-02": {"role": "customer portal", "os": "Ubuntu 22.04", "packages": {"php": "8.1.2", "nginx": "1.18.0"}},
+    "TR-APP-01": {"role": "SAP gateway", "os": "RHEL 9", "packages": {"java": "17.0.9"}},
+    "TR-WEB-03": {"role": "docs site", "os": "Ubuntu 24.04", "packages": {"php": "8.3.6", "nginx": "1.24.0"}},
+}
+
+ADVISORIES = {   # vulnerability feed: CVE id -> affected package, vulnerable versions, fixed version
+    "CVE-2026-4411": {"name": "php2shell", "package": "php", "vulnerable_below": "8.1.30", "fixed": "8.1.30",
+                      "severity": "critical", "summary": "remote code execution via crafted multipart upload"},
+}
+
+_snapshots: dict[str, dict] = {}   # snapshot_id -> {"hostname", "packages"}
+
+
+def _version_lt(a: str, b: str) -> bool:
+    return tuple(int(x) for x in a.split(".")) < tuple(int(x) for x in b.split("."))
+
+
+def find_vulnerable(cve: str) -> list[dict]:
+    adv = ADVISORIES.get(cve)
+    if not adv:
+        return []
+    return [{"hostname": h, "role": s["role"], "package": adv["package"], "version": s["packages"][adv["package"]]}
+            for h, s in SERVERS.items()
+            if adv["package"] in s["packages"] and _version_lt(s["packages"][adv["package"]], adv["vulnerable_below"])]
+
+
+def snapshot(hostname: str) -> str:
+    sid = f"snap-{hostname}-{len(_snapshots) + 1}"
+    _snapshots[sid] = {"hostname": hostname, "packages": dict(SERVERS[hostname]["packages"])}
+    return sid
+
+
+def rollback(snapshot_id: str) -> bool:
+    s = _snapshots.get(snapshot_id)
+    if not s:
+        return False
+    SERVERS[s["hostname"]]["packages"] = dict(s["packages"])
+    return True
+
+
 def user_by_phone(phone: str) -> tuple[str, dict] | None:
     for emp, u in USERS.items():
         if u["phone"] == phone:
