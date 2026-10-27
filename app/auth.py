@@ -518,7 +518,12 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
                            for r in db.query(Report).order_by(Report.id.desc()).limit(10))
         body = f"""<p class="muted">Muse Wonder writes a short narrative over the desk's numbers; it goes out as an HTML e-mail on the schedule below (desk time zone).</p>
 <form method="post" action="/settings/reports">
-<div class="srow"><div><b>Recipients</b><small>Comma-separated e-mail addresses</small></div><input name="recipients" style="width:360px" value="{_esc(c.get('recipients',''))}" placeholder="it-manager@company.com, ciso@company.com" {dis}></div>
+<div class="srow"><div><b>Delivery</b><small>Where the reports go</small></div><div class="seg2">
+<label class="check"><input type="radio" name="channel" value="email" {"checked" if c.get("channel","email")=="email" else ""} {dis}> Email</label>
+<label class="check"><input type="radio" name="channel" value="whatsapp" {"checked" if c.get("channel")=="whatsapp" else ""} {dis}> WhatsApp</label>
+<label class="check"><input type="radio" name="channel" value="both" {"checked" if c.get("channel")=="both" else ""} {dis}> Both</label></div></div>
+<div class="srow"><div><b>E-mail recipients</b><small>Comma-separated addresses</small></div><input name="recipients" style="width:360px" value="{_esc(c.get('recipients',''))}" placeholder="it-manager@company.com, ciso@company.com" {dis}></div>
+<div class="srow"><div><b>WhatsApp recipients</b><small>Comma-separated numbers with country code. Free-form messages reach a number only within 24 h of its last message to the desk; outside that window Meta requires an approved template.</small></div><input name="whatsapp_recipients" style="width:360px" value="{_esc(c.get('whatsapp_recipients',''))}" placeholder="+905551234567" {dis}></div>
 <div class="srow"><div><b>Language</b></div><select name="language" style="width:140px" {dis}><option value="en" {"selected" if c.get("language")=="en" else ""}>English</option><option value="tr" {"selected" if c.get("language")=="tr" else ""}>Türkçe</option></select></div>
 <div class="srow"><div><b>Daily</b><small>End-of-day report</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="daily" value="1" {"checked" if c.get("daily") else ""} {dis}></label> <input name="daily_at" type="time" value="{_esc(c.get('daily_at','18:00'))}" style="width:120px" {dis}></div></div>
 <div class="srow"><div><b>Weekly</b><small>Last 7 days</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="weekly" value="1" {"checked" if c.get("weekly") else ""} {dis}></label> <select name="weekly_day" style="width:90px" {dis}>{days}</select> <input name="weekly_at" type="time" value="{_esc(c.get('weekly_at','09:00'))}" style="width:120px" {dis}></div></div>
@@ -603,6 +608,8 @@ async def settings_reports(request: Request, admin: User = Depends(admin_user)):
     form = await request.form()
     rep = dict(DEFAULT_REPORTS)
     rep["recipients"] = ", ".join(x.strip() for x in str(form.get("recipients", "")).split(",") if x.strip())
+    rep["whatsapp_recipients"] = ", ".join(x.strip() for x in str(form.get("whatsapp_recipients", "")).split(",") if x.strip())
+    rep["channel"] = form.get("channel") if form.get("channel") in ("email", "whatsapp", "both") else "email"
     rep["language"] = "tr" if form.get("language") == "tr" else "en"
     for k in ("daily", "weekly", "monthly"):
         rep[k] = form.get(k) == "1"
@@ -749,6 +756,7 @@ td.act{text-align:right;width:40px}.kebab{border:1px solid transparent;backgroun
 .draft{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}.dh{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.dh small{color:var(--muted)}
 .draft pre{white-space:pre-wrap;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto}.draft summary{cursor:pointer;color:var(--accent);font-size:13px}
 .pools{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}@media(max-width:800px){.pools{grid-template-columns:1fr 1fr}}.pool h4{margin:0 0 6px}.pool ul{margin:0;padding-left:18px;font-size:13px}
+.seg2{display:flex;gap:14px}.seg2 .check{margin:0}
 .min{display:flex;align-items:center;gap:6px}.min input{width:110px;text-align:right}.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px}.kv dt{color:var(--muted)}.kv dd{margin:0}
 .modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(480px,100%)}.modal h3{margin:0 0 6px}
 """ + RAIL_CSS

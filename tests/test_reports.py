@@ -65,3 +65,20 @@ def test_settings_tab_and_manual_send_endpoint(desk, monkeypatch):
     out = desk.post("/reports/send", json={"kind": "daily", "to": "me@test"}).json()
     assert out["sent"] is True and desk.get("/reports").json()[0]["recipients"] == "me@test"
     assert "SMTP" in desk.get("/settings?tab=reports").text and desk.get(f"/reports/{out['id']}").status_code == 200
+
+
+def test_whatsapp_delivery_channel(monkeypatch):
+    from app import whatsapp
+    set_llm(ScriptedLLM([Reply(text="Short narrative.")]))
+    sent = []
+    monkeypatch.setattr(whatsapp, "send", lambda to, text: sent.append((to, text)) or True)
+    put_setting("reports", {**reports.DEFAULT_REPORTS, "channel": "whatsapp", "whatsapp_recipients": "+905551110001, +905551110002"})
+    r = reports.build_and_send("daily", "manual")
+    assert r.sent and [s[0] for s in sent] == ["+905551110001", "+905551110002"]
+    assert sent[0][1].startswith("*Daily desk report") and "Short narrative." in sent[0][1]
+    # a permanent WhatsApp error is reported, not raised
+    def boom(to, text):
+        raise whatsapp.SendError(131047, "re-engagement", permanent=False)
+    monkeypatch.setattr(whatsapp, "send", boom)
+    r = reports.build_and_send("daily", "manual")
+    assert r.sent is False and "template" in r.error

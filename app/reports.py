@@ -17,7 +17,9 @@ from app.sla import get_setting, put_setting, timing
 logger = logging.getLogger(__name__)
 
 DEFAULT_REPORTS = {
+    "channel": "email",          # email | whatsapp | both
     "recipients": "",            # comma-separated e-mails
+    "whatsapp_recipients": "",   # comma-separated phone numbers (+90...)
     "daily": False, "daily_at": "18:00",
     "weekly": False, "weekly_day": 1, "weekly_at": "09:00",     # 1 = Monday
     "monthly": False, "monthly_day": 1, "monthly_at": "09:00",
@@ -170,17 +172,60 @@ def send_html(to: list[str], subject: str, html_body: str, text_body: str) -> tu
         return False, str(e)[:300]
 
 
+def render_text(n: dict, text: str, lang: str, subject: str) -> str:
+    """Compact WhatsApp version: headline numbers + the narrative."""
+    L = (lambda en, tr: tr if lang == "tr" else en)
+    s = n["supervisor"]
+    head = (f"*{subject}*\n"
+            f"{L('Created', 'Açılan')} {n['created']} · {L('resolved', 'çözülen')} {n['resolved']} · {L('open', 'açık')} {n['open_now']} · "
+            f"{L('escalated', 'insana aktarılan')} {n['escalated_open']} · SLA {L('breaches', 'aşımı')} {n['sla_breaches']}\n"
+            f"{L('Satisfaction', 'Memnuniyet')} {n['avg_rating'] or '—'}/5 · {L('first response', 'ilk yanıt')} {_dur(n['median_first_response_s'])} · "
+            f"{L('handling', 'çözüm')} {_dur(n['median_handling_s'])}\n"
+            f"Supervisor: {s['runs']} {L('runs', 'tur')}, {s['problems']} {L('problems', 'problem')}, {s['sops_published']}/{s['sops_drafted']} SOP, {s['human_asks']} {L('human asks', 'insan talebi')}\n\n")
+    return (head + text)[:3900]
+
+
 def build_and_send(kind: str, trigger: str = "schedule", to: list[str] | None = None) -> Report:
     cfg = config()
     lang = cfg.get("language", "en")
-    recipients = to or [x.strip() for x in cfg.get("recipients", "").split(",") if x.strip()]
+    channel = cfg.get("channel", "email")
+    emails = [x.strip() for x in cfg.get("recipients", "").split(",") if x.strip()]
+    phones = [x.strip() for x in cfg.get("whatsapp_recipients", "").split(",") if x.strip()]
+    if to:                                   # manual override: route by shape
+        emails = [x for x in to if "@" in x]
+        phones = [x for x in to if "@" not in x]
+        channel = "both"
     n = numbers(kind)
     text = narrative(n, lang)
     body = render_html(n, text, lang)
     subject = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}[kind] + f" desk report · {n['created']} new, {n['resolved']} resolved, {n['open_now']} open"
-    ok, err = (False, "no recipients") if not recipients else send_html(recipients, subject, body, text)
+    results, delivered = [], []
+    if channel in ("email", "both"):
+        if emails:
+            ok, err = send_html(emails, subject, body, text)
+            results.append("" if ok else f"email: {err}")
+            if ok:
+                delivered += emails
+        else:
+            results.append("email: no recipients")
+    if channel in ("whatsapp", "both"):
+        from app.whatsapp import SendError, send
+        msg = render_text(n, text, lang, subject)
+        if not phones:
+            results.append("whatsapp: no recipients")
+        for p in phones:
+            try:
+                if send(p, msg):
+                    delivered.append(p)
+                else:
+                    results.append(f"whatsapp {p}: channel not configured")
+            except SendError as e:
+                hint = " (outside the 24h window a message template is required)" if e.code in (131047, 131026) else ""
+                results.append(f"whatsapp {p}: {e}{hint}")
+    ok = bool(delivered)
+    err = "; ".join(x for x in results if x)[:300]
     with session() as db:
-        r = Report(kind=kind, trigger=trigger, recipients=", ".join(recipients), subject=subject, html=body,
+        r = Report(kind=kind, trigger=trigger, recipients=", ".join(delivered or emails + phones), subject=subject, html=body,
                    narrative=text, numbers=n, sent=ok, error=err)
         db.add(r)
         db.flush()
