@@ -50,15 +50,20 @@ def test_ticket_waits_for_confirmation_then_closes_with_rating():
         assert ticket.id == tid and ticket.status == "resolved"
     assert "asked to confirm" in llm.requests[0][0]["content"]
 
-    set_llm(ScriptedLLM([Reply(tool_calls=[call("record_rating", rating=5)]), Reply(text="Teşekkürler!")]))
-    with session() as db:
-        # a resolved ticket is not reopened for the rating; the rating lands on a new ticket only if
-        # the model opens one — so we rate the last resolved ticket explicitly via the same requester
-        t = db.get(Ticket, tid)
-        t.status = "waiting_user"            # rating arrives while the closing exchange is still open
+    # the rating arrives after the ticket is closed: it belongs to the closing exchange, not a new ticket
+    llm = ScriptedLLM([Reply(tool_calls=[call("record_rating", rating=5)]), Reply(text="Teşekkürler!")])
+    set_llm(llm)
     with session() as db:
         ticket, _ = handle_message(db, "+905551110001", "5")
-        assert ticket.id == tid and ticket.rating == 5
+        assert ticket.id == tid and ticket.rating == 5 and ticket.status == "resolved"
+        assert db.query(Ticket).count() == 1
+    assert "already resolved" in llm.requests[0][0]["content"]
+
+    # once rated, a new message from the same employee is a new ticket
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    with session() as db:
+        ticket, _ = handle_message(db, "+905551110001", "yazıcı çalışmıyor")
+        assert ticket.id != tid
 
 
 def test_due_reminder_becomes_outbound_message():

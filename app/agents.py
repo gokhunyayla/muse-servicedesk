@@ -45,6 +45,10 @@ class Agent:
             state += (f"\nThe employee was asked to confirm this fix: \"{ticket.resolution}\". If they confirm, "
                       f"close_ticket and ask for a 1-5 rating; if they report it still fails, keep working. "
                       f"If their message is a rating, record_rating.")
+        elif ticket.status == "resolved":
+            state += (f"\nThis ticket is already resolved (\"{ticket.resolution}\") and the employee was asked for "
+                      f"a 1-5 rating. If their message is a number, record_rating and thank them in one line. "
+                      f"If it is just thanks, reply in one line. Do not ask what they need help with.")
         return (f"You are the {self.tier} agent of an autonomous IT service desk. {self.role}\n\n{RULES}\n\n"
                 f"SOPs in your knowledge pool (search_knowledge to read one):\n{sops}\n\n"
                 f"Other agents you can hand off to:\n{peers}\n\n{state}")
@@ -142,6 +146,25 @@ def _belongs_to(ticket: Ticket, text: str) -> bool:
     return "NEW" not in reply.text.upper()
 
 
+RATING_WINDOW_HOURS = 24
+
+
+def _closing_exchange(db, requester: str, text: str) -> Ticket | None:
+    """A short message ("5", "teşekkürler") right after a ticket was closed belongs to that ticket's
+    closing exchange (rating / thanks), not to a new one. Anything longer is a new request."""
+    from datetime import timedelta
+    from app.db import _now
+    if len(text.split()) > 3:
+        return None
+    last = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status == "resolved",
+                                    Ticket.rating.is_(None)).order_by(Ticket.id.desc()).first())
+    if last is None or not last.events:
+        return None
+    if last.events[-1].at < _now() - timedelta(hours=RATING_WINDOW_HOURS):
+        return None
+    return last
+
+
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
                    mime: str = "image/jpeg", extra_images: list[bytes] | None = None) -> tuple[Ticket, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
@@ -152,6 +175,8 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     if ticket is not None and not _belongs_to(ticket, text):
         log(db, ticket.id, "system", "note", f"new unrelated request from requester, opened a separate ticket: {text[:80]}")
         ticket = None
+    if ticket is None:
+        ticket = _closing_exchange(db, requester, text)
     if ticket is None:
         ticket = Ticket(requester=requester, title=text[:255])
         db.add(ticket)
