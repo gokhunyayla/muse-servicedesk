@@ -151,7 +151,7 @@ main{display:grid;gap:16px;padding:12px 16px 16px}main.dash{grid-template-column
 .tl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.search{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);min-width:220px}
 .list{padding:10px}.list .thead{padding:4px 6px 8px}.items{max-height:76vh;overflow:auto;display:flex;flex-direction:column}
 .item{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;padding:9px 8px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
-.item input{display:none}.items.selecting .item{grid-template-columns:22px 1fr auto}.items.selecting .item input{display:block}
+.item>div{min-width:0}.item input{display:none}.items.selecting .item{grid-template-columns:22px 1fr auto}.items.selecting .item input{display:block}
 .item:hover{background:var(--bg)}.item.on{background:rgba(8,102,255,.14)}.item .t{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .item .m{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.item .r{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
 .item .r small{color:var(--muted);font-size:11px;white-space:nowrap}.item .pill{font-size:11px;padding:1px 7px}.item input{margin-top:3px}
