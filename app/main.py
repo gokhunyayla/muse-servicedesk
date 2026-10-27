@@ -86,6 +86,12 @@ def list_outbound(unsent: bool = True) -> list[dict]:
         return [{"id": o.id, "to": o.to, "ticket_id": o.ticket_id, "text": o.text} for o in q.limit(100)]
 
 
+@app.post("/proactive/run")
+def run_proactive() -> dict:
+    from app.proactive import run_proactive_checks
+    return {"opened": run_proactive_checks()}
+
+
 @app.post("/followups/run")
 def run_followups() -> dict:
     from app.scheduler import run_due_followups

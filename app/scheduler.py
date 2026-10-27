@@ -35,13 +35,18 @@ def run_due_followups() -> int:
     return ran
 
 
-def start_background(interval_sec: int = 30) -> threading.Thread:
+def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600) -> threading.Thread:
     def loop():
+        from app.proactive import run_proactive_checks
+        last_proactive = 0.0
         while True:
             try:
                 run_due_followups()
-            except Exception:   # the scheduler must survive a failing follow-up
-                logger.exception("follow-up run failed")
+                if time.time() - last_proactive >= proactive_every_sec:
+                    run_proactive_checks()
+                    last_proactive = time.time()
+            except Exception:   # the scheduler must survive a failing run
+                logger.exception("scheduled run failed")
             time.sleep(interval_sec)
     t = threading.Thread(target=loop, daemon=True, name="followups")
     t.start()

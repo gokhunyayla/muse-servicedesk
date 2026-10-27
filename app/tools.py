@@ -308,6 +308,46 @@ def grant_sap_role(ctx: Ctx, employee_no: str, role: str, days: int | None = Non
     return {"ok": True, "sap_roles": u["sap_roles"], "expires_in_days": days}
 
 
+# ---- security: mail & endpoint response -----------------------------------------------------
+
+@tool("Analyze a suspicious e-mail (sender, subject, body with links). Returns safe / suspicious / phishing.",
+      ("L1", "L2", "L3"), sender=STR, subject=STR, body=STR)
+def analyze_email(ctx: Ctx, sender: str, subject: str, body: str) -> dict:
+    return systems.analyze_email(sender, subject, body)
+
+
+@tool("Remove a phishing e-mail from every mailbox in the tenant.", ("L1", "L3"), subject=STR, sender=STR)
+def quarantine_email(ctx: Ctx, subject: str, sender: str) -> dict:
+    return systems.quarantine(subject, sender)
+
+
+@tool("Block a sender address/domain at the mail gateway.", ("L1", "L3"), sender=STR)
+def block_sender(ctx: Ctx, sender: str) -> dict:
+    return systems.block_sender(sender)
+
+
+@tool("Isolate a laptop from the network (EDR). Only the management channel stays open. Do this first "
+      "on any malware suspicion; speed matters more than consent.", ("L2", "L3"), hostname=STR)
+def isolate_device(ctx: Ctx, hostname: str) -> dict:
+    return systems.isolate(hostname)
+
+
+@tool("Collect forensic evidence from a laptop: processes, downloads, connections, last logon.",
+      ("L2", "L3"), hostname=STR)
+def collect_evidence(ctx: Ctx, hostname: str) -> dict:
+    return systems.collect_evidence(hostname)
+
+
+@tool("Run a full malware scan; findings are quarantined automatically.", ("L2", "L3"), hostname=STR)
+def run_malware_scan(ctx: Ctx, hostname: str) -> dict:
+    return systems.malware_scan(hostname)
+
+
+@tool("Release a laptop from isolation after a clean scan.", ("L2", "L3"), hostname=STR)
+def release_device(ctx: Ctx, hostname: str) -> dict:
+    return systems.release(hostname)
+
+
 # ---- approvals ----------------------------------------------------------------------------
 
 def _approved(ctx: Ctx, what: str) -> bool:
@@ -380,6 +420,48 @@ def notify_user(ctx: Ctx, employee_no: str, text: str) -> dict:
     return {"ok": True, "to": u["name"]}
 
 
+# ---- incidents (many tickets, one cause) -----------------------------------------------------
+
+@tool("Find other open tickets that look like this one (same symptom). Use it when a problem may "
+      "affect many people.", ALL, query=STR)
+def find_similar_tickets(ctx: Ctx, query: str) -> dict:
+    import re
+    q = {t for t in re.findall(r"\w+", query.lower()) if len(t) > 3}
+    hits = []
+    for t in ctx.db.query(Ticket).filter(Ticket.status != "resolved", Ticket.id != ctx.ticket.id):
+        words = {w for w in re.findall(r"\w+", t.title.lower()) if len(w) > 3}
+        if len(q & words) >= 2:
+            hits.append({"ticket_id": t.id, "title": t.title, "requester": t.requester,
+                         "created_at": t.created_at.isoformat(), "incident_id": t.incident_id})
+    return {"ok": True, "similar": hits, "count": len(hits)}
+
+
+@tool("Link tickets to this one as a single incident; this ticket becomes the incident record. "
+      "Linked tickets close together with it.", ("L1", "L3"), ticket_ids={"type": "array", "items": INT},
+      incident_title=STR)
+def link_tickets(ctx: Ctx, ticket_ids: list[int], incident_title: str) -> dict:
+    ctx.ticket.title = f"[INCIDENT] {incident_title}"
+    linked = []
+    for tid in ticket_ids:
+        t = ctx.db.get(Ticket, int(tid))
+        if t and t.id != ctx.ticket.id:
+            t.incident_id = ctx.ticket.id
+            log(ctx.db, t.id, ctx.agent, "note", f"linked to incident #{ctx.ticket.id}")
+            linked.append(t.id)
+    return {"ok": True, "incident_id": ctx.ticket.id, "linked": linked}
+
+
+@tool("Send the same status update to everyone whose ticket is linked to this incident.", ("L1", "L3"), text=STR)
+def broadcast_incident_update(ctx: Ctx, text: str) -> dict:
+    from app.db import Outbound
+    children = ctx.db.query(Ticket).filter(Ticket.incident_id == ctx.ticket.id).all()
+    recipients = {ctx.ticket.requester, *(t.requester for t in children)}
+    for r in recipients:
+        ctx.db.add(Outbound(to=r, ticket_id=ctx.ticket.id, text=text))
+    ctx.db.flush()
+    return {"ok": True, "recipients": len(recipients)}
+
+
 # ---- ticket lifecycle -----------------------------------------------------------------------
 
 @tool("You believe the problem is fixed: ask the employee to confirm. The ticket waits for their answer "
@@ -400,7 +482,11 @@ def request_confirmation(ctx: Ctx, summary: str) -> dict:
 def close_ticket(ctx: Ctx, resolution: str) -> dict:
     ctx.ticket.status = "resolved"
     ctx.ticket.resolution = resolution
-    return {"ok": True, "status": "resolved"}
+    closed = 0
+    for child in ctx.db.query(Ticket).filter(Ticket.incident_id == ctx.ticket.id, Ticket.status != "resolved"):
+        child.status, child.resolution = "resolved", f"incident #{ctx.ticket.id}: {resolution}"
+        closed += 1
+    return {"ok": True, "status": "resolved", "linked_closed": closed}
 
 
 @tool("Store the employee's 1-5 satisfaction rating for this ticket.", ("L1",), rating=INT)

@@ -30,10 +30,17 @@ def create_user(name: str, department: str, manager: str, phone: str) -> str:
     return emp
 
 DEVICES = {
-    "TR-LT-101": {"vpn_profile": "expired", "online": True, "dns_ok": True},
-    "TR-LT-102": {"vpn_profile": "valid", "online": True, "dns_ok": False},
-    "TR-LT-103": {"vpn_profile": "valid", "online": False, "dns_ok": True},
+    "TR-LT-101": {"vpn_profile": "expired", "online": True, "dns_ok": True, "disk_used_pct": 61, "os_patch_days": 12},
+    "TR-LT-102": {"vpn_profile": "valid", "online": True, "dns_ok": False, "disk_used_pct": 97, "os_patch_days": 5},
+    "TR-LT-103": {"vpn_profile": "valid", "online": False, "dns_ok": True, "disk_used_pct": 40, "os_patch_days": 48},
 }
+
+
+def device_owner(hostname: str) -> tuple[str, dict] | None:
+    for emp, u in USERS.items():
+        if u.get("device") == hostname:
+            return emp, u
+    return None
 
 
 WARRANTY = {   # hostname -> vendor warranty record
@@ -103,6 +110,68 @@ def rollback(snapshot_id: str) -> bool:
         return False
     SERVERS[s["hostname"]]["packages"] = dict(s["packages"])
     return True
+
+
+# ---- security: EDR + mail security (simulated; same shapes as Defender / Exchange Online) ----
+_isolated: set[str] = set()
+_blocked_senders: set[str] = set()
+_quarantined: list[dict] = []
+
+KNOWN_BAD = {"domains": {"micros0ft-login.com", "dhl-tracking-tr.net", "hr-bonus-portal.com"},
+             "hashes": {"44d88612fea8a8f36de82e1278abb02f": "EICAR test file"}}
+
+
+def isolate(hostname: str) -> dict:
+    if hostname not in DEVICES:
+        return {"ok": False, "error": "unknown device"}
+    _isolated.add(hostname)
+    return {"ok": True, "hostname": hostname, "isolated": True, "management_channel": "open"}
+
+
+def release(hostname: str) -> dict:
+    _isolated.discard(hostname)
+    return {"ok": True, "hostname": hostname, "isolated": False}
+
+
+def collect_evidence(hostname: str) -> dict:
+    return {"ok": True, "hostname": hostname, "isolated": hostname in _isolated,
+            "suspicious_processes": [{"name": "svch0st.exe", "path": "C:\\Users\\Public\\svch0st.exe", "parent": "outlook.exe"}],
+            "recent_downloads": ["Fatura_2026_10.pdf.exe"],
+            "outbound_connections": ["185.220.101.4:443"],
+            "last_logon": "E1001"}
+
+
+def malware_scan(hostname: str) -> dict:
+    findings = [{"file": "C:\\Users\\Public\\svch0st.exe", "hash": "44d88612fea8a8f36de82e1278abb02f",
+                 "verdict": "Trojan:Win32/Agent (EICAR-marked sample)", "action": "quarantined"}]
+    return {"ok": True, "hostname": hostname, "findings": findings, "clean_after_action": True}
+
+
+def analyze_email(sender: str, subject: str, body: str) -> dict:
+    import re
+    domain = sender.split("@")[-1].lower()
+    links = re.findall(r"https?://[^\s)>\]]+", body)
+    link_domains = {re.sub(r"^https?://([^/]+).*", r"\1", l).lower() for l in links}
+    signals = []
+    if domain in KNOWN_BAD["domains"] or link_domains & KNOWN_BAD["domains"]:
+        signals.append("known phishing domain")
+    if any(w in (subject + body).lower() for w in ("acil", "urgent", "hesabınız askıya", "şifrenizi doğrulayın", "24 saat")):
+        signals.append("urgency / credential lure")
+    if domain not in ("company.com",) and any(w in body.lower() for w in ("şifre", "password", "giriş yapın", "login")):
+        signals.append("external sender asks for credentials")
+    verdict = "phishing" if len(signals) >= 2 or "known phishing domain" in signals else ("suspicious" if signals else "safe")
+    return {"ok": True, "verdict": verdict, "signals": signals, "sender_domain": domain, "links": links}
+
+
+def quarantine(subject: str, sender: str) -> dict:
+    hit = {"subject": subject, "sender": sender, "mailboxes_affected": 17}
+    _quarantined.append(hit)
+    return {"ok": True, **hit, "tenant_wide": True}
+
+
+def block_sender(sender: str) -> dict:
+    _blocked_senders.add(sender.lower())
+    return {"ok": True, "blocked": sorted(_blocked_senders)}
 
 
 # Allow-listed endpoint scripts. Only these names can run on a laptop; the endpoint agent
