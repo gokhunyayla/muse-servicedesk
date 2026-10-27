@@ -170,7 +170,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 .run{border-bottom:1px solid var(--line)}.run summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:center;padding:9px 4px}
 .run summary::-webkit-details-marker{display:none}.run .when{font-weight:600;white-space:nowrap}.run .first{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 .run .chips{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.chip{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-.run .body{padding:4px 4px 12px}.run .body p{margin:0 0 6px;line-height:1.5}.run .body small{color:var(--muted)}
+.run .body{padding:4px 4px 12px}.run .body p{margin:0 0 8px;line-height:1.5}.run .body small{color:var(--muted)}.acts{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.chip.err{color:var(--bad);border-color:var(--bad)}
 .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
 @media(max-width:900px){.run summary{grid-template-columns:1fr auto}.run .first,.run .chips{grid-column:1/-1;justify-content:flex-start}}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
@@ -290,8 +290,10 @@ async function load(){
     const chips=[['create_problem','problem'],['propose_sop','SOP draft'],['open_human_ticket','human ask'],['note_ticket','note'],['read_ticket','ticket read'],['web_search','search'],['fetch_page','page']].filter(([k])=>c[k]).map(([k,l])=>`<span class="chip">${c[k]} ${l}${c[k]>1?'s':''}</span>`).join('');
     const sig=(r.findings&&r.findings.signals||[]).length,cl=(r.findings&&r.findings.clusters||[]).length;
     const txt=plain(r.summary||r.error||'running…');const first=txt.split(/(?<=[.!?])\\s+/)[0];
-    return `<details class="run"><summary><span class="when">${fmt(r.started_at)}</span><span class="tag">${r.trigger}</span>${r.error?'<span class="pill escalated">error</span>':''}<span class="first">${esc(first)}</span><span class="chips">${chips||'<span class="chip">no actions</span>'}</span></summary>
-     <div class="body"><p>${esc(txt)}</p><small>Looked at: ${cl} emerging cluster${cl===1?'':'s'}, ${sig} failure signal${sig===1?'':'s'}${r.finished_at?' · took '+dur((new Date(r.finished_at)-new Date(r.started_at))/1000):''}</small></div></details>`}).join(''):'<small>No runs yet. Press Run now, or switch the mode to automatic in Settings.</small>';}catch(e){}
+    return `<details class="run" data-id="${r.id}"><summary><span class="when">${fmt(r.started_at)}</span><span class="tag">${r.trigger}</span>${r.error?'<span class="pill escalated">error</span>':''}<span class="first">${esc(first)}</span><span class="chips">${chips||'<span class="chip">no actions</span>'}</span></summary>
+     <div class="body">${paras(txt)}<div class="acts">${(r.actions||[]).map(a=>`<span class="chip ${a.ok?'':'err'}">${esc(a.tool)}${a.args&&(a.args.ticket_id||a.args.ticket_ids)?' #'+esc(a.args.ticket_id||(a.args.ticket_ids||[]).join(',#')):''}${a.args&&a.args.query?': '+esc(String(a.args.query).slice(0,40)):''}${a.args&&a.args.title?': '+esc(String(a.args.title).slice(0,40)):''}</span>`).join('')}</div>
+     <small>Looked at ${cl} emerging cluster${cl===1?'':'s'} and ${sig} failure signal${sig===1?'':'s'}${r.finished_at?' · took '+dur((new Date(r.finished_at)-new Date(r.started_at))/1000):''}</small></div></details>`}).join(''):'<small>No runs yet. Press Run now, or switch the mode to automatic in Settings.</small>';
+   document.querySelectorAll('.run').forEach(el=>{el.open=openRuns.has(el.dataset.id);el.ontoggle=()=>{el.open?openRuns.add(el.dataset.id):openRuns.delete(el.dataset.id)}});}catch(e){}
  }else{
   const ts=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
   $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');$('#scope').textContent+=' · '+ts.length+' tickets';
@@ -317,6 +319,9 @@ async function doAssign(){const id=$('#assignModal').dataset.id;$('#aGo').disabl
  await fetch('/tickets/'+id+'/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner:$('#aOwner').value,note:$('#aNote').value.trim(),assignee:$('#aName').value.trim()})});
  $('#aGo').disabled=false;$('#aGo').textContent='Assign';closeModal('assignModal');$('#aNote').value='';await load();show(id);}
 const AGENT_LABEL={L1:'L1 · first contact',L2:'L2 · devices & network',L3:'L3 · servers & security',L4:'L4 · vendors & logistics'};
+const openRuns=new Set();
+function paras(txt){const parts=String(txt).split(/\\s*(?=(?:#\\d+\\s*[\\[(—:-])|Deliberately skipped|Noticed|Did:|Skipped:)/).map(s=>s.trim()).filter(Boolean);
+ return (parts.length>1?parts:String(txt).split(/(?<=[.!?])\\s+(?=[A-Z#])/)).map(s=>`<p>${esc(s)}</p>`).join('');}
 function plain(md){return String(md).replace(/\\*\\*/g,'').replace(/`/g,'').replace(/^\\s*[-*]\\s+/gm,'').replace(/\\s*\\n+\\s*/g,' ').trim();}
 function ago(x){const s=(Date.now()-new Date(x))/1000;if(s<60)return 'now';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d';}
 function fmt(x){try{const d=new Date(x);return d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}catch(e){return x}}

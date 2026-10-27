@@ -83,19 +83,26 @@ def _sign_in(db, user: User, response: Response, days: int = SESSION_DAYS) -> No
 # ---- e-mail ----------------------------------------------------------------------------------
 
 def send_mail(to: str, subject: str, body: str) -> bool:
-    """SMTP when configured; otherwise the message goes to the log so development still works."""
-    if not auth_settings.smtp_host:
+    """SMTP from Settings → Reports (or .env); otherwise the message goes to the log so development still works."""
+    from app.reports import smtp_config
+    c = smtp_config()
+    if not c["host"]:
         logger.warning("SMTP not configured; mail to %s: %s\n%s", to, subject, body)
         return False
     msg = EmailMessage()
-    msg["From"], msg["To"], msg["Subject"] = auth_settings.smtp_from, to, subject
+    msg["From"], msg["To"], msg["Subject"] = c["from"] or c["user"], to, subject
     msg.set_content(body)
-    with smtplib.SMTP(auth_settings.smtp_host, auth_settings.smtp_port, timeout=20) as s:
-        s.starttls()
-        if auth_settings.smtp_user:
-            s.login(auth_settings.smtp_user, auth_settings.smtp_password)
-        s.send_message(msg)
-    return True
+    try:
+        with smtplib.SMTP(c["host"], int(c["port"]), timeout=20) as s:
+            if c.get("tls", True):
+                s.starttls()
+            if c["user"]:
+                s.login(c["user"], c["password"])
+            s.send_message(msg)
+        return True
+    except Exception as e:
+        logger.error("mail to %s failed: %s", to, e)
+        return False
 
 
 # ---- pages -----------------------------------------------------------------------------------
@@ -459,7 +466,7 @@ SLA_FIELDS = [("first_response", "First response", "Time until the employee gets
 def settings_page(user: User = Depends(current_user), tab: str = "sla", info: str = "") -> str:
     from app.sla import sla_targets
     admin = user.role == "admin"
-    tabs = [("sla", "SLA"), ("supervisor", "Supervisor"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
+    tabs = [("sla", "SLA"), ("supervisor", "Supervisor"), ("reports", "Reports"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
     nav = "".join(f'<a class="tab {"on" if tab == k else ""}" href="/settings?tab={k}">{v}</a>' for k, v in tabs)
     if tab == "sla":
         t = sla_targets()
@@ -497,6 +504,41 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <script>async function runNow(b){{b.disabled=true;b.textContent='Running…';const o=document.getElementById('runOut');o.style.display='';o.textContent='The Supervisor is reviewing the desk…';
  try{{const r=await (await fetch('/supervisor/run',{{method:'POST'}})).json();o.textContent=(r.error?'Error: '+r.error+String.fromCharCode(10):'')+r.summary+String.fromCharCode(10,10)+'Actions: '+r.actions.map(a=>a.tool+(a.ok?' ✓':' ✗')).join(', ');}}catch(e){{o.textContent='Failed: '+e}}
  b.disabled=false;b.textContent='Run now';}}</script>"""
+    elif tab == "reports":
+        from app.db import Report
+        from app.reports import config as rcfg, smtp_config
+        c, sm = rcfg(), smtp_config()
+        dis = "" if admin else "disabled"
+        days = "".join(f'<option value="{i}" {"selected" if int(c.get("weekly_day", 1)) == i else ""}>{d}</option>'
+                       for i, d in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], 1))
+        with session() as db:
+            hist = "".join(f"<tr><td>{r.created_at:%d %b %H:%M}</td><td><span class='tag'>{r.kind}</span></td><td>{_esc(r.recipients) or '—'}</td>"
+                           f"<td><span class='tag {'active' if r.sent else 'disabled'}'>{'sent' if r.sent else 'not sent'}</span>{(' <small class=muted>' + _esc(r.error) + '</small>') if r.error else ''}</td>"
+                           f"<td><a href='/reports/{r.id}' target='_blank'>open</a></td></tr>"
+                           for r in db.query(Report).order_by(Report.id.desc()).limit(10))
+        body = f"""<p class="muted">Muse Wonder writes a short narrative over the desk's numbers; it goes out as an HTML e-mail on the schedule below (desk time zone).</p>
+<form method="post" action="/settings/reports">
+<div class="srow"><div><b>Recipients</b><small>Comma-separated e-mail addresses</small></div><input name="recipients" style="width:360px" value="{_esc(c.get('recipients',''))}" placeholder="it-manager@company.com, ciso@company.com" {dis}></div>
+<div class="srow"><div><b>Language</b></div><select name="language" style="width:140px" {dis}><option value="en" {"selected" if c.get("language")=="en" else ""}>English</option><option value="tr" {"selected" if c.get("language")=="tr" else ""}>Türkçe</option></select></div>
+<div class="srow"><div><b>Daily</b><small>End-of-day report</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="daily" value="1" {"checked" if c.get("daily") else ""} {dis}></label> <input name="daily_at" type="time" value="{_esc(c.get('daily_at','18:00'))}" style="width:120px" {dis}></div></div>
+<div class="srow"><div><b>Weekly</b><small>Last 7 days</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="weekly" value="1" {"checked" if c.get("weekly") else ""} {dis}></label> <select name="weekly_day" style="width:90px" {dis}>{days}</select> <input name="weekly_at" type="time" value="{_esc(c.get('weekly_at','09:00'))}" style="width:120px" {dis}></div></div>
+<div class="srow"><div><b>Monthly</b><small>Last 30 days</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="monthly" value="1" {"checked" if c.get("monthly") else ""} {dis}></label> day <input name="monthly_day" type="number" min="1" max="28" value="{int(c.get('monthly_day',1))}" style="width:70px" {dis}> <input name="monthly_at" type="time" value="{_esc(c.get('monthly_at','09:00'))}" style="width:120px" {dis}></div></div>
+<h3>SMTP</h3>
+<div class="grid">
+<div><label>Host</label><input name="smtp_host" value="{_esc(sm.get('host',''))}" placeholder="smtp.office365.com" {dis}></div>
+<div><label>Port</label><input name="smtp_port" type="number" value="{int(sm.get('port',587))}" {dis}></div>
+<div><label>User</label><input name="smtp_user" value="{_esc(sm.get('user',''))}" autocomplete="off" {dis}></div>
+<div><label>Password <small>(leave blank to keep)</small></label><input name="smtp_password" type="password" autocomplete="new-password" {dis}></div>
+<div><label>From</label><input name="smtp_from" value="{_esc(sm.get('from',''))}" placeholder="servicedesk@company.com" {dis}></div>
+<div><label>STARTTLS</label><label class="check"><input type="checkbox" name="smtp_tls" value="1" {"checked" if sm.get("tls", True) else ""} {dis}> use STARTTLS</label></div>
+</div>
+{_alert('', info)}
+{('<div class="row end"><button class="btn" type="button" onclick="sendTest(this)">Send test report</button><button class="btn primary slim" type="submit">Save</button></div>' if admin else '<p class="muted">Only admins can change these.</p>')}</form>
+<pre id="repOut" class="muted" style="white-space:pre-wrap;display:none"></pre>
+<h3>Recent reports</h3><div class="scroll"><table><thead><tr><th>When</th><th>Kind</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>{hist or '<tr><td colspan=5 class=muted>none yet</td></tr>'}</tbody></table></div>
+<script>async function sendTest(b){{b.disabled=true;b.textContent='Sending…';const o=document.getElementById('repOut');o.style.display='';o.textContent='Writing the daily report with Muse Wonder…';
+ try{{const r=await (await fetch('/reports/send',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{kind:'daily'}})}})).json();
+ o.textContent=(r.sent?'Sent: ':'Not sent ('+r.error+'): ')+r.subject+String.fromCharCode(10,10)+r.narrative;}}catch(e){{o.textContent='Failed: '+e}}b.disabled=false;b.textContent='Send test report';}}</script>"""
     elif tab == "channels":
         body = '<p class="muted">WhatsApp Cloud API settings are read from <code>.env</code> (WA_PHONE_NUMBER_ID, WA_ACCESS_TOKEN, WA_VERIFY_TOKEN). An editable form lands here next.</p>'
     elif tab == "models":
@@ -551,6 +593,37 @@ def knowledge_page(user: User = Depends(current_user)) -> str:
 <h3>SOP pools</h3><div class="pools">{pools}</div>
 <script>async function decide(id,decision){{const r=await fetch('/sops/drafts/'+id,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{decision}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}</script>"""
     return _page("Knowledge", body, wide=True, user=user, active="knowledge")
+
+
+@router.post("/settings/reports")
+async def settings_reports(request: Request, admin: User = Depends(admin_user)):
+    from app.reports import DEFAULT_REPORTS
+    from app.sla import get_setting, put_setting
+    check_origin(request)
+    form = await request.form()
+    rep = dict(DEFAULT_REPORTS)
+    rep["recipients"] = ", ".join(x.strip() for x in str(form.get("recipients", "")).split(",") if x.strip())
+    rep["language"] = "tr" if form.get("language") == "tr" else "en"
+    for k in ("daily", "weekly", "monthly"):
+        rep[k] = form.get(k) == "1"
+    for k in ("daily_at", "weekly_at", "monthly_at"):
+        v = str(form.get(k, DEFAULT_REPORTS[k]))
+        rep[k] = v if len(v) == 5 and v[2] == ":" else DEFAULT_REPORTS[k]
+    try:
+        rep["weekly_day"] = min(7, max(1, int(form.get("weekly_day", 1))))
+        rep["monthly_day"] = min(28, max(1, int(form.get("monthly_day", 1))))
+    except (TypeError, ValueError):
+        pass
+    put_setting("reports", rep)
+    saved = get_setting("smtp", {})
+    smtp = {"host": str(form.get("smtp_host", "")).strip(), "port": int(form.get("smtp_port") or 587),
+            "user": str(form.get("smtp_user", "")).strip(), "from": str(form.get("smtp_from", "")).strip(),
+            "tls": form.get("smtp_tls") == "1",
+            "password": str(form.get("smtp_password") or "") or saved.get("password", "")}
+    put_setting("smtp", smtp)
+    with session() as db:
+        audit(db, admin.email, "settings.reports", detail=f"{rep['recipients']} daily={rep['daily']} weekly={rep['weekly']} monthly={rep['monthly']} smtp={smtp['host']}", ip=_ip(request))
+    return RedirectResponse("/settings?tab=reports&info=Report+settings+saved", 303)
 
 
 @router.post("/settings/sla")

@@ -209,3 +209,20 @@ class SopDraft(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")   # pending | published | rejected
     decided_by: Mapped[str] = mapped_column(String(255), default="")
     sop_id: Mapped[str] = mapped_column(String(128), default="")
+
+
+class Report(Base):
+    """A generated desk report (daily / weekly / monthly) and whether it was e-mailed."""
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    kind: Mapped[str] = mapped_column(String(16))
+    trigger: Mapped[str] = mapped_column(String(16), default="schedule")
+    recipients: Mapped[str] = mapped_column(String(500), default="")
+    subject: Mapped[str] = mapped_column(String(255), default="")
+    narrative: Mapped[str] = mapped_column(Text, default="")
+    html: Mapped[str] = mapped_column(Text, default="")
+    numbers: Mapped[dict] = mapped_column(JSON, default=dict)
+    sent: Mapped[bool] = mapped_column(default=False)
+    error: Mapped[str] = mapped_column(String(300), default="")

@@ -35,6 +35,8 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   problem records, detects where the tier agents fail (stuck, escalated, SLA breach, tool errors, low ratings),
   researches the gap on the web and writes a draft SOP that an admin publishes at `/knowledge`, or opens a
   `[Supervisor]` ticket asking a human for exactly what is missing (access, purchase, policy, on-site work).
+* **Reports.** Daily, weekly and monthly reports (Settings → Reports: recipients, schedule, SMTP): numbers from the
+  ticket store, a narrative by Muse Wonder, delivered as HTML e-mail; history and "send test" in the console.
 * **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
   approval over chat (`ONAY 12`), confirmation before closing, satisfaction rating, scheduled follow-ups,
   incident linking for mass outages, proactive tickets from inventory checks, escalation to a human engineer when no tier can solve it, desk-side close from the dashboard.
@@ -51,6 +53,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 | Photos, screenshots, video frames | Muse Spark vision | intake (`image_message`), `/video` |
 | Locating objects in camera frames (sticky note, monitor) | SAM 3.1 | `app/vision.py`, `app/camera.py` |
 | Supervisor: reviews the desk, merges emerging problems, researches gaps on the web and drafts SOPs, asks humans for what is missing | Muse Wonder 1.0 | `app/supervisor.py` |
+| Daily / weekly / monthly management reports (narrative over the desk's numbers, e-mailed) | Muse Wonder 1.0 | `app/reports.py` |
 
 ## Scenarios covered (all run against the real models)
 
@@ -78,7 +81,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 cp .env.example .env            # add META_API_KEY (and WhatsApp tokens when you have them)
 uv venv .venv && uv pip install -p .venv -r requirements.txt
 .venv/bin/python run.py         # http://localhost:1002  dashboard · /docs API
-.venv/bin/python -m pytest      # 65 offline tests with a scripted model
+.venv/bin/python -m pytest      # 69 offline tests with a scripted model
 ```
 
 Needs a MariaDB on 127.0.0.1:3306 (root, empty password); the database is created on start.
@@ -129,6 +132,7 @@ app/voice.py        Muse Voice Transcribe            app/vision.py   SAM 3.1 + f
 app/camera.py       compliance watcher               app/proactive.py  inventory checks
 app/scheduler.py    follow-ups, reminders, outbound  app/whatsapp.py   Cloud API channel
 app/supervisor.py   desk-manager agent (problems, research, SOP drafts, human asks)
+app/reports.py      daily/weekly/monthly e-mail reports (Muse Wonder narrative)
 app/sla.py          timing & SLA from the trail      app/auth.py       console sign-in, users, settings, knowledge
 app/dashboard.py    manager dashboard                app/main.py       HTTP API
 tests/              scenario tests over a scripted model

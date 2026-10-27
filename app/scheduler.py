@@ -69,6 +69,8 @@ def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600
                     is_due = supervisor.due(last)
                 if is_due:
                     supervisor.run("schedule")
+                from app import reports
+                reports.run_due()
             except Exception:   # the scheduler must survive a failing run
                 logger.exception("scheduled run failed")
             time.sleep(interval_sec)

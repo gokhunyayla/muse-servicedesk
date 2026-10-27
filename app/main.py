@@ -252,6 +252,42 @@ def supervisor_stats(period: str | None = None, user=Depends(current_user)) -> d
     return st
 
 
+class ReportRequest(BaseModel):
+    kind: str = "daily"           # daily | weekly | monthly
+    to: str = ""                  # optional override, comma-separated
+
+
+@app.post("/reports/send")
+def send_report_now(r: ReportRequest, request: Request, user=Depends(current_user)) -> dict:
+    from app import reports
+    if r.kind not in ("daily", "weekly", "monthly"):
+        raise HTTPException(422, "kind must be daily, weekly or monthly")
+    check_origin(request)
+    to = [x.strip() for x in r.to.split(",") if x.strip()] or None
+    with session() as db:
+        audit(db, user.email, "report.send", detail=f"{r.kind} {to or ''}".strip())
+    rep = reports.build_and_send(r.kind, "manual", to)
+    return {"id": rep.id, "sent": rep.sent, "error": rep.error, "subject": rep.subject, "narrative": rep.narrative}
+
+
+@app.get("/reports")
+def list_reports(limit: int = 20, user=Depends(current_user)) -> list[dict]:
+    from app.db import Report
+    with session() as db:
+        return [{"id": r.id, "created_at": r.created_at.isoformat(), "kind": r.kind, "trigger": r.trigger, "recipients": r.recipients,
+                 "subject": r.subject, "sent": r.sent, "error": r.error} for r in db.query(Report).order_by(Report.id.desc()).limit(min(limit, 100))]
+
+
+@app.get("/reports/{report_id}", response_class=__import__("fastapi.responses", fromlist=["HTMLResponse"]).HTMLResponse)
+def view_report(report_id: int, user=Depends(current_user)):
+    from app.db import Report
+    with session() as db:
+        r = db.get(Report, report_id)
+        if r is None:
+            raise HTTPException(404)
+        return r.html
+
+
 @app.get("/supervisor/runs")
 def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
     from app.db import SupervisorRun
