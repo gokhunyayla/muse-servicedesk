@@ -85,7 +85,8 @@ CATEGORIES = {   # English labels; keywords cover Turkish and English ticket tit
 
 @router.get("/", response_class=HTMLResponse)
 def page(user=Depends(current_user)) -> str:
-    return PAGE
+    from app.auth import RAIL_CSS, rail
+    return PAGE.replace("<!--RAIL_CSS-->", RAIL_CSS).replace("<!--RAIL-->", rail(user, "dash"))
 
 
 PAGE = """<!doctype html>
@@ -96,19 +97,15 @@ PAGE = """<!doctype html>
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}}
 :root[data-theme=dark]{--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}
 *{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
-header{position:sticky;top:0;z-index:5;background:var(--card);padding:10px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
-.brand{display:flex;align-items:center;gap:10px;min-width:0}.logo{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center;flex:none}
-.logo svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-h1{font-size:16px;margin:0;line-height:1.1;white-space:nowrap}h1 small{display:block;font-size:11px;font-weight:400}h3{margin:14px 0 8px;font-size:14px}small{color:var(--muted)}
-.right{display:flex;align-items:center;gap:8px}.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
-.live i{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
-.menu{position:relative}.avatar{width:34px;height:34px;border-radius:50%;border:0;background:var(--accent);color:#fff;font:600 13px/1 inherit;font-family:inherit;cursor:pointer;display:grid;place-items:center}
+h3{margin:14px 0 8px;font-size:14px}small{color:var(--muted)}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}.live i{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
+.ibtn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;display:grid;place-items:center;padding:0}
+.ibtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.menu{position:relative}.avatar{width:36px;height:36px;border-radius:50%;border:0;background:var(--accent);color:#fff;font:600 13px/1 inherit;font-family:inherit;cursor:pointer;display:grid;place-items:center}
 .dropdown{position:absolute;right:0;top:42px;min-width:230px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:6px;display:none;z-index:20}
 .dropdown.on{display:block}.dropdown a{display:block;padding:8px 10px;border-radius:6px;color:var(--fg);text-decoration:none;font-size:13px}.dropdown a:hover{background:var(--bg)}
 .dd-head{padding:8px 10px 10px}.dd-head b{display:block;font-size:13px}.dd-head small{color:var(--muted);font-size:12px}.dd-sep{height:1px;background:var(--line);margin:6px 0}
-@media(max-width:600px){.live span{display:none}}
-.ibtn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;display:grid;place-items:center;padding:0}
-.ibtn:hover{background:var(--bg)}.ibtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+<!--RAIL_CSS-->
 main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:12px 16px 16px}
 @media(max-width:900px){main{grid-template-columns:1fr;padding:12px;gap:12px}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
@@ -119,7 +116,6 @@ main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:12px 16px 16px}
 th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:hover{background:var(--bg)}td.title{max-width:52vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;color:#fff;white-space:nowrap}
 .open{background:var(--accent)}.waiting_user{background:var(--warn);color:#000}.waiting_approval{background:#8a2be2}.resolved{background:var(--ok)}.escalated{background:#d9480f}
-button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:inherit;cursor:pointer;font-size:12px}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
 .tiers{display:flex;flex-wrap:wrap;gap:6px}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
@@ -141,17 +137,10 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 .modal .row{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 #trail{max-height:70vh;overflow:auto}.ev{padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px;overflow-wrap:anywhere}
 .ev b{color:var(--accent)}.ev.user b{color:var(--ok)}.ev.handoff b{color:var(--bad)}.ev code{font-size:12px;color:var(--muted);white-space:pre-wrap}
-</style></head><body>
-<header>
-<div class="brand"><div class="logo"><svg viewBox="0 0 24 24"><path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg></div>
-<h1>Muse ServiceDesk<small>Service desk console</small></h1></div>
-<div class="right"><span class="live"><i></i><span id="upd">live</span></span>
-<button class="ibtn" id="theme" title="Theme: system" aria-label="Toggle theme"></button>
-<div class="menu"><button class="avatar" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" onclick="toggleMenu(this)">·</button>
-<div class="dropdown" id="userMenu" role="menu"><div class="dd-head"><b id="mName"></b><small id="mMail"></small></div>
-<a href="/profile" role="menuitem">Profile &amp; password</a><span id="adminLinks"></span><div class="dd-sep"></div><a href="/logout" role="menuitem">Sign out</a></div></div></div></header>
+</style></head><body class="app">
+<!--RAIL--><div class="page">
 <div class="toolbar"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
-<small id="scope"></small></div>
+<span class="live"><small id="scope"></small> · <i></i><span id="upd">live</span></span></div>
 <div class="cards" id="cards"></div>
 <main>
 <section class="card"><div class="kpis" id="kpis"></div><h3>Top issues</h3><div id="issues"></div>
@@ -159,7 +148,7 @@ button.close{margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid
 <section class="card"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn primary" id="mergeBtn" disabled onclick="openMerge()">Merge into problem</button></div></div>
 <div class="scroll"><table><thead><tr><th class="sel"></th><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
 <section class="card" style="grid-column:1/-1"><div class="thead"><h3 id="ttitle">Ticket trail</h3><div class="actions" id="tactions"></div></div><div id="trail"><small>Select a ticket.</small></div></section>
-</main>
+</main></div>
 <div class="modal" id="mergeModal"><div class="box"><h3>Merge into a problem record</h3><small id="mergeList"></small>
 <label>Problem title</label><input id="mTitle" placeholder="e.g. Exchange connectivity outage">
 <label>First update to everyone affected (optional)</label><textarea id="mUpdate" rows="2" placeholder="We are aware of the issue and working on it."></textarea>
@@ -175,22 +164,16 @@ const $=s=>document.querySelector(s);let cur=null;
 const LABELS={open:'open',waiting_user:'waiting for user',waiting_approval:'waiting for approval',resolved:'resolved',escalated:'escalated'};
 const pill=s=>`<span class="pill ${s}">${LABELS[s]||s}</span>`;
 const esc=x=>String(x).replace(/</g,'&lt;');
-const ICONS={system:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+function toggleMenu(b){const m=$('#userMenu'),on=!m.classList.contains('on');m.classList.toggle('on',on);b.setAttribute('aria-expanded',on);}
+document.addEventListener('click',e=>{const m=$('#userMenu');if(m&&!e.target.closest('.menu'))m.classList.remove('on');});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){const m=$('#userMenu');if(m)m.classList.remove('on');}});
+(function(){const b=$('#theme');if(!b)return;const I={system:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
  light:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
  dark:'<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'};
-const ORDER=['system','light','dark'];let theme='system';
-function applyTheme(v){theme=v;try{localStorage.setItem('theme',v)}catch(e){}
- if(v==='system')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);
- $('#theme').innerHTML=ICONS[v];$('#theme').title='Theme: '+v+' (click to change)';}
-function toggleMenu(b){const m=$('#userMenu'),on=!m.classList.contains('on');m.classList.toggle('on',on);b.setAttribute('aria-expanded',on);}
-document.addEventListener('click',e=>{if(!e.target.closest('.menu'))$('#userMenu').classList.remove('on');});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#userMenu').classList.remove('on');});
-(async function(){try{const me=await (await fetch('/me')).json();const ini=me.name.split(/\s+/).filter(Boolean).slice(0,2).map(p=>p[0]).join('').toUpperCase()||'?';
- $('#avatarBtn').textContent=ini;$('#mName').textContent=me.name;$('#mMail').textContent=me.email+' · '+me.role;
- if(me.role==='admin')$('#adminLinks').innerHTML='<a href="/users" role="menuitem">Desk users</a><a href="/audit" role="menuitem">Audit log</a>';
- const us=await (await fetch('/users.json')).json();$('#aName').innerHTML='<option value="">— anyone on the desk —</option>'+us.map(u=>`<option>${esc(u.name)}</option>`).join('');}catch(e){}})();
-(function(){let v='system';try{v=localStorage.getItem('theme')||'system'}catch(e){}applyTheme(ORDER.includes(v)?v:'system');
- $('#theme').onclick=()=>applyTheme(ORDER[(ORDER.indexOf(theme)+1)%3]);})();
+ const O=['system','light','dark'];let cur='system';try{cur=localStorage.getItem('theme')||'system'}catch(e){}
+ function ap(v){cur=v;try{localStorage.setItem('theme',v)}catch(e){}if(v==='system')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);b.innerHTML=I[v];b.title='Theme: '+v;}
+ ap(O.includes(cur)?cur:'system');b.onclick=()=>ap(O[(O.indexOf(cur)+1)%3]);})();
+(async function(){try{const us=await (await fetch('/users.json')).json();$('#aName').innerHTML='<option value="">— anyone on the desk —</option>'+us.map(u=>`<option>${esc(u.name)}</option>`).join('');}catch(e){}})();
 let period='all',owner='';
 document.querySelectorAll('#period button').forEach(b=>b.onclick=()=>{period=b.dataset.p;document.querySelectorAll('#period button').forEach(x=>x.classList.toggle('on',x===b));load();});
 function pick(o){owner=owner===o?'':o;load();}

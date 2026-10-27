@@ -266,7 +266,7 @@ def users_page(admin: User = Depends(admin_user), info: str = "", error: str = "
 {_alert(error, info)}
 <div><button class="btn primary" type="submit">Invite user</button></div></form>
 {('<p class="alert ok">Set-password link (SMTP not configured, share it yourself): <a href="'+_esc(link)+'">'+_esc(link)+'</a></p>') if link else ''}
-<p class="links"><a href="/">Back to the console</a></p>""", wide=True, user=admin)
+<p class="links"><a href="/">Back to the console</a></p>""", wide=True, user=admin, active="users")
 
 
 @router.post("/users")
@@ -364,7 +364,7 @@ def profile_page(user: User = Depends(current_user), info: str = "", error: str 
 <button class="btn primary" type="submit">Update password</button>
 <p class="muted" style="margin-top:10px">Other sessions are signed out after a password change.</p></form>
 </aside></div>"""
-    return _page("Profile", body, wide=True, user=user)
+    return _page("Profile", body, wide=True, user=user, active="")
 
 
 @router.post("/profile")
@@ -409,7 +409,7 @@ def audit_page(admin: User = Depends(admin_user), limit: int = 200) -> str:
                        for r in db.query(Audit).order_by(Audit.id.desc()).limit(min(limit, 1000)))
     return _page("Audit log", f"""<p class="muted">Everything desk users did in this console, newest first (UTC).</p>
 <div class="scroll"><table><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead><tbody>{rows}</tbody></table></div>""",
-                 wide=True, user=admin)
+                 wide=True, user=admin, active="audit")
 
 
 @router.get("/audit.json")
@@ -443,6 +443,33 @@ def _alert(error: str, info: str) -> str:
     return ""
 
 
+ICONS = {
+    "dash": '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+    "users": '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>',
+    "audit": '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h8"/></svg>',
+    "system": '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+    "light": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+    "dark": '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+}
+
+
+RAIL_CSS = """
+/* icon rail */
+body.app{display:flex;min-height:100vh}.page{flex:1;min-width:0}
+.rail{position:sticky;top:0;height:100vh;width:64px;flex:none;background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:6px;z-index:10}
+.rail nav{display:flex;flex-direction:column;gap:4px;margin-top:14px;width:100%;align-items:center}
+.rail .nav{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;color:var(--muted);text-decoration:none;position:relative;border:0;background:transparent;cursor:pointer;padding:0}
+.rail .nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.rail .nav:hover{background:var(--bg);color:var(--fg)}.rail .nav.on{background:rgba(8,102,255,.14);color:var(--accent)}
+.rail .nav span{position:absolute;left:52px;top:50%;transform:translateY(-50%);background:var(--fg);color:var(--bg);font-size:12px;padding:4px 8px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s}
+.rail .nav:hover span{opacity:1}
+.rail-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:8px}
+.rail .dropdown.up{top:auto;bottom:0;left:52px;right:auto}
+@media(max-width:800px){body.app{flex-direction:column}.rail{position:fixed;top:auto;bottom:0;left:0;right:0;width:auto;height:60px;flex-direction:row;justify-content:space-around;padding:0 8px;border-right:0;border-top:1px solid var(--line)}
+ .rail nav{flex-direction:row;margin:0;width:auto}.rail .logo{display:none}.rail-bottom{margin:0;flex-direction:row}.rail .nav span{display:none}
+ .page{padding-bottom:64px}.rail .dropdown.up{left:auto;right:0;bottom:50px}}
+"""
+
 LOGO = '<svg viewBox="0 0 24 24"><path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>'
 
 CSS = """
@@ -450,9 +477,8 @@ CSS = """
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}}
 :root[data-theme=dark]{--bg:#18191a;--card:#242526;--fg:#e4e6eb;--muted:#b0b3b8;--line:#3a3b3c}
 *{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
-header{background:var(--card);padding:10px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
-.brand{display:flex;align-items:center;gap:10px}.logo{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center;flex:none}
-.logo svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.brand{display:flex;align-items:center;gap:10px}.logo{width:36px;height:36px;border-radius:10px;background:var(--accent);display:grid;place-items:center;flex:none;text-decoration:none}
+.logo svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 h1{font-size:16px;margin:0;line-height:1.1}h1 small{display:block;font-size:11px;font-weight:400;color:var(--muted)}
 main{max-width:960px;margin:32px auto;padding:0 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}h2{margin:0 0 12px;font-size:18px}h3{font-size:14px;margin:20px 0 8px}
@@ -483,39 +509,48 @@ body.auth{min-height:100vh;display:grid;place-items:center;padding:24px;backgrou
 .dd-head{padding:8px 10px 10px}.dd-head b{display:block;font-size:13px}.dd-head small{color:var(--muted);font-size:12px}.dd-sep{height:1px;background:var(--line);margin:6px 0}
 .cols{display:grid;grid-template-columns:1fr 340px;gap:24px}@media(max-width:800px){.cols{grid-template-columns:1fr}}
 .side{border-left:1px solid var(--line);padding-left:24px}@media(max-width:800px){.side{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:8px}}
-.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}.scroll{overflow-x:auto}a.logo{text-decoration:none}
-"""
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}.scroll{overflow-x:auto}
+""" + RAIL_CSS
 
-JS = """<script>
+JS = "<script>" + """
 try{var t=localStorage.getItem('theme');if(t&&t!=='system')document.documentElement.setAttribute('data-theme',t)}catch(e){}
 function togglePw(id,b){var i=document.getElementById(id);i.type=i.type==='password'?'text':'password';b.setAttribute('aria-label',i.type==='password'?'Show password':'Hide password');}
 function toggleMenu(b){var m=document.getElementById('userMenu');var on=!m.classList.contains('on');m.classList.toggle('on',on);b.setAttribute('aria-expanded',on);}
+(function(){var b=document.getElementById('theme');if(!b)return;var I=""" + __import__("json").dumps({k: ICONS[k] for k in ("system", "light", "dark")}) + """;
+ var O=['system','light','dark'],cur='system';try{cur=localStorage.getItem('theme')||'system'}catch(e){}
+ function ap(v){cur=v;try{localStorage.setItem('theme',v)}catch(e){}if(v==='system')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);b.innerHTML=I[v];b.title='Theme: '+v;}
+ ap(O.indexOf(cur)>=0?cur:'system');b.onclick=function(){ap(O[(O.indexOf(cur)+1)%3])};})();
 document.addEventListener('click',function(e){var m=document.getElementById('userMenu');if(m&&!e.target.closest('.menu'))m.classList.remove('on');});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){var m=document.getElementById('userMenu');if(m)m.classList.remove('on');}});
-</script>"""
+""" + "</script>"
 
 
-def _page(title: str, body: str, wide: bool = False, user: User | None = None, shell: str = "app") -> str:
+def _page(title: str, body: str, wide: bool = False, user: User | None = None, shell: str = "app", active: str = "") -> str:
     head = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{_esc(title)} · Muse ServiceDesk</title>'
             f'<meta name="viewport" content="width=device-width,initial-scale=1"><style>{CSS}</style></head>')
     if shell == "auth":
         return (f'{head}<body class="auth"><div class="card"><div class="brand"><div class="logo">{LOGO}</div>'
                 f'<h2>{_esc(title)}</h2></div>{body}'
                 f'<p class="foot">Muse ServiceDesk · service desk console</p></div>{JS}</body></html>')
-    return (f'{head}<body><header><div class="brand"><a class="logo" href="/" title="Console">{LOGO}</a>'
-            f'<h1>Muse ServiceDesk<small>Service desk console</small></h1></div>{user_menu(user)}</header>'
-            f'<main><div class="card"><h2>{_esc(title)}</h2>{body}</div></main>{JS}</body></html>')
+    return (f'{head}<body class="app">{rail(user, active)}<div class="page"><main><div class="card"><h2>{_esc(title)}</h2>{body}</div></main></div>{JS}</body></html>')
 
 
-def user_menu(user: User | None) -> str:
-    """Avatar + dropdown shared by the console and the app pages."""
+def rail(user: User | None, active: str = "") -> str:
+    """The vertical icon sidebar shared by every signed-in page: logo, navigation, theme, avatar menu."""
     if user is None:
         return ""
     admin = user.role == "admin"
-    return (f'<div class="menu"><button class="avatar" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" '
+    def item(key, href, label):
+        return (f'<a class="nav {"on" if active == key else ""}" href="{href}" title="{label}" aria-label="{label}">'
+                f'{ICONS[key]}<span>{label}</span></a>')
+    nav = item("dash", "/", "Dashboard")
+    if admin:
+        nav += item("users", "/users", "Desk users") + item("audit", "/audit", "Audit log")
+    return (f'<aside class="rail"><a class="logo" href="/" title="Muse ServiceDesk">{LOGO}</a><nav>{nav}</nav>'
+            f'<div class="rail-bottom"><button class="nav ibtn" id="theme" title="Theme" aria-label="Toggle theme"></button>'
+            f'<div class="menu"><button class="avatar" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" '
             f'onclick="toggleMenu(this)">{_initials(user.name)}</button>'
-            f'<div class="dropdown" id="userMenu" role="menu">'
+            f'<div class="dropdown up" id="userMenu" role="menu">'
             f'<div class="dd-head"><b>{_esc(user.name)}</b><small>{_esc(user.email)} · {user.role}</small></div>'
-            f'<a href="/" role="menuitem">Console</a><a href="/profile" role="menuitem">Profile &amp; password</a>'
-            + (f'<a href="/users" role="menuitem">Desk users</a><a href="/audit" role="menuitem">Audit log</a>' if admin else "")
-            + f'<div class="dd-sep"></div><a href="/logout" role="menuitem">Sign out</a></div></div>')
+            f'<a href="/profile" role="menuitem">Profile &amp; password</a><div class="dd-sep"></div>'
+            f'<a href="/logout" role="menuitem">Sign out</a></div></div></div></aside>')
