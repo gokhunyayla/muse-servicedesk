@@ -59,7 +59,8 @@ def chunk(pages: list[tuple[int | None, str]]) -> list[dict]:
     out, heading = [], ""
     for page, text in pages:
         buf = ""
-        for para in re.split(r"\n\s*\n|\n(?=#)", text.replace("\r", "")):
+        text = re.sub(r"^(#+ .*)$", r"\1\n", text.replace("\r", ""), flags=re.M)   # headings stand alone
+        for para in re.split(r"\n\s*\n|\n(?=#)", text):
             para = para.strip()
             if not para:
                 continue
