@@ -177,3 +177,34 @@ def resolve(ticket) -> None:
     """Mark a ticket resolved and stamp the time (used by every path that closes a ticket)."""
     ticket.status = "resolved"
     ticket.resolved_at = _now()
+
+
+class SupervisorRun(Base):
+    """One pass of the Supervisor agent over the desk."""
+    __tablename__ = "supervisor_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    trigger: Mapped[str] = mapped_column(String(16), default="schedule")   # schedule | manual
+    summary: Mapped[str] = mapped_column(Text, default="")
+    findings: Mapped[list] = mapped_column(JSON, default=list)             # what it noticed
+    actions: Mapped[list] = mapped_column(JSON, default=list)              # what it did (tool calls)
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+class SopDraft(Base):
+    """A SOP the Supervisor wrote from research; an admin publishes or rejects it."""
+    __tablename__ = "sop_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    tier: Mapped[str] = mapped_column(String(8))
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    reason: Mapped[str] = mapped_column(Text, default="")        # the gap it fills
+    ticket_ids: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="pending")   # pending | published | rejected
+    decided_by: Mapped[str] = mapped_column(String(255), default="")
+    sop_id: Mapped[str] = mapped_column(String(128), default="")

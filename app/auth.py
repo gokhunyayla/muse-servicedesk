@@ -459,7 +459,7 @@ SLA_FIELDS = [("first_response", "First response", "Time until the employee gets
 def settings_page(user: User = Depends(current_user), tab: str = "sla", info: str = "") -> str:
     from app.sla import sla_targets
     admin = user.role == "admin"
-    tabs = [("sla", "SLA"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
+    tabs = [("sla", "SLA"), ("supervisor", "Supervisor"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
     nav = "".join(f'<a class="tab {"on" if tab == k else ""}" href="/settings?tab={k}">{v}</a>' for k, v in tabs)
     if tab == "sla":
         t = sla_targets()
@@ -469,6 +469,33 @@ def settings_page(user: User = Depends(current_user), tab: str = "sla", info: st
         body = f"""<p class="muted">Targets in minutes. Tickets show green/red against these on their Timing panel.</p>
 <form method="post" action="/settings/sla">{rows}{_alert('', info)}
 {('<div class="row end"><button class="btn primary slim" type="submit">Save SLA targets</button></div>' if admin else '<p class="muted">Only admins can change these.</p>')}</form>"""
+    elif tab == "supervisor":
+        from app.supervisor import config
+        c = config()
+        def num(k, label, hint, unit="min"):
+            return (f'<div class="srow"><div><b>{label}</b><small>{hint}</small></div><div class="min">'
+                    f'<input name="{k}" type="number" min="1" step="1" value="{c.get(k, "")}" {"" if admin else "disabled"}> <span>{unit}</span></div></div>')
+        def chk(k, label, hint):
+            return (f'<div class="srow"><div><b>{label}</b><small>{hint}</small></div><label class="check" style="margin:0">'
+                    f'<input type="checkbox" name="{k}" value="1" {"checked" if c.get(k) else ""} {"" if admin else "disabled"}></label></div>')
+        body = f"""<p class="muted">The Supervisor reviews every open ticket on a schedule: merges emerging problems, finds where the
+agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or asks a human for exactly what is missing.</p>
+<form method="post" action="/settings/supervisor">
+{chk('enabled', 'Enabled', 'Run on the schedule below')}
+{num('every_minutes', 'Run every', 'Cadence of the review pass')}
+{num('window_hours', 'Problem window', 'Look back this far for similar tickets', 'h')}
+{num('cluster_min', 'Problem threshold', 'Similar tickets from different employees that make a problem record', 'tickets')}
+{num('stuck_minutes', 'Stuck after', 'Open ticket with no activity for this long counts as failing')}
+{num('max_research', 'Research per run', 'Web research tasks per pass', 'tasks')}
+{chk('auto_publish_sops', 'Auto-publish SOPs', 'Otherwise drafts wait for an admin under Knowledge')}
+<div class="srow"><div><b>Search provider</b><small>ddg needs no key; tavily uses TAVILY_API_KEY from .env</small></div>
+<select name="search_provider" style="width:160px" {"" if admin else "disabled"}><option value="ddg" {"selected" if c.get("search_provider")=="ddg" else ""}>DuckDuckGo</option><option value="tavily" {"selected" if c.get("search_provider")=="tavily" else ""}>Tavily</option></select></div>
+{_alert('', info)}
+{('<div class="row end"><button class="btn" type="button" onclick="runNow(this)">Run now</button><button class="btn primary slim" type="submit">Save</button></div>' if admin else '<p class="muted">Only admins can change these.</p>')}</form>
+<pre id="runOut" class="muted" style="white-space:pre-wrap;display:none"></pre>
+<script>async function runNow(b){{b.disabled=true;b.textContent='Running…';const o=document.getElementById('runOut');o.style.display='';o.textContent='The Supervisor is reviewing the desk…';
+ try{{const r=await (await fetch('/supervisor/run',{{method:'POST'}})).json();o.textContent=(r.error?'Error: '+r.error+'\n':'')+r.summary+'\n\nActions: '+r.actions.map(a=>a.tool+(a.ok?' ✓':' ✗')).join(', ');}}catch(e){{o.textContent='Failed: '+e}}
+ b.disabled=false;b.textContent='Run now';}}</script>"""
     elif tab == "channels":
         body = '<p class="muted">WhatsApp Cloud API settings are read from <code>.env</code> (WA_PHONE_NUMBER_ID, WA_ACCESS_TOKEN, WA_VERIFY_TOKEN). An editable form lands here next.</p>'
     elif tab == "models":
@@ -477,6 +504,52 @@ def settings_page(user: User = Depends(current_user), tab: str = "sla", info: st
     else:
         body = '<p class="muted">Muse ServiceDesk — autonomous multi-tier IT service desk on Meta Model API. Built for the Meta Global AI Developer Hackathon 2026.</p>'
     return _page("Settings", f'<div class="tabs">{nav}</div>{body}', wide=True, user=user, active="settings")
+
+
+@router.post("/settings/supervisor")
+async def settings_supervisor(request: Request, admin: User = Depends(admin_user)):
+    from app.sla import put_setting
+    from app.supervisor import DEFAULT_SUPERVISOR
+    check_origin(request)
+    form = await request.form()
+    value = dict(DEFAULT_SUPERVISOR)
+    for k in ("every_minutes", "window_hours", "cluster_min", "stuck_minutes", "max_research"):
+        try:
+            value[k] = max(1, int(form.get(k, DEFAULT_SUPERVISOR[k])))
+        except (TypeError, ValueError):
+            pass
+    value["enabled"] = form.get("enabled") == "1"
+    value["auto_publish_sops"] = form.get("auto_publish_sops") == "1"
+    value["search_provider"] = form.get("search_provider") if form.get("search_provider") in ("ddg", "tavily") else "ddg"
+    put_setting("supervisor", value)
+    with session() as db:
+        audit(db, admin.email, "settings.supervisor", detail=str(value), ip=_ip(request))
+    return RedirectResponse("/settings?tab=supervisor&info=Supervisor+settings+saved", 303)
+
+
+@router.get("/knowledge", response_class=HTMLResponse)
+def knowledge_page(user: User = Depends(current_user)) -> str:
+    """SOP pools per tier plus the Supervisor's drafts awaiting an admin."""
+    from app import knowledge
+    from app.db import SopDraft
+    admin = user.role == "admin"
+    with session() as db:
+        drafts = db.query(SopDraft).filter(SopDraft.status == "pending").order_by(SopDraft.id.desc()).all()
+        cards = "".join(f"""<div class="draft" id="d{d.id}"><div class="dh"><span class="tag">{d.tier}</span><b>{_esc(d.title)}</b>
+<small>{d.created_at:%d %b %H:%M}{' · tickets ' + ', '.join('#' + str(i) for i in d.ticket_ids) if d.ticket_ids else ''}</small></div>
+<p class="muted">{_esc(d.reason)}</p><details><summary>Read the draft</summary><pre>{_esc(d.content)}</pre>
+{('<small>Sources: ' + ' · '.join(f'<a href="{_esc(u)}" target="_blank" rel="noopener">{_esc(u[:60])}</a>' for u in d.sources) + '</small>') if d.sources else ''}</details>
+{(f'<div class="row end"><button class="btn" onclick="decide({d.id},\'reject\')">Reject</button><button class="btn primary slim" onclick="decide({d.id},\'publish\')">Publish to {d.tier}</button></div>') if admin else ''}</div>"""
+                        for d in drafts) or '<p class="muted">No drafts waiting.</p>'
+        history = db.query(SopDraft).filter(SopDraft.status != "pending").order_by(SopDraft.id.desc()).limit(10).all()
+        hist = "".join(f"<tr><td>{d.created_at:%d %b %H:%M}</td><td><span class='tag'>{d.tier}</span></td><td>{_esc(d.title)}</td><td><span class='tag {'active' if d.status=='published' else 'disabled'}'>{d.status}</span></td><td class='muted'>{_esc(d.decided_by)}</td></tr>" for d in history)
+    pools = "".join(f"<div class='pool'><h4>{tier}</h4><ul>{''.join(f'<li>{_esc(t)}</li>' for t in knowledge.titles(tier)) or '<li class=muted>empty</li>'}</ul></div>"
+                    for tier in ("L1", "L2", "L3", "L4"))
+    body = f"""<div class="tabs"><a class="tab on" href="/knowledge">Drafts from the Supervisor</a></div>{cards}
+<h3>Recent decisions</h3><div class="scroll"><table><thead><tr><th>When</th><th>Tier</th><th>Title</th><th>Status</th><th>By</th></tr></thead><tbody>{hist or '<tr><td colspan=5 class=muted>none yet</td></tr>'}</tbody></table></div>
+<h3>SOP pools</h3><div class="pools">{pools}</div>
+<script>async function decide(id,decision){{const r=await fetch('/sops/drafts/'+id,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{decision}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}</script>"""
+    return _page("Knowledge", body, wide=True, user=user, active="knowledge")
 
 
 @router.post("/settings/sla")
@@ -519,6 +592,7 @@ ICONS = {
     "tickets": '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg>',
     "users": '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>',
     "audit": '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h8"/></svg>',
+    "knowledge": '<svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
     "settings": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
     "system": '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
     "light": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
@@ -598,6 +672,9 @@ td.act{text-align:right;width:40px}.kebab{border:1px solid transparent;backgroun
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:30;padding:16px}.modal.on{display:grid}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 16px}.tab{padding:8px 12px;color:var(--muted);text-decoration:none;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}.tab.on{color:var(--accent);border-color:var(--accent)}
 .srow{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--line)}.srow b{display:block;font-size:13px}.srow small{color:var(--muted)}
+.draft{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}.dh{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.dh small{color:var(--muted)}
+.draft pre{white-space:pre-wrap;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto}.draft summary{cursor:pointer;color:var(--accent);font-size:13px}
+.pools{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}@media(max-width:800px){.pools{grid-template-columns:1fr 1fr}}.pool h4{margin:0 0 6px}.pool ul{margin:0;padding-left:18px;font-size:13px}
 .min{display:flex;align-items:center;gap:6px}.min input{width:110px;text-align:right}.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px}.kv dt{color:var(--muted)}.kv dd{margin:0}
 .modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(480px,100%)}.modal h3{margin:0 0 6px}
 """ + RAIL_CSS
@@ -637,7 +714,7 @@ def rail(user: User | None, active: str = "") -> str:
     def item(key, href, label):
         return (f'<a class="nav {"on" if active == key else ""}" href="{href}" title="{label}" aria-label="{label}">'
                 f'{ICONS[key]}<span>{label}</span></a>')
-    nav = item("dash", "/", "Dashboard") + item("tickets", "/tickets", "Tickets")
+    nav = item("dash", "/", "Dashboard") + item("tickets", "/tickets", "Tickets") + item("knowledge", "/knowledge", "Knowledge")
     if admin:
         nav += item("users", "/users", "Desk users") + item("audit", "/audit", "Audit log")
     return (f'<aside class="rail"><a class="logo" href="/" title="Muse ServiceDesk">{LOGO}</a><nav>{nav}</nav>'

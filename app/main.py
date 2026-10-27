@@ -231,6 +231,62 @@ def desk_status(ticket_id: int, s: StatusChange, request: Request, user=Depends(
         return {"id": t.id, "status": t.status, "owner": t.owner}
 
 
+@app.post("/supervisor/run")
+def supervisor_run_now(request: Request, user=Depends(current_user)) -> dict:
+    from app import supervisor
+    check_origin(request)
+    with session() as db:
+        audit(db, user.email, "supervisor.run")
+    r = supervisor.run("manual")
+    return {"id": r.id, "summary": r.summary, "actions": r.actions, "findings": r.findings, "error": r.error}
+
+
+@app.get("/supervisor/runs")
+def supervisor_runs(limit: int = 10, user=Depends(current_user)) -> list[dict]:
+    from app.db import SupervisorRun
+    with session() as db:
+        return [{"id": r.id, "started_at": r.started_at.isoformat(), "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                 "trigger": r.trigger, "summary": r.summary, "findings": r.findings, "actions": r.actions, "error": r.error}
+                for r in db.query(SupervisorRun).order_by(SupervisorRun.id.desc()).limit(min(limit, 100))]
+
+
+@app.get("/sops/drafts")
+def sop_drafts(status: str = "pending", user=Depends(current_user)) -> list[dict]:
+    from app.db import SopDraft
+    with session() as db:
+        q = db.query(SopDraft).order_by(SopDraft.id.desc())
+        if status != "all":
+            q = q.filter(SopDraft.status == status)
+        return [{"id": d.id, "tier": d.tier, "title": d.title, "content": d.content, "sources": d.sources, "reason": d.reason,
+                 "ticket_ids": d.ticket_ids, "status": d.status, "created_at": d.created_at.isoformat(), "sop_id": d.sop_id}
+                for d in q.limit(100)]
+
+
+class DraftDecision(BaseModel):
+    decision: str          # publish | reject
+
+
+@app.post("/sops/drafts/{draft_id}")
+def decide_draft(draft_id: int, d: DraftDecision, request: Request, user=Depends(current_user)) -> dict:
+    from app.auth import admin_user
+    from app.db import SopDraft
+    from app.supervisor import publish_draft
+    if user.role != "admin":
+        raise HTTPException(403, "admin only")
+    check_origin(request)
+    with session() as db:
+        dr = db.get(SopDraft, draft_id)
+        if dr is None or dr.status != "pending":
+            raise HTTPException(404, "no pending draft")
+        if d.decision == "publish":
+            sop_id = publish_draft(db, dr, by=user.name)
+            audit(db, user.email, "sop.published", target=dr.id, detail=f"{dr.tier}: {dr.title}")
+            return {"id": dr.id, "status": "published", "sop_id": sop_id}
+        dr.status, dr.decided_by = "rejected", user.name
+        audit(db, user.email, "sop.rejected", target=dr.id, detail=dr.title)
+        return {"id": dr.id, "status": "rejected"}
+
+
 @app.post("/approvals/{approval_id}", dependencies=[Depends(api_key)])
 def decide_approval(approval_id: int, d: Decision) -> dict:
     from app.agents import handle_approval

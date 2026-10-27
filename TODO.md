@@ -10,11 +10,8 @@
       immediately; a worker processes it with retries. Nothing is lost while the model/API is slow or down.
       Document Meta's own redelivery window (retries for up to 7 days while the webhook returns non-2xx)
       so messages sent while the app is offline still arrive once it is back.
-- [ ] **Emerging-incident awareness.** When several employees report the same thing within a short window,
-      the desk recognises an ongoing situation on its own (similarity over open tickets, not a manual tool
-      call): opens/links the incident automatically, tells each new reporter "we know, X people affected,
-      working on it", and folds what was learned so far (what helped, what didn't, ETA) into every reply
-      and into the incident SOP. Closes everyone when the incident closes.
+- [x] **Emerging-incident awareness** → the Supervisor merges clusters into problem records and updates everyone.
+      Still open: tell *new* reporters of a known problem immediately at intake (before the next Supervisor pass).
 - [ ] Stable public URL for the webhook (ngrok static domain or a named Cloudflare tunnel).
 - [ ] 3-minute demo video; link in README; tag `v1.0.0`.
 

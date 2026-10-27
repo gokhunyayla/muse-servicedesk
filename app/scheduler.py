@@ -62,6 +62,13 @@ def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600
                 if time.time() - last_proactive >= proactive_every_sec:
                     run_proactive_checks()
                     last_proactive = time.time()
+                from app import supervisor
+                from app.db import SupervisorRun
+                with session() as db:
+                    last = db.query(SupervisorRun).order_by(SupervisorRun.id.desc()).first()
+                    is_due = supervisor.due(last)
+                if is_due:
+                    supervisor.run("schedule")
             except Exception:   # the scheduler must survive a failing run
                 logger.exception("scheduled run failed")
             time.sleep(interval_sec)

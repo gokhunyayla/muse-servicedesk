@@ -165,7 +165,7 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;color:#fff;white-space:nowrap}
 .open{background:var(--accent)}.waiting_user{background:var(--warn);color:#000}.waiting_approval{background:#8a2be2}.resolved{background:var(--ok)}.escalated{background:#d9480f}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
-.tiers{display:flex;flex-wrap:wrap;gap:6px}
+.tiers{display:flex;flex-wrap:wrap;gap:6px}.suprun{padding:8px 0;border-bottom:1px solid var(--line);color:var(--fg)}.suprun small{color:var(--muted)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
 .seg button{font:inherit;font-size:12px;padding:6px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
 .seg button.on{background:var(--accent);color:#fff}@media(max-width:600px){.seg button{padding:6px 7px}}
@@ -215,6 +215,7 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <section class="card"><div class="kpis" id="kpis"></div></section>
 <section class="card"><h3 style="margin-top:0">Top issues</h3><div id="issues"></div></section>
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
+<section class="card" style="grid-column:1/-1"><div class="thead"><h3 style="margin:0">Supervisor</h3><div class="actions"><a class="btn" href="/knowledge">Knowledge</a><a class="btn" href="/settings?tab=supervisor">Settings</a></div></div><div id="sup" class="muted" style="margin-top:8px">—</div></section>
 </main>
 <main class="tix only-tickets">
 <section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
@@ -274,6 +275,9 @@ async function load(){
   $('#issues').innerHTML=s.top_issues.map(([k,v])=>`<div>${esc(k)} <small>${v}</small><div class="bar"><i style="width:${v/max*100}%"></i></div></div>`).join('')||'<small>No tickets in this period.</small>';
   const tc=s.tool_calls_by_tier||{};$('#tiers').innerHTML=['L1','L2','L3','L4'].map(t=>`<span class="pill open">${t}: ${tc[t]||0} tool calls</span>`).join('');
   const h=s.handoffs||{};$('#handoffs').innerHTML=Object.keys(h).length?Object.entries(h).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · '):'none';
+  try{const runs=await (await fetch('/supervisor/runs?limit=3')).json();
+   $('#sup').innerHTML=runs.length?runs.map(r=>`<div class="suprun"><b>${fmt(r.started_at)}</b> <small>${r.trigger}</small>${r.error?` <span class="pill escalated">error</span>`:''}
+    <div>${esc(r.summary||r.error||'running…')}</div><small>${(r.findings&&r.findings.clusters||[]).length} clusters · ${(r.findings&&r.findings.signals||[]).length} failure signals · ${(r.actions||[]).length} actions${(r.actions||[]).length?': '+r.actions.map(a=>a.tool).join(', '):''}</small></div>`).join(''):'No runs yet. The scheduler runs it on the cadence set in Settings.';}catch(e){}
  }else{
   const ts=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
   $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');$('#scope').textContent+=' · '+ts.length+' tickets';
