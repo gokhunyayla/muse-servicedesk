@@ -257,5 +257,7 @@ def get_ticket(ticket_id: int, user=Depends(current_user)) -> dict:
         if t is None:
             raise HTTPException(404)
         return {"id": t.id, "title": t.title, "status": t.status, "verified": t.verified, "owner": t.owner, "incident_id": t.incident_id,
+                "requester": t.requester, "created_at": t.created_at.isoformat(), "resolution": t.resolution, "rating": t.rating,
+                "linked": [c.id for c in db.query(Ticket).filter(Ticket.incident_id == t.id)],
                 "events": [{"at": e.at.isoformat(), "actor": e.actor, "kind": e.kind,
                             "content": e.content, "data": e.data} for e in t.events]}

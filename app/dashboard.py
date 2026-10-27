@@ -147,8 +147,20 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 .modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;width:min(520px,100%)}
 .modal label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}.modal input,.modal textarea,.modal select{width:100%;font:inherit;padding:7px 9px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
 .modal .row{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-#trail{max-height:70vh;overflow:auto}.ev{padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px;overflow-wrap:anywhere}
-.ev b{color:var(--accent)}.ev.user b{color:var(--ok)}.ev.handoff b{color:var(--bad)}.ev code{font-size:12px;color:var(--muted);white-space:pre-wrap}
+.dcols{display:grid;grid-template-columns:1fr 300px;gap:18px}@media(max-width:900px){.dcols{grid-template-columns:1fr}}
+.timeline{max-height:70vh;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px}
+.msg{max-width:78%;padding:9px 12px;border-radius:14px;font-size:13px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.msg.agent{align-self:flex-start;background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg small{display:block;margin-top:4px;font-size:11px;opacity:.75}.msg.user small{color:#fff}
+.sys{align-self:center;font-size:12px;color:var(--muted);text-align:center;padding:2px 10px}
+.sys.handoff{color:#d9480f;font-weight:600}.sys.note{background:rgba(247,185,40,.14);color:inherit;border-radius:8px;padding:6px 10px;max-width:85%;align-self:flex-start;text-align:left}
+.tool{align-self:flex-start;max-width:85%}.tool summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding:3px 10px;border:1px solid var(--line);border-radius:999px;background:var(--card)}
+.tool summary::-webkit-details-marker{display:none}.tool summary b{color:var(--fg);font-weight:600}.tool summary i{font-style:normal}.tool .ok{color:var(--ok)}.tool .err{color:var(--bad)}
+.tool pre{margin:6px 0 0 8px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}
+.meta{border-left:1px solid var(--line);padding-left:18px;font-size:13px}@media(max-width:900px){.meta{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:10px}}
+.meta dl{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:0}.meta dt{color:var(--muted)}.meta dd{margin:0;overflow-wrap:anywhere}
+.meta h4{margin:14px 0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.tagok{color:var(--ok)}.meta a{color:var(--accent);text-decoration:none}
 </style></head><body class="app">
 <!--RAIL--><div class="page">
 <div class="toolbar"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
@@ -159,7 +171,8 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <h3>Tier load</h3><div class="tiers" id="tiers"></div></section>
 <section class="card"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn primary" id="mergeBtn" disabled onclick="openMerge()">Merge into problem</button></div></div>
 <div class="scroll"><table><thead><tr><th class="sel"></th><th>#</th><th>Title</th><th>Status</th><th>Owner</th><th>Rating</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
-<section class="card" style="grid-column:1/-1"><div class="thead"><h3 id="ttitle">Ticket trail</h3><div class="actions" id="tactions"></div></div><div id="trail"><small>Select a ticket.</small></div></section>
+<section class="card detail" style="grid-column:1/-1" id="detail"><div class="thead"><h3 id="ttitle">Ticket</h3><div class="actions" id="tactions"></div></div>
+<div class="dcols"><div id="trail" class="timeline"><small>Select a ticket to see its conversation and what the agents did.</small></div><aside id="meta" class="meta"></aside></div></section>
 </main></div>
 <div class="modal" id="mergeModal"><div class="box"><h3>Merge into a problem record</h3><small id="mergeList"></small>
 <label>Problem title</label><input id="mTitle" placeholder="e.g. Exchange connectivity outage">
@@ -224,11 +237,40 @@ function openAssign(id){$('#aTitle').textContent='Assign #'+id;$('#assignModal')
 async function doAssign(){const id=$('#assignModal').dataset.id;$('#aGo').disabled=true;$('#aGo').textContent='Assigning…';
  await fetch('/tickets/'+id+'/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner:$('#aOwner').value,note:$('#aNote').value.trim(),assignee:$('#aName').value.trim()})});
  $('#aGo').disabled=false;$('#aGo').textContent='Assign';closeModal('assignModal');$('#aNote').value='';await load();show(id);}
+const AGENT_LABEL={L1:'L1 · first contact',L2:'L2 · devices & network',L3:'L3 · servers & security',L4:'L4 · vendors & logistics'};
+function fmt(x){try{const d=new Date(x);return d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}catch(e){return x}}
+function tstamp(x){try{return new Date(x).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
+function renderTimeline(events){
+ const out=[];const calls=new Map();
+ for(const e of events){
+  if(e.kind==='message'){
+   const who=e.actor==='user'?'user':'agent';
+   out.push(`<div class="msg ${who}">${esc(e.content)}<small>${who==='user'?'employee':esc(AGENT_LABEL[e.actor]||e.actor)} · ${tstamp(e.at)}</small></div>`);
+  }else if(e.kind==='tool_call'){
+   calls.set(e.content+'|'+e.actor,{args:e.data,actor:e.actor,at:e.at});
+   out.push(`<details class="tool" data-k="${esc(e.content+'|'+e.actor)}"><summary><i>${esc(e.actor)}</i> · <b>${esc(e.content)}</b> <span class="pending">…</span></summary><pre>${esc(JSON.stringify(e.data,null,1))}</pre></details>`);
+  }else if(e.kind==='tool_result'){
+   const ok=!(e.data&&e.data.ok===false);const k=e.content+'|'+e.actor;
+   for(let i=out.length-1;i>=0;i--){if(out[i].startsWith(`<details class="tool" data-k="${esc(k)}"`)&&out[i].includes('class="pending"')){
+    out[i]=out[i].replace('<span class="pending">…</span>',ok?'<span class="ok">✓</span>':'<span class="err">✗</span>').replace('</pre></details>',`</pre><pre>→ ${esc(JSON.stringify(e.data,null,1).slice(0,1500))}</pre></details>`);break;}}
+  }else if(e.kind==='handoff'){out.push(`<div class="sys handoff">⇄ ${esc(e.content)}</div>`);}
+  else if(e.kind==='note'){out.push(`<div class="sys note"><b>${esc(e.actor)}</b> · ${esc(e.content)}</div>`);}
+  else{out.push(`<div class="sys">${esc(e.actor)} · ${esc(e.kind)} · ${esc(e.content)}</div>`);}
+ }
+ return out.join('');
+}
 async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id)).json();
- $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} — ${pill(t.status)} <small>owner: ${esc(t.owner||'')}${t.incident_id?` · part of problem #${t.incident_id}`:''}</small>`;
+ $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} ${pill(t.status)}`;
  $('#tactions').innerHTML=`<button class="btn" onclick="openAssign(${t.id})">Assign</button>`+(t.status!=='resolved'?` <button class="btn" onclick="closeTicket(${t.id})">Close</button>`:'');
- $('#trail').innerHTML=t.events.map(e=>`<div class="ev ${e.actor==='user'?'user':''} ${e.kind}"><b>${esc(e.actor)}</b> <small>${e.kind}</small> ${esc(e.content)}${e.data?`<br><code>${esc(JSON.stringify(e.data).slice(0,300))}</code>`:''}</div>`).join('');
- if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#ttitle').scrollIntoView({behavior:'smooth'});}}
+ $('#meta').innerHTML=`<h4>Details</h4><dl><dt>Requester</dt><dd>${esc(t.requester||'')}</dd><dt>Status</dt><dd>${pill(t.status)}</dd><dt>Owner</dt><dd>${esc(AGENT_LABEL[t.owner]||t.owner||'')}</dd>
+  <dt>Identity</dt><dd>${t.verified?'<span class="tagok">verified</span>':'not verified'}</dd><dt>Opened</dt><dd>${fmt(t.created_at)}</dd>
+  ${t.rating?`<dt>Rating</dt><dd>${'★'.repeat(t.rating)}${'☆'.repeat(5-t.rating)}</dd>`:''}
+  ${t.incident_id?`<dt>Problem</dt><dd><a href="#" onclick="show(${t.incident_id});return false">#${t.incident_id}</a></dd>`:''}
+  ${t.linked&&t.linked.length?`<dt>Linked</dt><dd>${t.linked.map(i=>`<a href="#" onclick="show(${i});return false">#${i}</a>`).join(', ')}</dd>`:''}</dl>
+  ${t.resolution?`<h4>Resolution</h4><div>${esc(t.resolution)}</div>`:''}
+  <h4>Activity</h4><div class="muted">${t.events.filter(e=>e.kind==='tool_call').length} tool calls · ${t.events.filter(e=>e.kind==='handoff').length} handoffs · ${t.events.filter(e=>e.kind==='message').length} messages</div>`;
+ $('#trail').innerHTML=renderTimeline(t.events);
+ if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#detail').scrollIntoView({behavior:'smooth'});}}
 function closeTicket(id){$('#cTitle').textContent='Close #'+id;$('#closeModal').dataset.id=id;$('#closeModal').classList.add('on');$('#cNote').focus();}
 async function doClose(){const id=$('#closeModal').dataset.id;await fetch('/tickets/'+id+'/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution:$('#cNote').value.trim()||'closed by the service desk'})});
  closeModal('closeModal');await load();show(id);}
