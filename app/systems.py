@@ -17,6 +17,33 @@ DEVICES = {
 }
 
 
+WARRANTY = {   # hostname -> vendor warranty record
+    "TR-LT-101": {"vendor": "Dell", "service_tag": "7KX2Q93", "valid_until": "2027-03-15"},
+    "TR-LT-102": {"vendor": "Lenovo", "service_tag": "PF3M8K1", "valid_until": "2025-11-30"},
+    "TR-LT-103": {"vendor": "Dell", "service_tag": "9HT4R21", "valid_until": "2027-08-01"},
+}
+
+LOANERS = {"TR-LN-01": "available", "TR-LN-02": "available", "TR-LN-03": "assigned"}
+
+_cases: list[dict] = []
+_shipments: list[dict] = []
+
+
+def open_vendor_case(hostname: str, summary: str) -> dict:
+    rec = WARRANTY[hostname]
+    case = {"case_no": f"{rec['vendor'][:2].upper()}-{100200 + len(_cases)}", "vendor": rec["vendor"],
+            "service_tag": rec["service_tag"], "summary": summary, "status": "opened"}
+    _cases.append(case)
+    return case
+
+
+def create_shipment(to_name: str, device: str, case_no: str) -> dict:
+    s = {"tracking_no": f"TR{48100000 + len(_shipments)}", "carrier": "Yurtiçi Kargo", "to": to_name,
+         "contents": device, "case_no": case_no, "pickup": "next business day", "status": "label_created"}
+    _shipments.append(s)
+    return s
+
+
 def user_by_phone(phone: str) -> tuple[str, dict] | None:
     for emp, u in USERS.items():
         if u["phone"] == phone:

@@ -37,6 +37,16 @@ async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) 
         return {"ticket_id": ticket.id, "transcript": text, "reply": answer}
 
 
+@app.post("/image")
+async def post_image(requester: str = Form(...), text: str = Form(""), image: UploadFile = File(...)) -> dict:
+    """A photo or screenshot with an optional caption."""
+    data = await image.read()
+    with session() as db:
+        ticket, answer = handle_message(db, requester, text or "(fotoğraf gönderdi)", data,
+                                        image.content_type or "image/jpeg")
+        return {"ticket_id": ticket.id, "reply": answer}
+
+
 @app.get("/tickets/{ticket_id}")
 def get_ticket(ticket_id: int) -> dict:
     with session() as db:

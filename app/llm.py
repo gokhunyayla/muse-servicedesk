@@ -68,6 +68,14 @@ class ScriptedLLM:
         return self.replies.pop(0)
 
 
+def image_message(text: str, image: bytes, mime: str = "image/jpeg") -> list[dict]:
+    """A user message that carries a photo alongside its caption (OpenAI content-parts format)."""
+    import base64
+    data = base64.b64encode(image).decode()
+    return [{"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}]
+
+
 _llm: LLM | None = None
 
 

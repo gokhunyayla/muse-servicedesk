@@ -119,6 +119,40 @@ def network_diagnostics(ctx: Ctx, hostname: str) -> dict:
     return {"ok": True, "online": d["online"], "dns_ok": d["dns_ok"]}
 
 
+@tool("Check the vendor warranty of a laptop.", ("L1", "L4"), hostname=STR)
+def check_warranty(ctx: Ctx, hostname: str) -> dict:
+    rec = systems.WARRANTY.get(hostname)
+    if not rec:
+        return {"ok": False, "error": "no warranty record"}
+    from datetime import date
+    return {"ok": True, "hostname": hostname, **rec, "in_warranty": rec["valid_until"] >= date.today().isoformat()}
+
+
+@tool("Open a hardware service case with the vendor.", ("L4",), hostname=STR, summary=STR)
+def open_service_case(ctx: Ctx, hostname: str, summary: str) -> dict:
+    if hostname not in systems.WARRANTY:
+        return {"ok": False, "error": "unknown device"}
+    return {"ok": True, **systems.open_vendor_case(hostname, summary)}
+
+
+@tool("Reserve a loaner laptop for the employee while theirs is repaired.", ("L4",), employee_no=STR)
+def assign_loaner(ctx: Ctx, employee_no: str) -> dict:
+    for dev, state in systems.LOANERS.items():
+        if state == "available":
+            systems.LOANERS[dev] = employee_no
+            return {"ok": True, "loaner": dev, "assigned_to": employee_no}
+    return {"ok": False, "error": "no loaner available"}
+
+
+@tool("Create a courier shipment (label + pickup) to send a device to the employee.", ("L4",),
+      employee_no=STR, device=STR, case_no=STR)
+def create_shipment(ctx: Ctx, employee_no: str, device: str, case_no: str) -> dict:
+    u = systems.USERS.get(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    return {"ok": True, **systems.create_shipment(u["name"], device, case_no)}
+
+
 @tool("Record a decision or finding on the ticket.", ALL, text=STR)
 def add_note(ctx: Ctx, text: str) -> dict:
     log(ctx.db, ctx.ticket.id, ctx.agent, "note", text)

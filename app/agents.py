@@ -45,7 +45,8 @@ class Agent:
                                    "required": ["summary"]}}})
         return specs
 
-    def run(self, db, ticket: Ticket, message: str, history: list[dict] | None = None, depth: int = 0) -> str:
+    def run(self, db, ticket: Ticket, message: str | list, history: list[dict] | None = None,
+            depth: int = 0) -> str:
         llm = get_llm()
         ctx = Ctx(db=db, ticket=ticket, agent=self.tier)
         messages = [{"role": "system", "content": self.system_prompt(ticket)}, *(history or []),
@@ -86,7 +87,8 @@ class Agent:
 AGENTS: dict[str, Agent] = {a.tier: a for a in [
     Agent("L1", "You are the only agent that talks to the employee (over WhatsApp). Understand the request, "
                 "solve standard problems yourself, and hand off the rest.",
-          "first contact, identity checks, password resets, standard VPN fixes"),
+          "first contact, identity checks, password resets, standard VPN fixes, reading photos/screenshots "
+          "the employee sends (e.g. blue screen stop codes)"),
     Agent("L2", "You diagnose devices and networks. You never talk to the employee; return a clear result.",
           "device and network diagnosis, VPN deep analysis, performance problems"),
     Agent("L3", "You handle servers, business applications and security changes, always with a rollback plan.",
@@ -96,8 +98,11 @@ AGENTS: dict[str, Agent] = {a.tier: a for a in [
 ]}
 
 
-def handle_message(db, requester: str, text: str) -> tuple[Ticket, str]:
-    """Entry point for an employee message: reuse the open ticket or open a new one, then run L1."""
+def handle_message(db, requester: str, text: str, image: bytes | None = None,
+                   mime: str = "image/jpeg") -> tuple[Ticket, str]:
+    """Entry point for an employee message (optionally with a photo): reuse the open ticket
+    or open a new one, then run L1."""
+    from app.llm import image_message
     ticket = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
               .order_by(Ticket.id.desc()).first())
     if ticket is None:
@@ -108,8 +113,9 @@ def handle_message(db, requester: str, text: str) -> tuple[Ticket, str]:
     for e in ticket.events:
         if e.kind == "message":
             history.append({"role": "user" if e.actor == "user" else "assistant", "content": e.content})
-    log(db, ticket.id, "user", "message", text)
-    answer = AGENTS["L1"].run(db, ticket, text, history=history)
+    log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
+    content = image_message(text, image, mime) if image else text
+    answer = AGENTS["L1"].run(db, ticket, content, history=history)
     log(db, ticket.id, "L1", "message", answer)
     db.refresh(ticket)   # events were added by id; reload the relationship
     return ticket, answer
