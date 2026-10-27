@@ -96,9 +96,9 @@ CATEGORIES = {   # English labels; keywords cover Turkish and English ticket tit
 
 
 def _render(user, mode: str) -> str:
-    from app.auth import RAIL_CSS, rail
+    from app.auth import CHAT_WIDGET, RAIL_CSS, rail
     return (PAGE.replace("<!--RAIL_CSS-->", RAIL_CSS).replace("<!--RAIL-->", rail(user, "dash" if mode == "dashboard" else "tickets"))
-            .replace("<!--MODE-->", mode))
+            .replace("<!--MODE-->", mode).replace("</body>", CHAT_WIDGET + "</body>"))
 
 
 @router.get("/", response_class=HTMLResponse)

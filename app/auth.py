@@ -633,6 +633,54 @@ loadThreads();
 </script></body></html>"""
 
 
+CHAT_WIDGET = r"""
+<style>
+.cw-btn{position:fixed;right:22px;bottom:22px;width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;border:0;box-shadow:0 10px 30px rgba(0,0,0,.25);cursor:pointer;display:grid;place-items:center;z-index:40}
+.cw-btn svg{width:26px;height:26px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.cw-btn .dot{position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;background:var(--bad);display:none}
+.cw{position:fixed;right:22px;bottom:90px;width:min(420px,calc(100vw - 32px));height:min(620px,calc(100vh - 120px));background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.3);display:none;flex-direction:column;z-index:41;overflow:hidden}
+.cw.on{display:flex}.cw-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}.cw-head b{flex:1;font-size:13px}
+.cw-head button,.cw-head a{font:inherit;font-size:12px;border:1px solid var(--line);background:transparent;color:var(--fg);border-radius:6px;padding:4px 8px;cursor:pointer;text-decoration:none}
+.cw-msgs{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.cw .m{display:flex}.cw .m.user{justify-content:flex-end}.cw .bubble{max-width:92%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.cw .m.user .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}.cw .m.assistant .bubble{background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
+.cw .bubble ul{margin:4px 0 4px 16px;padding:0}.cw .bubble a{color:var(--accent);text-decoration:none;font-weight:600}.cw .bubble code{font-size:12px;background:var(--card);padding:1px 4px;border-radius:4px}
+.cw .acts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.cw .chip{font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.cw-form{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}.cw-form textarea{flex:1;font:inherit;font-size:13px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);resize:none}
+.cw-form button{font:inherit;font-size:13px;padding:0 14px;border-radius:10px;border:0;background:var(--accent);color:#fff;cursor:pointer}.cw-form button:disabled{opacity:.6}
+.cw .hello{color:var(--muted);font-size:13px;padding:6px 4px}.cw .sugg{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.cw .sugg button{font:inherit;font-size:12px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+@media(max-width:900px){.cw-btn{bottom:76px}.cw{bottom:140px;right:16px}}
+</style>
+<button class="cw-btn" id="cwBtn" title="Desk Chat" onclick="cwToggle()"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6.5A8 8 0 0 1 13 4a8 8 0 0 1 8 8z"/><path d="M9 11h6M9 14h4"/></svg><span class="dot" id="cwDot"></span></button>
+<div class="cw" id="cw"><div class="cw-head"><b>Desk Chat</b><button onclick="cwNew()" title="New conversation">+ New</button><a href="/chat" title="Open full page">Expand</a><button onclick="cwToggle()" title="Close">×</button></div>
+<div class="cw-msgs" id="cwMsgs"></div>
+<form class="cw-form" onsubmit="cwSend(event)"><textarea id="cwBox" rows="2" placeholder="Ask the desk… (Enter to send)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();cwSend(event)}"></textarea><button id="cwSendBtn" type="submit">Send</button></form></div>
+<script>
+(function(){
+const esc=x=>String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function md(t){let h=esc(t);h=h.replace(/\[([^\]]+)\]\((\/[^)\s]*)\)/g,'<a href="$2">$1</a>').replace(/(^|[\s(])#(\d+)(?![\w-])/g,'$1<a href="/tickets?id=$2">#$2</a>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+ let out='',inList=false;for(const l of h.split('\n')){const m=/^\s*[-*•]\s+(.*)$/.exec(l);if(m){if(!inList){out+='<ul>';inList=true}out+='<li>'+m[1]+'</li>';}else{if(inList){out+='</ul>';inList=false}out+=l.trim()===''?'<div style="height:5px"></div>':'<div>'+l+'</div>';}}if(inList)out+='</ul>';return out;}
+const $=id=>document.getElementById(id);let thread=null,busy=false;
+try{thread=+localStorage.getItem('cw.thread')||null;if(localStorage.getItem('cw.open')==='1')$('cw').classList.add('on');}catch(e){}
+function render(m){const acts=(m.actions||[]).length?`<div class="acts">${m.actions.map(a=>`<span class="chip">${esc(a.tool)}${a.args&&a.args.ticket_id?' #'+a.args.ticket_id:''}</span>`).join('')}</div>`:'';
+ return `<div class="m ${m.role}"><div class="bubble">${m.role==='assistant'?md(m.content):esc(m.content)}${acts}</div></div>`;}
+function hello(){$('cwMsgs').innerHTML=`<div class="hello">I know every ticket, who holds what, SLA risk, approvals and the Supervisor's work — and I can act for you.<div class="sugg"><button onclick="cwSay('What is the desk working on right now?')">What is the desk doing?</button><button onclick="cwSay('Is there anything waiting for my decision?')">Waiting for me?</button><button onclick="cwSay('Which tickets are at SLA risk?')">SLA risk?</button></div></div>`;}
+async function load(){if(!thread){hello();return;}const r=await fetch('/chat/threads/'+thread);if(!r.ok){thread=null;try{localStorage.removeItem('cw.thread')}catch(e){}hello();return;}
+ const ms=await r.json();$('cwMsgs').innerHTML=ms.length?ms.map(render).join(''):'';if(!ms.length)hello();$('cwMsgs').scrollTop=1e9;}
+window.cwToggle=function(){const on=$('cw').classList.toggle('on');try{localStorage.setItem('cw.open',on?'1':'0')}catch(e){}if(on){$('cwDot').style.display='none';load();$('cwBox').focus();}};
+window.cwNew=async function(){const t=await (await fetch('/chat/threads',{method:'POST'})).json();thread=t.id;try{localStorage.setItem('cw.thread',thread)}catch(e){}hello();};
+window.cwSay=function(t){$('cwBox').value=t;cwSend();};
+window.cwSend=async function(ev){if(ev)ev.preventDefault();if(busy)return;const text=$('cwBox').value.trim();if(!text)return;if(!thread)await cwNew();
+ if($('cwMsgs').querySelector('.hello'))$('cwMsgs').innerHTML='';$('cwMsgs').insertAdjacentHTML('beforeend',render({role:'user',content:text}));$('cwBox').value='';busy=true;$('cwSendBtn').disabled=true;
+ $('cwMsgs').insertAdjacentHTML('beforeend','<div class="m assistant" id="cwTyping"><div class="bubble" style="color:var(--muted)">thinking…</div></div>');$('cwMsgs').scrollTop=1e9;
+ try{const r=await (await fetch('/chat/threads/'+thread,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})).json();
+  $('cwTyping').remove();$('cwMsgs').insertAdjacentHTML('beforeend',render({role:'assistant',content:r.answer||r.detail||'(no answer)',actions:r.actions||[]}));if(!$('cw').classList.contains('on'))$('cwDot').style.display='block';}
+ catch(e){$('cwTyping').remove();$('cwMsgs').insertAdjacentHTML('beforeend',render({role:'assistant',content:'Failed: '+e}));}
+ busy=false;$('cwSendBtn').disabled=false;$('cwMsgs').scrollTop=1e9;};
+if($('cw').classList.contains('on'))load();
+})();
+</script>
+"""
+
 CHAT_CSS = """
 .chatpage{display:grid;grid-template-columns:260px 1fr;height:100vh}
 .threads{border-right:1px solid var(--line);background:var(--card);display:flex;flex-direction:column;min-height:0}
@@ -937,7 +985,7 @@ def _page(title: str, body: str, wide: bool = False, user: User | None = None, s
         return (f'{head}<body class="auth"><div class="card"><div class="brand"><div class="logo">{LOGO}</div>'
                 f'<h2>{_esc(title)}</h2></div>{body}'
                 f'<p class="foot">Muse ServiceDesk · service desk console</p></div>{JS}</body></html>')
-    return (f'{head}<body class="app">{rail(user, active)}<div class="page"><main><div class="card"><h2>{_esc(title)}</h2>{body}</div></main></div>{JS}</body></html>')
+    return (f'{head}<body class="app">{rail(user, active)}<div class="page"><main><div class="card"><h2>{_esc(title)}</h2>{body}</div></main></div>{JS}{CHAT_WIDGET}</body></html>')
 
 
 def rail(user: User | None, active: str = "") -> str:
