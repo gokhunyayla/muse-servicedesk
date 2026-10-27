@@ -189,7 +189,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 .thead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.thead h3{margin:0}
 .actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .link{font-size:11px;color:var(--muted)}td.sel{width:24px}input[type=checkbox]{accent-color:var(--accent)}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:9;padding:16px}.modal.on{display:grid}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:60;padding:16px}.modal.on{display:grid}
 .modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;width:min(520px,100%)}
 .modal label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}.modal input,.modal textarea,.modal select{width:100%;font:inherit;padding:7px 9px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
 .modal .row{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}

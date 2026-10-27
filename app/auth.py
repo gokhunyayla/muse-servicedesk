@@ -990,7 +990,8 @@ td.act{text-align:right;width:40px}.kebab{border:1px solid transparent;backgroun
 .kebab:hover{background:var(--bg);color:var(--fg)}.dropdown.right{right:0;top:36px;left:auto;min-width:200px}
 .dropdown form{margin:0}.dropdown form button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:transparent;color:var(--fg);font:inherit;font-size:13px;border-radius:6px;cursor:pointer}
 .dropdown form button:hover{background:var(--bg)}.dropdown form button.danger{color:var(--bad)}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:30;padding:16px}.modal.on{display:grid}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:60;padding:16px}.modal.on{display:grid}
+.modal textarea{width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 16px}.tab{padding:8px 12px;color:var(--muted);text-decoration:none;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}.tab.on{color:var(--accent);border-color:var(--accent)}
 .srow{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--line)}.srow b{display:block;font-size:13px}.srow small{color:var(--muted)}
 .draft{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}.dh{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.dh small{color:var(--muted)}
