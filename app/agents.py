@@ -3,6 +3,7 @@ handoff_<tier> tools, so the model chooses who to call (L1 may go straight to L4
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from app.db import Ticket, log
@@ -138,9 +139,36 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     for e in ticket.events:
         if e.kind == "message":
             history.append({"role": "user" if e.actor == "user" else "assistant", "content": e.content})
+    # a manager answering "ONAY 3" / "RET 3" is an approval decision, not a new problem
+    m = re.match(r"^\s*(onay|ret|approve|deny)\s+#?(\d+)\s*$", text, re.I)
+    if m:
+        decision = "approved" if m.group(1).lower() in ("onay", "approve") else "denied"
+        return handle_approval(db, int(m.group(2)), decision, requester)
     log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
     content = image_message(text, image, mime) if image else text
     answer = AGENTS["L1"].run(db, ticket, content, history=history)
     log(db, ticket.id, "L1", "message", answer)
     db.refresh(ticket)   # events were added by id; reload the relationship
+    return ticket, answer
+
+
+def handle_approval(db, approval_id: int, decision: str, by_phone: str) -> tuple[Ticket, str]:
+    """A manager answered an approval request: record it and let L1 continue the ticket."""
+    from app.db import Approval, _now
+    a = db.get(Approval, approval_id)
+    if a is None or a.decision is not None:
+        raise ValueError("unknown or already decided approval")
+    from app import systems
+    approver = systems.USERS.get(a.approver, {})
+    if approver.get("phone") != by_phone:
+        raise PermissionError("only the assigned approver can decide")
+    a.decision, a.decided_at = decision, _now()
+    ticket = db.get(Ticket, a.ticket_id)
+    ticket.status = "open"
+    log(db, ticket.id, a.approver, "note", f"approval #{a.id} {decision}: {a.request}")
+    answer = AGENTS["L1"].run(db, ticket, f"[Approval #{a.id} {decision} by {approver.get('name')}] "
+                                          f"Request was: {a.request}. Continue the ticket accordingly and "
+                                          f"tell the employee.")
+    log(db, ticket.id, "L1", "message", answer)
+    db.refresh(ticket)
     return ticket, answer

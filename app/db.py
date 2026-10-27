@@ -46,6 +46,18 @@ class Followup(Base):
     done: Mapped[bool] = mapped_column(default=False)
 
 
+class Approval(Base):
+    """A decision the desk needs from a human (usually the requester's manager)."""
+    __tablename__ = "approvals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"))
+    approver: Mapped[str] = mapped_column(String(16))    # employee no
+    request: Mapped[str] = mapped_column(Text)
+    decision: Mapped[str | None] = mapped_column(String(16), nullable=True)   # approved | denied
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Outbound(Base):
     """Messages the desk sends on its own (not as a reply): reminders, approvals, incident updates."""
     __tablename__ = "outbound"

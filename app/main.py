@@ -47,6 +47,24 @@ async def post_image(requester: str = Form(...), text: str = Form(""), image: Up
         return {"ticket_id": ticket.id, "reply": answer}
 
 
+class Decision(BaseModel):
+    decision: str          # approved | denied
+    by: str                # approver's phone
+
+
+@app.post("/approvals/{approval_id}")
+def decide_approval(approval_id: int, d: Decision) -> dict:
+    from app.agents import handle_approval
+    if d.decision not in ("approved", "denied"):
+        raise HTTPException(422, "decision must be approved or denied")
+    with session() as db:
+        try:
+            ticket, answer = handle_approval(db, approval_id, d.decision, d.by)
+        except (ValueError, PermissionError) as e:
+            raise HTTPException(403, str(e))
+        return {"ticket_id": ticket.id, "reply": answer}
+
+
 @app.get("/tickets")
 def list_tickets(status: str | None = None) -> list[dict]:
     with session() as db:

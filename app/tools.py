@@ -198,6 +198,144 @@ def rollback_patch(ctx: Ctx, snapshot_id: str) -> dict:
     return {"ok": systems.rollback(snapshot_id), "snapshot_id": snapshot_id}
 
 
+# ---- identity, licenses, groups (directory / M365) -----------------------------------------
+
+def _user(employee_no: str) -> dict | None:
+    return systems.USERS.get(employee_no)
+
+
+@tool("Show an employee's directory record: department, manager, licenses, groups, SAP roles.",
+      ("L1", "L3"), employee_no=STR)
+def get_employee(ctx: Ctx, employee_no: str) -> dict:
+    u = _user(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    return {"ok": True, "employee_no": employee_no, **{k: v for k, v in u.items() if k != "birth_year"}}
+
+
+@tool("List licenses available in the catalog and whether each needs manager approval.", ("L1",))
+def list_licenses(ctx: Ctx) -> dict:
+    return {"ok": True, "catalog": systems.LICENSE_CATALOG}
+
+
+@tool("Assign a license. Licenses marked needs_approval require an approved request first.",
+      ("L1",), employee_no=STR, license=STR)
+def assign_license(ctx: Ctx, employee_no: str, license: str) -> dict:
+    u = _user(employee_no)
+    if not u or license not in systems.LICENSE_CATALOG:
+        return {"ok": False, "error": "unknown employee or license"}
+    if systems.LICENSE_CATALOG[license] and not _approved(ctx, license):
+        return {"ok": False, "error": f"{license} needs manager approval; use request_manager_approval first"}
+    if license not in u["licenses"]:
+        u["licenses"].append(license)
+    return {"ok": True, "employee_no": employee_no, "licenses": u["licenses"]}
+
+
+@tool("Remove a license from an employee.", ("L1",), employee_no=STR, license=STR)
+def revoke_license(ctx: Ctx, employee_no: str, license: str) -> dict:
+    u = _user(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    if license in u["licenses"]:
+        u["licenses"].remove(license)
+    return {"ok": True, "licenses": u["licenses"]}
+
+
+@tool("Add an employee to a directory group (mail lists, shared folders, app access).", ("L1", "L3"),
+      employee_no=STR, group=STR)
+def add_to_group(ctx: Ctx, employee_no: str, group: str) -> dict:
+    u = _user(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    if group not in u["groups"]:
+        u["groups"].append(group)
+    return {"ok": True, "groups": u["groups"]}
+
+
+@tool("Remove an employee from all groups (offboarding) or from one group.", ("L1", "L3"),
+      employee_no=STR, group={"type": "string", "optional": True})
+def remove_from_groups(ctx: Ctx, employee_no: str, group: str | None = None) -> dict:
+    u = _user(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    u["groups"] = [g for g in u["groups"] if group and g != group]
+    return {"ok": True, "groups": u["groups"]}
+
+
+@tool("Create a directory account and mailbox for a new hire.", ("L1",), name=STR, department=STR,
+      manager_employee_no=STR, phone=STR)
+def create_account(ctx: Ctx, name: str, department: str, manager_employee_no: str, phone: str) -> dict:
+    if manager_employee_no not in systems.USERS:
+        return {"ok": False, "error": "unknown manager"}
+    emp = systems.create_user(name, department, manager_employee_no, phone)
+    return {"ok": True, "employee_no": emp, "upn": f"{emp.lower()}@company.com", "initial_password": systems.reset_password(emp)}
+
+
+@tool("Disable an account immediately (offboarding or compromise).", ("L1", "L3"), employee_no=STR)
+def disable_account(ctx: Ctx, employee_no: str) -> dict:
+    u = _user(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    u["enabled"] = False
+    return {"ok": True, "enabled": False}
+
+
+@tool("Revoke all active sessions and tokens of an employee.", ("L1", "L3"), employee_no=STR)
+def revoke_sessions(ctx: Ctx, employee_no: str) -> dict:
+    if not _user(employee_no):
+        return {"ok": False, "error": "unknown employee"}
+    return {"ok": True, "revoked_sessions": 3}
+
+
+@tool("Reset MFA registration so the employee can enrol a new device. Requires verified identity.",
+      ("L1",), employee_no=STR)
+def reset_mfa(ctx: Ctx, employee_no: str) -> dict:
+    if not ctx.ticket.verified:
+        return {"ok": False, "error": "identity not verified in this ticket"}
+    return {"ok": True, "mfa": "reset; enrol at https://aka.ms/mfasetup"}
+
+
+@tool("Grant an SAP role. Needs an approved manager request. Set days for temporary access.", ("L3",),
+      employee_no=STR, role=STR, days={"type": "integer", "optional": True})
+def grant_sap_role(ctx: Ctx, employee_no: str, role: str, days: int | None = None) -> dict:
+    u = _user(employee_no)
+    if not u or role not in systems.SAP_ROLES:
+        return {"ok": False, "error": "unknown employee or role"}
+    if not _approved(ctx, role):
+        return {"ok": False, "error": f"SAP role {role} needs manager approval; use request_manager_approval first"}
+    if role not in u["sap_roles"]:
+        u["sap_roles"].append(role)
+    return {"ok": True, "sap_roles": u["sap_roles"], "expires_in_days": days}
+
+
+# ---- approvals ----------------------------------------------------------------------------
+
+def _approved(ctx: Ctx, what: str) -> bool:
+    from app.db import Approval
+    return ctx.db.query(Approval).filter(Approval.ticket_id == ctx.ticket.id, Approval.decision == "approved",
+                                         Approval.request.contains(what)).count() > 0
+
+
+@tool("Ask the employee's manager to approve something (paid license, SAP role, software). The ticket "
+      "waits; you'll be called again when the decision arrives.", ALL, employee_no=STR, request=STR)
+def request_manager_approval(ctx: Ctx, employee_no: str, request: str) -> dict:
+    from app.db import Approval, Outbound
+    u = _user(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    mgr = u.get("manager")
+    if not mgr:
+        return {"ok": False, "error": "employee has no manager on record"}
+    a = Approval(ticket_id=ctx.ticket.id, approver=mgr, request=request)
+    ctx.db.add(a)
+    ctx.db.flush()
+    ctx.db.add(Outbound(to=systems.USERS[mgr]["phone"], ticket_id=ctx.ticket.id,
+                        text=f"Onay talebi #{a.id}: {u['name']} için \"{request}\". "
+                             f"Cevap: ONAY {a.id} veya RET {a.id}"))
+    ctx.ticket.status = "waiting_approval"
+    return {"ok": True, "approval_id": a.id, "approver": systems.USERS[mgr]["name"], "status": "waiting_approval"}
+
+
 # ---- knowledge & learning ------------------------------------------------------------------
 
 @tool("Search this tier's SOP knowledge pool. Do this before acting on any request.", ALL, query=STR)

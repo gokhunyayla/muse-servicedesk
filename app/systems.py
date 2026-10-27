@@ -5,10 +5,29 @@ from __future__ import annotations
 import secrets
 
 USERS = {
-    "E1001": {"name": "Ayşe Demir", "phone": "+905551110001", "birth_year": 1990, "device": "TR-LT-101"},
-    "E1002": {"name": "Mehmet Kaya", "phone": "+905551110002", "birth_year": 1985, "device": "TR-LT-102"},
-    "E1003": {"name": "Zeynep Arslan", "phone": "+905551110003", "birth_year": 1994, "device": "TR-LT-103"},
+    "E1001": {"name": "Ayşe Demir", "phone": "+905551110001", "birth_year": 1990, "device": "TR-LT-101",
+              "department": "Sales", "manager": "E1002", "licenses": ["M365-E3"], "groups": ["sales-tr"],
+              "sap_roles": [], "enabled": True},
+    "E1002": {"name": "Mehmet Kaya", "phone": "+905551110002", "birth_year": 1985, "device": "TR-LT-102",
+              "department": "Sales", "manager": "E1003", "licenses": ["M365-E3", "Visio"], "groups": ["sales-tr", "managers"],
+              "sap_roles": ["SD_DISPLAY"], "enabled": True},
+    "E1003": {"name": "Zeynep Arslan", "phone": "+905551110003", "birth_year": 1994, "device": "TR-LT-103",
+              "department": "Finance", "manager": None, "licenses": ["M365-E3"], "groups": ["finance", "managers"],
+              "sap_roles": ["FI_DISPLAY", "FI_POST"], "enabled": True},
 }
+
+LICENSE_CATALOG = {   # license -> needs manager approval?
+    "M365-E3": False, "Teams-Phone": False, "Visio": False, "Project": True, "Adobe-CC": True, "AutoCAD": True,
+}
+SAP_ROLES = {"SD_DISPLAY": "sales display", "SD_CREATE": "create sales orders", "FI_DISPLAY": "finance display",
+             "FI_POST": "post journal entries", "MM_PURCHASE": "create purchase orders"}
+
+
+def create_user(name: str, department: str, manager: str, phone: str) -> str:
+    emp = f"E{1000 + len(USERS) + 1}"
+    USERS[emp] = {"name": name, "phone": phone, "birth_year": 0, "device": None, "department": department,
+                  "manager": manager, "licenses": [], "groups": [], "sap_roles": [], "enabled": True}
+    return emp
 
 DEVICES = {
     "TR-LT-101": {"vpn_profile": "expired", "online": True, "dns_ok": True},
