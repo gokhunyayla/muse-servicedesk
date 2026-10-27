@@ -145,11 +145,15 @@ h3{margin:14px 0 8px;font-size:14px}small{color:var(--muted)}
 .dropdown.on{display:block}.dropdown a{display:block;padding:8px 10px;border-radius:6px;color:var(--fg);text-decoration:none;font-size:13px}.dropdown a:hover{background:var(--bg)}
 .dd-head{padding:8px 10px 10px}.dd-head b{display:block;font-size:13px}.dd-head small{color:var(--muted);font-size:12px}.dd-sep{height:1px;background:var(--line);margin:6px 0}
 <!--RAIL_CSS-->
-main{display:grid;gap:16px;padding:12px 16px 16px}main.dash{grid-template-columns:1fr 1fr 1fr}main.tix{grid-template-columns:minmax(360px,2fr) 3fr;align-items:start}
+main{display:grid;gap:16px;padding:12px 16px 16px}main.dash{grid-template-columns:1fr 1fr 1fr}main.tix{grid-template-columns:340px 1fr;align-items:start}
 @media(max-width:1100px){main.dash{grid-template-columns:1fr 1fr}}@media(max-width:900px){main.dash,main.tix{grid-template-columns:1fr;padding:12px;gap:12px}}
 [data-mode=dashboard] .only-tickets{display:none!important}[data-mode=tickets] .only-dash{display:none!important}
 .tl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.search{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);min-width:220px}
-.list .scroll{max-height:72vh;overflow:auto}tr.t.on{background:rgba(8,102,255,.12)}
+.list{padding:10px}.list .thead{padding:4px 6px 8px}.items{max-height:76vh;overflow:auto;display:flex;flex-direction:column}
+.item{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:start;padding:9px 8px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
+.item:hover{background:var(--bg)}.item.on{background:rgba(8,102,255,.14)}.item .t{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .m{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.item .r{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.item .r small{color:var(--muted);font-size:11px;white-space:nowrap}.item .pill{font-size:11px;padding:1px 7px}.item input{margin-top:3px}
 .dcols{grid-template-columns:1fr 260px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
 .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.kpi{padding:10px;border:1px solid var(--line);border-radius:8px}
@@ -212,8 +216,8 @@ th{color:var(--muted);font-weight:500;font-size:12px}tr.t{cursor:pointer}tr.t:ho
 <section class="card"><h3 style="margin-top:0">Tier load</h3><div class="tiers" id="tiers"></div><h3>Handoffs</h3><div id="handoffs" class="muted"></div></section>
 </main>
 <main class="tix only-tickets">
-<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn primary" id="mergeBtn" disabled onclick="openMerge()">Merge into problem</button></div></div>
-<div class="scroll"><table><thead><tr><th class="sel"></th><th>#</th><th>Title</th><th>Status</th><th>Owner</th></tr></thead><tbody id="tickets"></tbody></table></div></section>
+<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn primary" id="mergeBtn" disabled onclick="openMerge()">Merge</button></div></div>
+<div class="items" id="tickets"></div></section>
 <section class="card detail" id="detail"><div class="thead"><h3 id="ttitle">Ticket</h3><div class="actions" id="tactions"></div></div>
 <div class="dcols"><div><div id="trail" class="timeline"><small>Select a ticket to see its conversation and what the agents did.</small></div>
 <form class="composer" id="composer" style="display:none" onsubmit="sendReply(event)"><textarea id="replyText" rows="2" placeholder="Write to the employee… (sent over WhatsApp)"></textarea><button class="btn primary" type="submit">Send</button></form></div>
@@ -272,7 +276,9 @@ async function load(){
  }else{
   const ts=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
   $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');$('#scope').textContent+=' · '+ts.length+' tickets';
-  $('#tickets').innerHTML=ts.map(t=>`<tr class="t ${cur===t.id?'on':''}" onclick="show(${t.id})"><td class="sel" onclick="event.stopPropagation()"><input type="checkbox" ${sel.has(t.id)?'checked':''} onchange="toggle(${t.id},this.checked)"></td><td>${t.id}</td><td class="title" title="${esc(t.title)}">${esc(t.title)}${t.incident_id?` <span class="link">→ #${t.incident_id}</span>`:''}</td><td>${pill(t.status)}</td><td>${esc(t.owner)}</td></tr>`).join('')||'<tr><td colspan="5"><small>No tickets match.</small></td></tr>';
+  $('#tickets').innerHTML=ts.map(t=>`<div class="item ${cur===t.id?'on':''}" data-id="${t.id}" onclick="show(${t.id})"><input type="checkbox" ${sel.has(t.id)?'checked':''} onclick="event.stopPropagation()" onchange="toggle(${t.id},this.checked)">
+   <div><div class="t" title="${esc(t.title)}">#${t.id} ${esc(t.title)}</div><div class="m">${esc(t.owner)}${t.incident_id?` · problem #${t.incident_id}`:''}${t.rating?` · ${'★'.repeat(t.rating)}`:''}</div></div>
+   <div class="r">${pill(t.status)}<small>${ago(t.created_at)}</small></div></div>`).join('')||'<small style="padding:8px">No tickets match.</small>';
   updateSel();if(cur)show(cur,true);else if(P.get('id')){show(+P.get('id'));}
  }
  $('#upd').textContent='updated '+new Date().toLocaleTimeString();
@@ -291,6 +297,7 @@ async function doAssign(){const id=$('#assignModal').dataset.id;$('#aGo').disabl
  await fetch('/tickets/'+id+'/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner:$('#aOwner').value,note:$('#aNote').value.trim(),assignee:$('#aName').value.trim()})});
  $('#aGo').disabled=false;$('#aGo').textContent='Assign';closeModal('assignModal');$('#aNote').value='';await load();show(id);}
 const AGENT_LABEL={L1:'L1 · first contact',L2:'L2 · devices & network',L3:'L3 · servers & security',L4:'L4 · vendors & logistics'};
+function ago(x){const s=(Date.now()-new Date(x))/1000;if(s<60)return 'now';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d';}
 function fmt(x){try{const d=new Date(x);return d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}catch(e){return x}}
 function tstamp(x){try{return new Date(x).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
 function renderTimeline(events){
@@ -336,7 +343,7 @@ async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id))
   ${t.resolution?`<h4>Resolution</h4><div>${esc(t.resolution)}</div>`:''}
   <h4>Activity</h4><div class="muted">${t.events.filter(e=>e.kind==='tool_call').length} tool calls · ${t.events.filter(e=>e.kind==='handoff').length} handoffs · ${t.events.filter(e=>e.kind==='message').length} messages</div>`;
  $('#trail').innerHTML=renderTimeline(t.events);$('#composer').style.display='';
- document.querySelectorAll('tr.t').forEach(r=>r.classList.toggle('on',r.cells[1]&&+r.cells[1].textContent===t.id));
+ document.querySelectorAll('.item').forEach(r=>r.classList.toggle('on',+r.dataset.id===t.id));
  if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#detail').scrollIntoView({behavior:'smooth'});}}
 async function sendReply(ev){ev.preventDefault();const text=$('#replyText').value.trim();if(!text||!cur)return;
  await fetch('/tickets/'+cur+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});$('#replyText').value='';show(cur);}
