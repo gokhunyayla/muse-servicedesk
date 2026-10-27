@@ -134,7 +134,15 @@ def call(c: Connector, tool: str, args: dict) -> dict:
         is_error = getattr(res, "is_error", None)
         if is_error is None:
             is_error = getattr(res, "isError", False)
-        return {"ok": not is_error, "text": "\n".join(texts)[:6000], "data": structured}
+        text = "\n".join(texts)
+        if structured is None and text.strip().startswith(("{", "[")):
+            try:
+                structured = json.loads(text)
+            except ValueError:
+                pass
+        if isinstance(structured, dict) and set(structured) == {"result"}:
+            structured = structured["result"]          # MCP wraps plain returns as {"result": ...}
+        return {"ok": not is_error, "text": text[:6000], "data": structured}
     return _run(_with_session(c, fn))
 
 
