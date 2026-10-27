@@ -125,7 +125,7 @@ AGENTS: dict[str, Agent] = {a.tier: a for a in [
 
 
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
-                   mime: str = "image/jpeg") -> tuple[Ticket, str]:
+                   mime: str = "image/jpeg", extra_images: list[bytes] | None = None) -> tuple[Ticket, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
     or open a new one, then run L1."""
     from app.llm import image_message
@@ -146,6 +146,8 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         return handle_approval(db, int(m.group(2)), decision, requester)
     log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
     content = image_message(text, image, mime) if image else text
+    for extra in extra_images or []:          # video frames: same message, more image parts
+        content.append(image_message("", extra, mime)[1])
     answer = AGENTS["L1"].run(db, ticket, content, history=history)
     log(db, ticket.id, "L1", "message", answer)
     db.refresh(ticket)   # events were added by id; reload the relationship

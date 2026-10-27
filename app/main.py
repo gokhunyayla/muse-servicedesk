@@ -65,6 +65,32 @@ def decide_approval(approval_id: int, d: Decision) -> dict:
         return {"ticket_id": ticket.id, "reply": answer}
 
 
+@app.post("/video")
+async def post_video(requester: str = Form(...), text: str = Form(""), video: UploadFile = File(...)) -> dict:
+    """A short screen recording or phone clip: sample frames and let L1 look at them."""
+    from app.llm import image_message
+    from app.vision import sample_frames
+    frames = sample_frames(await video.read())
+    if not frames:
+        raise HTTPException(422, "could not read video")
+    with session() as db:
+        # first frame rides through the normal image path; the rest are appended as extra parts
+        caption = (text or "(video gönderdi)") + f" [video: {len(frames)} frames sampled, 2s apart]"
+        from app.agents import AGENTS, handle_message
+        ticket, answer = handle_message(db, requester, caption, frames[0], "image/jpeg",
+                                        extra_images=frames[1:])
+        return {"ticket_id": ticket.id, "frames": len(frames), "reply": answer}
+
+
+@app.post("/camera/{camera_id}")
+async def post_camera_frame(camera_id: str, image: UploadFile = File(...)) -> dict:
+    from app.camera import process_frame
+    try:
+        return {"findings": process_frame(camera_id, await image.read(), image.content_type or "image/jpeg")}
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+
 @app.get("/tickets")
 def list_tickets(status: str | None = None) -> list[dict]:
     with session() as db:
