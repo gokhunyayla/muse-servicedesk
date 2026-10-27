@@ -167,6 +167,7 @@ def assign_ticket(ticket_id: int, a: Assignment, request: Request, user=Depends(
         audit(db, user.email, "ticket.assign", target=t.id, detail=f"{a.owner} {a.assignee} {a.note}".strip())
         if a.owner == "human":
             t.status, t.owner = "escalated", "human"
+            t.assignee = a.assignee or ""
             who = f" to {a.assignee}" if a.assignee else ""
             log(db, t.id, f"desk:{user.name}", "note", f"assigned{who} by the desk. {a.note}".strip())
             return {"id": t.id, "status": t.status, "owner": t.owner}
@@ -555,6 +556,7 @@ def get_ticket(ticket_id: int, user=Depends(current_user)) -> dict:
             raise HTTPException(404)
         return {"id": t.id, "title": t.title, "status": t.status, "verified": t.verified, "owner": t.owner, "incident_id": t.incident_id,
                 "requester": t.requester, "created_at": t.created_at.isoformat(), "resolution": t.resolution, "rating": t.rating,
+                "assignee": t.assignee,
                 "linked": [c.id for c in db.query(Ticket).filter(Ticket.incident_id == t.id)],
                 "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None, "timing": timing(t, t.events),
                 "events": [{"at": e.at.isoformat(), "actor": e.actor, "kind": e.kind,

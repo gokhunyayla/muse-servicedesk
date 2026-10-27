@@ -42,7 +42,10 @@ def desk_overview(ctx: Ctx) -> dict:
     since = _now() - timedelta(hours=24)
     resolved_24h = db.query(Ticket).filter(Ticket.resolved_at >= since).count()
     created_24h = db.query(Ticket).filter(Ticket.created_at >= since).count()
-    return {"ok": True, "open_by_owner": by_owner, "open_total": len(open_), "created_24h": created_24h, "resolved_24h": resolved_24h,
+    me = ctx.user
+    mine = [{"id": t.id, "title": t.title[:80], "status": t.status} for t in open_ if t.assignee and t.assignee in (me.name, me.email)]
+    return {"ok": True, "you": {"name": me.name, "role": me.role, "your_open_tickets": mine},
+            "open_by_owner": by_owner, "open_total": len(open_), "created_24h": created_24h, "resolved_24h": resolved_24h,
             "sla_at_risk": at_risk(db)[:10], "pending_approvals": approvals, "sop_drafts": drafts,
             "supervisor_last_run": {"at": run.started_at.isoformat(timespec="minutes"), "summary": run.summary[:400],
                                     "actions": len(run.actions or [])} if run else None,
@@ -119,7 +122,7 @@ def assign(ctx: Ctx, ticket_id: int, to: str, note: str = "") -> dict:
             ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
         audit(ctx.db, user.email, "ticket.assign", target=t.id, detail=f"chat → {to} {note}".strip())
         return {"ok": True, "owner": to, "agent_reply": answer[:300], "link": f"/tickets?id={t.id}"}
-    t.status, t.owner = "escalated", "human"
+    t.status, t.owner, t.assignee = "escalated", "human", who
     log(ctx.db, t.id, f"desk:{user.name}", "note", f"assigned to {who} via Desk Chat. {note}".strip())
     audit(ctx.db, user.email, "ticket.assign", target=t.id, detail=f"chat → human:{who} {note}".strip())
     return {"ok": True, "owner": "human", "assignee": who, "link": f"/tickets?id={t.id}"}
@@ -212,7 +215,9 @@ def run_supervisor_now(ctx: Ctx) -> dict:
 
 # ---- the conversation ------------------------------------------------------------------------------
 
-SYSTEM = """You are the brain of Muse ServiceDesk, talking to {name} ({role}) from the service desk console.
+SYSTEM = """You are the brain of Muse ServiceDesk, talking to {name} ({role}) from the service desk console. You know who
+they are (below): address them by name when natural, relate answers to their tickets, their role and what they
+did recently, and when they ask "what should I do" start from what is theirs.
 You know the whole desk through your tools and you can act with this person's authority. Be concise, factual
 and specific: numbers, ticket ids, owners, times. Never invent a ticket, a person or a rule; call a tool.
 When the person should look at something, give a link: tickets as [#12](/tickets?id=12), the queue as
@@ -221,6 +226,27 @@ the Supervisor as [Supervisor settings](/settings?tab=supervisor), reports as [R
 If the person wants to get involved, offer the concrete step (assign to me, approve #3, reply to the employee,
 escalate) and do it when they say so. Confirm before destructive or irreversible actions (closing tickets,
 denying approvals). Answer in the language the person writes in. Use Markdown: short paragraphs, lists, bold ids."""
+
+
+def person_context(db, user) -> str:
+    """What the brain knows about the person it is talking to: role, their tickets, their recent actions,
+    their drafts, what waits for them. Rebuilt every turn so it is current."""
+    from app.db import Audit, User
+    since = _now() - timedelta(hours=24)
+    u = db.get(User, user.id)
+    mine = db.query(Ticket).filter(Ticket.status != "resolved", Ticket.assignee.in_([user.name, user.email])).all()
+    recent = db.query(Audit).filter(Audit.user == user.email, Audit.at >= since).order_by(Audit.id.desc()).limit(8).all()
+    drafts = db.query(Sop).filter(Sop.status == "draft").all()
+    my_drafts = [s for s in drafts if s.author == user.email]
+    approvals = db.query(Approval).filter(Approval.decision.is_(None)).count()
+    lines = [f"Name: {user.name} · e-mail: {user.email} · role: {user.role} · desk user since {u.created_at:%d %b %Y}" if u else f"Name: {user.name} · role: {user.role}"]
+    lines.append("Their open tickets (assigned to them): " + (", ".join(f"#{t.id} {t.title[:50]} [{t.status}]" for t in mine) if mine else "none"))
+    lines.append("Their actions in the last 24h: " + (", ".join(f"{a.action}{' ' + str(a.target) if a.target else ''}" for a in recent) if recent else "none"))
+    if my_drafts:
+        lines.append("SOP drafts they wrote: " + ", ".join(s.key for s in my_drafts))
+    if user.role == "admin":
+        lines.append(f"Waiting for an admin: {len(drafts)} SOP draft(s), {approvals} pending approval(s) desk-wide.")
+    return "\n".join(lines)
 
 
 def _history(db, thread_id: int) -> list[dict]:
@@ -243,7 +269,8 @@ def ask(user, thread_id: int, text: str) -> dict:
         ctx = Ctx(db=db, ticket=None, agent="DESK")
         ctx.user = user
         specs = [t.spec() for t in tools_for("DESK")]
-        messages = [{"role": "system", "content": SYSTEM.format(name=user.name, role=user.role)}, *_history(db, th.id)]
+        messages = [{"role": "system", "content": SYSTEM.format(name=user.name, role=user.role) + "\n\nAbout the person you are talking to (current):\n" + person_context(db, user)},
+                    *_history(db, th.id)]
         answer = ""
         try:
             for _ in range(MAX_STEPS):

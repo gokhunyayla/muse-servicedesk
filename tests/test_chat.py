@@ -78,3 +78,22 @@ def test_threads_are_private_and_deletable(desk):
     assert other.get(f"/chat/threads/{th['id']}").status_code == 404
     assert desk.delete(f"/chat/threads/{th['id']}").json()["deleted"] and desk.get("/chat/threads").json() == []
     assert "Desk Chat" in desk.get("/chat").text
+
+
+def test_brain_knows_the_person_it_talks_to(desk):
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    with session() as db:
+        handle_message(db, "+905551110001", "projektör lambası yanmıyor")
+    th = desk.post("/chat/threads").json()
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("assign", ticket_id=1, to="me", note="")]), Reply(text="Yours.")]))
+    desk.post(f"/chat/threads/{th['id']}", json={"text": "assign #1 to me"})
+    llm = ScriptedLLM([Reply(tool_calls=[call("desk_overview")]), Reply(text="You hold #1.")])
+    set_llm(llm)
+    r = desk.post(f"/chat/threads/{th['id']}", json={"text": "what is mine?"}).json()
+    system = llm.requests[0][0]["content"]
+    assert "Desk Admin" in system and "admin@test" in system and "#1 projektör" in system and "ticket.assign 1" in system
+    import json
+    overview = json.loads(llm.requests[1][-1]["content"])
+    assert overview["you"]["your_open_tickets"][0]["id"] == 1
+    with session() as db:
+        assert db.get(Ticket, 1).assignee == "Desk Admin"

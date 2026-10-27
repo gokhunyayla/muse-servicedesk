@@ -33,6 +33,7 @@ class Ticket(Base):
     rating: Mapped[int | None] = mapped_column(nullable=True)    # 1..5 from the employee
     incident_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)  # parent, for mass outages
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    assignee: Mapped[str] = mapped_column(String(255), default="")   # desk user (name or e-mail) when a human holds it
     events: Mapped[list["Event"]] = relationship(back_populates="ticket", order_by="Event.id")
 
 
