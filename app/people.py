@@ -474,6 +474,10 @@ def execute_offboarding(db, process_id: int) -> dict:
     p.status, p.result, p.updated_at = ("done" if not problems else "done_with_problems"), {"done": done, "problems": problems, "handover": handover}, _now()
     lang = _lang(db.get(Ticket, p.hr_ticket_id) if p.hr_ticket_id else None)
     tr = lang == "tr"
+    if tr:
+        labels = {"account disabled": "hesap kapatıldı", "sessions revoked": "oturumlar sonlandırıldı", "groups removed": "gruplardan çıkarıldı",
+                  "licences removed": "lisanslar geri alındı", "support-page access closed": "destek sayfası erişimi kapatıldı"}
+        done = [labels.get(x, x.replace("device return:", "cihaz iadesi:").replace("(simulated courier)", "(kargo simüle)")) for x in done]
     text = ((f"{p.data['name']} için ayrılış tamamlandı: " + "; ".join(done) + (f". Sorunlar: {'; '.join(problems)}" if problems else "")
              + (f". E-posta ve dosya devri ({handover}) bir mühendise iletildi." if handover else "."))
             if tr else
