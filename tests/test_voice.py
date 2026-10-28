@@ -83,3 +83,27 @@ def test_identity_check_wrong_birth_year_blocks_reset():
         ticket, _ = handle_message(db, "+905551110001", "şifremi unuttum")
         results = [e.data for e in ticket.events if e.kind == "tool_result"]
     assert results[0]["ok"] is False and results[1]["ok"] is False
+
+
+def test_implausible_transcript_is_retried_on_enhanced_audio_then_given_up(monkeypatch):
+    from app import voice, whatsapp
+    from app.voice import plausible, transcribe
+    assert plausible("Şifremi unuttum") and plausible("my vpn is down") and not plausible("শ্রীপ্রেম") and not plausible("")
+    monkeypatch.setattr(voice, "to_wav", lambda audio: audio)
+    monkeypatch.setattr(voice, "enhance", lambda wav: wav + b"+")
+    attempts = []
+    set_transcriber(lambda wav: attempts.append(wav) or ("শ্রীপ্রেম" if not wav.endswith(b"+") else "şifremi unuttum"))
+    assert transcribe(b"OggS", "audio/ogg") == "şifremi unuttum" and len(attempts) == 2      # second pass rescued it
+    set_transcriber(lambda wav: "শ্রীপ্রেম")
+    assert transcribe(b"OggS", "audio/ogg") == ""                                           # both failed: empty
+    sent = []
+    monkeypatch.setattr(whatsapp, "try_send", lambda to, text: (sent.append((to, text)) or True))
+    monkeypatch.setattr(whatsapp, "download_media", lambda mid: (b"OggS", "audio/ogg"))
+    set_llm(ScriptedLLM([]))
+    client = TestClient(app)
+    payload = {"entry": [{"changes": [{"value": {"messages": [{"id": "wamid.v1", "from": "905551110001", "timestamp": "0", "type": "audio", "audio": {"id": "m1"}}]}}]}]}
+    assert client.post("/webhook", json=payload).json()["handled"] == 0
+    assert sent and "yazar mısınız" in sent[-1][1]
+    with session() as db:
+        from app.db import Ticket
+        assert db.query(Ticket).count() == 0
