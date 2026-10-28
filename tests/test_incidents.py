@@ -148,35 +148,37 @@ def test_burst_of_similar_reports_is_linked_at_intake_and_the_agent_is_briefed()
     assert "Desk notice" in llm.requests[-1][-1]["content"] and "others are affected" in llm.requests[-1][-1]["content"]
 
 
-def test_channel_switch_offers_to_continue_and_resumes_on_yes():
+def test_channel_switch_continues_silently_and_asks_only_when_unclear():
     from app import agents
     agents._RESUME.clear()
     set_llm(ScriptedLLM([Reply(text="VPN profilini yeniledim, dener misiniz?")]))
     with session() as db:
         t, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor", channel="whatsapp")
         tid = t.id
-    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
-    with session() as db:                                                        # same person shows up on the web a minute later
-        held, answer = handle_message(db, "+905551110001", "hâlâ bağlanmıyor, ekran görüntüsünü ekledim", channel="web")
-        assert held.id == tid and "WhatsApp" in answer and "devam edelim mi" in answer
-        assert db.query(Ticket).count() == 1
+    # clearly the same problem, now from the web: no question, the ticket just follows the employee
+    set_llm(ScriptedLLM([Reply(text="SAME"), Reply(text="Bakıyorum.")]))
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", "evet", channel="web")     # the held message lands on the same ticket
-        assert t.id == tid and t.channel == "web" and "Bakıyorum" in answer
-        msgs = [e.content for e in t.events if e.kind == "message" and e.actor == "user"]
-        assert msgs[-1].startswith("hâlâ bağlanmıyor")
+        t, answer = handle_message(db, "+905551110001", "hâlâ bağlanmıyor, ekran görüntüsünü ekledim", channel="web")
+        assert t.id == tid and t.channel == "web" and answer == "Bakıyorum." and db.query(Ticket).count() == 1
+    # clearly a new problem on another channel: opened at once, no question
+    set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Yazıcıya bakıyorum.")]))
+    with session() as db:
+        t2, answer = handle_message(db, "+905551110001", "yazıcı da bozuldu", channel="whatsapp")
+        assert t2.id != tid and t2.title == "yazıcı da bozuldu" and "Yazıcıya" in answer
+    # unclear: the desk asks, and "evet" lands the held message on the ticket
+    agents._RESUME.clear()
+    set_llm(ScriptedLLM([Reply(text="UNCLEAR"), Reply(text="Bakıyorum.")]))
+    with session() as db:
+        db.get(Ticket, t2.id).status = "resolved"
+        db.get(Ticket, tid).channel = "web"                     # the VPN conversation was last on the web
+        held, answer = handle_message(db, "+905551110001", "yine olmadı", channel="whatsapp")
+        assert held.id == tid and "devam edelim mi" in answer and "destek sayfası" in answer
+        t, answer = handle_message(db, "+905551110001", "evet", channel="whatsapp")
+        assert t.id == tid and t.channel == "whatsapp" and answer == "Bakıyorum."
+        assert [e.content for e in t.events if e.kind == "message" and e.actor == "user"][-1] == "yine olmadı"
     # a hello on the other channel: one message that greets and offers, never two
     agents._RESUME.clear()
     with session() as db:
-        db.get(Ticket, tid).channel = "whatsapp"
-        held, answer = handle_message(db, "+905551110001", "selam", channel="web")
+        db.get(Ticket, tid).channel = "web"
+        held, answer = handle_message(db, "+905551110001", "selam", channel="whatsapp")
         assert held.id == tid and answer.startswith("Merhaba!") and "devam edelim mi" in answer
-    # the other answer: a new issue
-    agents._RESUME.clear()
-    set_llm(ScriptedLLM([Reply(text="Yazıcıya bakıyorum.")]))
-    with session() as db:
-        db.get(Ticket, tid).channel = "whatsapp"
-        held, answer = handle_message(db, "+905551110001", "yazıcı da bozuldu", channel="web")
-        assert held.id == tid and "devam edelim mi" in answer
-        t2, answer = handle_message(db, "+905551110001", "yeni konu", channel="web")
-        assert t2.id != tid and t2.title == "yazıcı da bozuldu" and "Yazıcıya" in answer

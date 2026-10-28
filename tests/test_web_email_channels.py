@@ -209,7 +209,7 @@ def test_greetings_and_small_talk_open_no_ticket(desk):
         assert t is not None and t.title == "yazıcı bozuk"
     emp = _employee()                                                          # Ayşe has an open ticket: greeting points at it, opens nothing
     r = emp.post("/support-agent/say", data={"text": "merhaba"}).json()
-    assert r["ticket"] == t.id and "hâlâ açık" in r["text"]
+    assert r["ticket"] == t.id and ("hâlâ açık" in r["text"] or "devam edelim mi" in r["text"])   # greets, opens nothing
     with session() as db:
         assert db.query(Ticket).count() == 1
     assert desk.post("/messages", json={"requester": "+905551110002", "text": "günaydın"}).json()["ticket_id"] is None

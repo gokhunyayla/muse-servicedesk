@@ -435,11 +435,20 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
             return None, tr_("resume_new", detect(text, None) or "tr")
         # anything else: the question is dropped and the message is handled normally
     elif pinned is None and not is_ack(text) and not is_greeting(text):
-        offer = resume_offer(db, requester, channel, detect(text, None) or "tr", pending=text)
-        if offer is not None:
-            held, question = offer
-            log(db, held.id, "system", "note", f"employee switched to {channel}; asked whether to continue here")
-            return held, question
+        held = recent_switch(db, requester, channel)
+        if held is not None:                                   # mid-conversation channel switch: decide, ask only if unclear
+            where = _route(db, held, text)
+            if where == "same":
+                held.channel = channel
+                pinned = held
+                log(db, held.id, "system", "note", f"employee continued on {channel}")
+            elif where == "new":
+                held.channel = channel
+                return handle_message(db, requester, text, image, mime, extra_images, force_new=True, channel=channel)
+            else:
+                _, question = resume_offer(db, requester, channel, detect(text, None) or "tr", pending=text)
+                log(db, held.id, "system", "note", f"employee switched to {channel}; asked whether to continue here")
+                return held, question
     # 3) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
     if pinned is None and is_greeting(text):
         lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
