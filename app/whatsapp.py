@@ -4,6 +4,7 @@ updates) are drained by the scheduler through send()."""
 from __future__ import annotations
 
 import logging
+import time
 import os
 
 import httpx
@@ -77,6 +78,17 @@ def drain_outbound() -> int:
     return drain()
 
 
+STALE_SEC = 3600
+_SEEN: list = []
+
+
+def _remember(mid: str | None) -> None:
+    if mid:
+        _SEEN.append(mid)
+        if len(_SEEN) > 2000:
+            del _SEEN[:1000]
+
+
 @router.get("/webhook")
 def verify(hub_mode: str = Query("", alias="hub.mode"), hub_token: str = Query("", alias="hub.verify_token"),
            hub_challenge: str = Query("", alias="hub.challenge")):
@@ -99,6 +111,13 @@ async def inbound(request: Request) -> dict:
     payload = await request.json()
     handled = 0
     for m in _extract(payload):
+        mid, ts = m.get("id"), int(m.get("timestamp") or 0)
+        if mid and mid in _SEEN:                       # Meta redelivers while it retries: never answer twice
+            continue
+        _remember(mid)
+        if ts and time.time() - ts > STALE_SEC:        # queued while we were unreachable: too old to act on now
+            logger.warning("skipping stale WhatsApp message %s from %s (%d min old)", mid, m.get("from"), (time.time() - ts) // 60)
+            continue
         frm = "+" + m["from"].lstrip("+")
         kind = m.get("type")
         text, image, mime, extra = "", None, "image/jpeg", None

@@ -57,7 +57,7 @@ def health() -> dict:
 def post_message(msg: Incoming) -> dict:
     with session() as db:
         ticket, answer = handle_message(db, msg.requester, msg.text)
-        return {"ticket_id": ticket.id, "reply": answer}
+        return {"ticket_id": ticket.id if ticket else None, "reply": answer}
 
 
 @app.post("/voice", dependencies=[Depends(api_key)])
@@ -68,8 +68,9 @@ async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) 
         raise HTTPException(422, "could not transcribe audio")
     with session() as db:
         ticket, answer = handle_message(db, requester, text)
-        log(db, ticket.id, "user", "note", f"voice note transcribed: {text}")
-        return {"ticket_id": ticket.id, "transcript": text, "reply": answer}
+        if ticket is not None:
+            log(db, ticket.id, "user", "note", f"voice note transcribed: {text}")
+        return {"ticket_id": ticket.id if ticket else None, "transcript": text, "reply": answer}
 
 
 @app.post("/image", dependencies=[Depends(api_key)])
@@ -79,7 +80,7 @@ async def post_image(requester: str = Form(...), text: str = Form(""), image: Up
     with session() as db:
         ticket, answer = handle_message(db, requester, text or "(fotoğraf gönderdi)", data,
                                         image.content_type or "image/jpeg")
-        return {"ticket_id": ticket.id, "reply": answer}
+        return {"ticket_id": ticket.id if ticket else None, "reply": answer}
 
 
 class Decision(BaseModel):
@@ -669,7 +670,7 @@ async def post_video(requester: str = Form(...), text: str = Form(""), video: Up
         from app.agents import AGENTS, handle_message
         ticket, answer = handle_message(db, requester, caption, frames[0], "image/jpeg",
                                         extra_images=frames[1:])
-        return {"ticket_id": ticket.id, "frames": len(frames), "reply": answer}
+        return {"ticket_id": ticket.id if ticket else None, "frames": len(frames), "reply": answer}
 
 
 @app.post("/camera/{camera_id}", dependencies=[Depends(api_key)])

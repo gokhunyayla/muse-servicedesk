@@ -131,7 +131,7 @@ def sender_allowed(addr: str, cfg: dict | None = None) -> bool:
     return any(addr == a or addr.endswith("@" + a) or addr.endswith("." + a) for a in allowed)
 
 
-def ingest_email(parsed: dict) -> tuple[Ticket, str] | None:
+def ingest_email(parsed: dict) -> tuple[Ticket | None, str] | None:
     """Run one parsed mail through the desk and answer by mail."""
     from app.agents import handle_message
     text = parsed["text"] or parsed["subject"]
@@ -143,7 +143,7 @@ def ingest_email(parsed: dict) -> tuple[Ticket, str] | None:
         continues = tagged is not None and tagged.requester == parsed["from"] and tagged.status != "resolved"
         ticket, answer = handle_message(db, parsed["from"], text, parsed["image"], parsed["mime"], channel="email",
                                         force_new=not continues, ticket=tagged if continues else None)
-        subject, to = _subject(ticket, parsed["subject"]), parsed["from"]
+        subject, to = (_subject(ticket, parsed["subject"]) if ticket else "Re: " + (parsed["subject"] or "IT Service Desk")), parsed["from"]
     ok, err = send_email(to, subject, answer)
     if not ok:
         logger.warning("e-mail reply to %s failed: %s", to, err)

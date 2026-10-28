@@ -94,6 +94,14 @@ class ScriptedLLM:
         self.requests: list[list[dict]] = []
         self.heavy_calls = 0
 
+    def verdict(self, options: tuple[str, ...]) -> str | None:
+        """Classifier calls (routing, intake) take the next reply only when it is one of `options`; otherwise
+        the script is left for the agent and the classifier falls back to its default. Keeps tests scripted
+        around the conversation, not around every yes/no the desk asks itself."""
+        if self.replies and (self.replies[0].text or "").strip().upper() in options:
+            return self.replies.pop(0).text.strip().upper()
+        return None
+
     def chat(self, messages: list[dict], tools: list[dict], heavy: bool = False) -> Reply:
         self.requests.append([dict(m) for m in messages])
         self.heavy_calls += heavy

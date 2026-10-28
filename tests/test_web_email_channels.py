@@ -126,3 +126,41 @@ def test_sender_allow_list_and_folded_subjects():
     from app.db import Ticket
     assert channels._subject(Ticket(id=3, title="a\nb   c")) == "[#3] Re: a b c"
     assert channels._subject(Ticket(id=3, title="x"), "Re: [#3] Yazıcı") == "[#3] Re: Yazıcı"
+
+
+def test_greetings_and_small_talk_open_no_ticket(desk):
+    from app.agents import handle_message, is_greeting
+    assert is_greeting("Selam") and is_greeting("merhaba, orada mısın?") and is_greeting("hello there") and not is_greeting("selam, vpn bağlanmıyor")
+    set_llm(ScriptedLLM([]))                                                   # a greeting needs no model at all
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "Selam")
+        assert t is None and answer.startswith("Merhaba!") and db.query(Ticket).count() == 0
+    set_llm(ScriptedLLM([Reply(text="CHAT")]))                                 # the model says it is small talk
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "bugün hava çok güzel değil mi")
+        assert t is None and db.query(Ticket).count() == 0
+    set_llm(ScriptedLLM([Reply(text="REQUEST"), Reply(text="Bakıyorum.")]))
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", "yazıcı bozuk")
+        assert t is not None and t.title == "yazıcı bozuk"
+    emp = _employee()                                                          # Ayşe has an open ticket: greeting points at it, opens nothing
+    r = emp.post("/portal/say", data={"text": "merhaba"}).json()
+    assert r["ticket"] == t.id and "hâlâ açık" in r["text"] and "clear chat" in emp.get("/portal").text
+    with session() as db:
+        assert db.query(Ticket).count() == 1
+    assert desk.post("/messages", json={"requester": "+905551110002", "text": "günaydın"}).json()["ticket_id"] is None
+
+
+def test_stale_and_duplicate_whatsapp_messages_are_skipped(desk, monkeypatch):
+    import time
+    from app import whatsapp
+    monkeypatch.setattr(whatsapp, "try_send", lambda to, text: True)
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    def payload(mid, ts, text):
+        return {"entry": [{"changes": [{"value": {"messages": [{"id": mid, "from": "905551110001", "timestamp": str(ts), "type": "text", "text": {"body": text}}]}}]}]}
+    old = desk.post("/webhook", json=payload("wamid.old", int(time.time()) - 2 * 3600, "Selam")).json()
+    fresh = desk.post("/webhook", json=payload("wamid.1", int(time.time()), "yazıcı bozuk")).json()
+    again = desk.post("/webhook", json=payload("wamid.1", int(time.time()), "yazıcı bozuk")).json()
+    assert old["handled"] == 0 and fresh["handled"] == 1 and again["handled"] == 0
+    with session() as db:
+        assert db.query(Ticket).count() == 1

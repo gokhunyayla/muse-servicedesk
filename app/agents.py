@@ -175,10 +175,14 @@ def _route(db, ticket: Ticket, text: str) -> str:
               "states one is NEW. If the message is too vague to tell what it is about (\"garip bir hata\", "
               "\"yine olmadı\" with nothing to anchor it), answer UNCLEAR so the desk asks the employee. "
               "Answer with one word: SAME, NEW or UNCLEAR.")
+    llm = get_llm()
+    if hasattr(llm, "verdict"):                                   # scripted (tests): default SAME unless scripted
+        up = llm.verdict(("SAME", "NEW", "UNCLEAR")) or "SAME"
+        return "ask" if up == "UNCLEAR" else "new" if up == "NEW" else "same"
     from app import usage
     try:
         with usage.scope("ticket", ticket.id, "route", db=db):
-            reply = get_llm().chat([{"role": "user", "content": prompt}], [])
+            reply = llm.chat([{"role": "user", "content": prompt}], [])
     except ContentFiltered:
         return "same"
     up = reply.text.upper()
@@ -193,6 +197,41 @@ ACK_WORDS = {"evet", "hayır", "hayir", "yok", "var", "tamam", "tamamdır", "ok"
              "devam", "ediyor", "teşekkür", "teşekkürler", "tesekkurler", "sağol", "sağolun", "sagol", "eyvallah", "süper", "harika", "peki",
              "iyi", "güzel", "yes", "no", "nope", "yep", "done", "works", "worked", "fixed", "still", "same", "thanks", "thank", "you",
              "thx", "ty", "cheers", "solved", "resolved", "ok.", "puan", "kapat", "close", "kapatın", "iptal", "cancel", "yanlış", "talep"}
+
+
+GREETING_WORDS = {"selam", "selamlar", "merhaba", "merhabalar", "mrb", "slm", "hello", "hi", "hey", "günaydın", "gunaydin", "iyi", "günler",
+                  "gunler", "akşamlar", "aksamlar", "geceler", "kolay", "gelsin", "nasılsın", "nasilsin", "naber", "orada", "mısın", "misin",
+                  "there", "good", "morning", "afternoon", "evening", "how", "are", "you", "hocam", "abi", "abla", "ben", "bana", "yardım", "lazım",
+                  "destek", "istiyorum", "var", "mı", "mi", "bir", "sorum", "soru", "sorunum", "olacak", "olacaktı"}
+
+
+def is_greeting(text: str) -> bool:
+    """Only a greeting / "are you there" / "I need help" with no problem stated yet."""
+    words = [w for w in re.split(r"[\s,.!?:;]+", text.strip().lower()) if w]
+    return bool(words) and len(words) <= 6 and all(w in GREETING_WORDS for w in words)
+
+
+def _is_request(db, text: str) -> bool:
+    """Before opening a ticket: is this a support request / problem / question that needs the desk (REQUEST),
+    or small talk that needs no record (CHAT)? Obvious greetings skip the model."""
+    if is_greeting(text):
+        return False
+    if len(text.split()) >= 12 or text.startswith("["):
+        return True
+    prompt = (f"Message from an employee to the IT service desk: \"{text[:400]}\"\n\n"
+              "Is this a REQUEST (a problem, an IT question, something to do, a report, an approval) that the desk should "
+              "open a ticket for, or CHAT (greeting, thanks, small talk, a test of whether someone is there) that needs no "
+              "ticket? A short problem statement like 'printer broken' is a REQUEST. Answer with one word: REQUEST or CHAT.")
+    llm = get_llm()
+    if hasattr(llm, "verdict"):                                   # scripted (tests): default REQUEST unless scripted
+        return (llm.verdict(("REQUEST", "CHAT")) or "REQUEST") == "REQUEST"
+    from app import usage
+    try:
+        with usage.scope("ticket", None, "intake", db=db):
+            reply = llm.chat([{"role": "user", "content": prompt}], [])
+    except ContentFiltered:
+        return True
+    return "CHAT" not in reply.text.upper()
 
 
 def is_ack(text: str) -> bool:
@@ -252,7 +291,7 @@ def _approval_decision(db, requester: str, text: str):
 
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
                    mime: str = "image/jpeg", extra_images: list[bytes] | None = None,
-                   force_new: bool = False, channel: str | None = None, ticket: Ticket | None = None) -> tuple[Ticket, str]:
+                   force_new: bool = False, channel: str | None = None, ticket: Ticket | None = None) -> tuple[Ticket | None, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
     or open a new one, then run L1. `force_new` skips the routing and always opens a ticket (system-generated
     tickets, a fresh e-mail); `ticket` pins the message to that ticket (an e-mail reply tagged [#id])."""
@@ -276,6 +315,12 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         return handle_approval(db, approval.id, decision, requester)
     open_tickets = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
                     .order_by(Ticket.id.desc()).all())
+    # 2) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
+    if pinned is None and is_greeting(text):
+        lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
+        if open_tickets:
+            return open_tickets[0], tr_("greeting_open", lang, id=open_tickets[0].id, title=open_tickets[0].title[:60])
+        return None, tr_("greeting", lang)
     ticket = pinned if pinned is not None else (open_tickets[0] if open_tickets else None)
     short = is_ack(text)
     if pinned is not None:
@@ -309,6 +354,8 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     if ticket is None:
         ticket = _closing_exchange(db, requester, text)
     if ticket is None:
+        if not _is_request(db, text):                       # small talk: answer, open nothing
+            return None, tr_("greeting", detect(text, None) or "tr")
         ticket = Ticket(requester=requester, title=text[:255], channel=channel)
         db.add(ticket)
         db.flush()

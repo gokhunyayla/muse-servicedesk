@@ -67,7 +67,7 @@ def test_history_is_replayed_to_the_model_on_follow_up_messages():
     with session() as db:
         handle_message(db, "+905551110001", "ilk mesaj")
         handle_message(db, "+905551110001", "ikinci mesaj")
-    roles = [(m["role"], m["content"]) for m in llm.requests[2][1:]]
+    roles = [(m["role"], m["content"]) for m in llm.requests[1][1:]]
     assert roles == [("user", "ilk mesaj"), ("assistant", "İlk cevap"), ("user", "ikinci mesaj")]
 
 

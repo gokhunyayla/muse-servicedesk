@@ -29,6 +29,10 @@ def ticket_lang(ticket) -> str:
 T = {
     "which_ticket": {"tr": "Birden fazla açık talebiniz var, hangisi için?\n{choices}\n(Örn. \"#{first} çözüldü\")",
                      "en": "You have several open tickets; which one is this about?\n{choices}\n(e.g. \"#{first} solved\")"},
+    "greeting": {"tr": "Merhaba! Ben IT servis masası. Sorununuzu veya talebinizi yazın, hemen bakayım.",
+                 "en": "Hello! This is the IT service desk. Tell me the problem or request and I will get on it."},
+    "greeting_open": {"tr": "Merhaba! #{id} numaralı talebiniz (\"{title}\") hâlâ açık. Onunla ilgili bir gelişme varsa yazın; yeni bir konu için de doğrudan anlatabilirsiniz.",
+                      "en": "Hello! Your ticket #{id} (\"{title}\") is still open. Tell me if there is news on it, or just describe a new issue."},
     "same_or_new": {"tr": "Tam anlayamadım: bu, açık talebiniz #{id} (\"{title}\") ile mi ilgili, yoksa yeni bir konu mu? Sorunu bir cümleyle anlatır mısınız?",
                     "en": "I could not quite place this: is it about your open ticket #{id} (\"{title}\") or a new issue? Could you describe the problem in a sentence?"},
     "closed_on_request": {"tr": "Talebiniz (#{id}) isteğiniz üzerine kapatıldı. Yeni bir sorun olursa yazmanız yeterli.",

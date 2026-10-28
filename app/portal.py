@@ -72,7 +72,7 @@ def portal_start(request: Request, name: str = Form(...), phone: str = Form(...)
     from app import vault
     token = vault._fernet().encrypt(json.dumps({"name": name.strip()[:80], "phone": digits}).encode()).decode()
     r = RedirectResponse("/portal", 303)
-    r.set_cookie(COOKIE, token, max_age=30 * 86400, httponly=True, samesite="lax", secure=cookie_secure())
+    r.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=cookie_secure())   # session cookie: gone when the browser closes
     return r
 
 
@@ -134,7 +134,7 @@ async def portal_say(request: Request, text: str = Form(""), image: UploadFile |
         return JSONResponse({"error": "empty"}, 422)
     with session() as db:
         t, answer = handle_message(db, who["phone"], text or "(photo)", data, mime, channel="web")
-        return {"ticket": t.id, "status": t.status, "text": answer}
+        return {"ticket": t.id if t else None, "status": t.status if t else None, "text": answer}
 
 
 def _shell(cfg: dict, body: str, chat: bool = False) -> str:
@@ -148,7 +148,7 @@ def _shell(cfg: dict, body: str, chat: bool = False) -> str:
 PORTAL_CSS = """
 body.chat{align-items:stretch}.chat .card{width:min(680px,100%);display:flex;flex-direction:column;height:min(860px,calc(100vh - 48px))}
 .chat .brand{flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:10px}.chat .brand h2{font-size:18px}
-.who{font-size:12px;color:var(--muted)}.who form{display:inline}.who button{border:0;background:none;color:var(--accent);cursor:pointer;font:inherit;font-size:12px;padding:0}
+.who{font-size:12px;color:var(--muted)}.who form{display:inline}.who > button,.who form button{border:0;background:none;color:var(--accent);cursor:pointer;font:inherit;font-size:12px;padding:0}
 .log{flex:1;overflow:auto;padding:6px 2px;display:flex;flex-direction:column;gap:8px}
 .m{max-width:85%;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.4}
 .m.you{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}.m.desk{align-self:flex-start;background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
@@ -162,7 +162,7 @@ body.chat{align-items:stretch}.chat .card{width:min(680px,100%);display:flex;fle
 """
 
 CHAT = """
-<div class="who">Signed in as <b>{NAME}</b> · <form method="post" action="/portal/leave"><button type="submit">not you?</button></form></div>
+<div class="who">Signed in as <b>{NAME}</b> · <form method="post" action="/portal/leave"><button type="submit">not you?</button></form> · <button type="button" onclick="clearChat()">clear chat</button></div>
 <div class="log" id="log"><div class="sys">Write your request below. Photos of error screens help.</div></div>
 <div class="typing" id="typing"></div>
 <form class="composer" id="f" onsubmit="return send(event)">
@@ -181,7 +181,9 @@ async function send(e){e.preventDefault();const text=T.value.trim();const f=IMG.
  try{const r=await fetch('/portal/say',{method:'POST',body:fd});const j=await r.json();TY.textContent='';
   if(!r.ok){add('desk',j.error||'Something went wrong. Please try again.');return;}add('desk',j.text);}
  catch(err){TY.textContent='';add('desk','Could not reach the desk. Please try again.');}}
-async function load(){try{const r=await fetch('/portal/history');if(r.status===401){location.reload();return;}const rows=await r.json();rows.forEach(m=>add(m.who,m.text,m.at));}catch(e){}}
+function since(){try{return localStorage.getItem('portal_clear')||''}catch(e){return ''}}
+function clearChat(){try{localStorage.setItem('portal_clear',new Date().toISOString().slice(0,16))}catch(e){}log.innerHTML='<div class="sys">Chat cleared. Your tickets are still on the desk.</div>';}
+async function load(){try{const r=await fetch('/portal/history');if(r.status===401){location.reload();return;}const rows=await r.json();const s=since();rows.filter(m=>!s||m.at>s).forEach(m=>add(m.who,m.text,m.at));}catch(e){}}
 async function poll(){try{const r=await fetch('/portal/updates');if(r.ok){(await r.json()).forEach(m=>add(m.who,m.text,m.at));}}catch(e){}}
 load();setInterval(poll,5000);
 </script>
