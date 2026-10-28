@@ -422,7 +422,8 @@ body.chat{align-items:stretch}.chat .card{width:min(1040px,100%);display:flex;fl
 .chat .brand{flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:8px}.chat .brand h2{font-size:18px}
 .who{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}.who form{display:inline}.who button{border:0;background:none;color:var(--accent);cursor:pointer;font:inherit;font-size:12px;padding:0}
 .tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}.tag.open,.tag.waiting_user,.tag.waiting_approval,.tag.escalated{color:var(--accent);border-color:var(--accent)}.tag.resolved{color:var(--ok);border-color:var(--ok)}.tag.risk{color:var(--bad);border-color:var(--bad)}
-.layout{display:grid;grid-template-columns:270px 1fr;gap:14px;flex:1;min-height:0;margin-top:8px}.layout.anon{grid-template-columns:1fr}.layout.anon .side{display:none}
+.layout{display:grid;grid-template-columns:1fr;gap:14px;flex:1;min-height:0;margin-top:8px}.layout .side{display:none}.layout.show{grid-template-columns:270px 1fr}.layout.show .side{display:flex}
+.who .reqbtn{margin-left:auto;font:inherit;font-size:12px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}.who .reqbtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .side{border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}.side .btn{margin:10px;width:auto;padding:8px 10px;font-size:13px}
 .side h4{margin:4px 12px 4px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.side .list{overflow:auto;flex:1}
 .side .it{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:none;color:var(--fg);padding:9px 12px;cursor:pointer;font:inherit}.side .it:hover,.side .it.on{background:var(--bg)}
@@ -440,12 +441,13 @@ body.chat{align-items:stretch}.chat .card{width:min(1040px,100%);display:flex;fl
 .composer label.att svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.composer input[type=file]{display:none}
 .typing{font-size:12px;color:var(--muted);height:16px}
 .stars button{font-size:20px;background:none;border:0;cursor:pointer;color:var(--muted);padding:0 2px}.stars button.on{color:#f5a623}
-@media(max-width:720px){.layout{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{max-height:34vh}.chat .card{padding:12px}}
+@media(max-width:720px){.layout.show{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{max-height:34vh}.chat .card{padding:12px}}
 """
 
 APP = """
 <div class="who"><span><b id="whoName">{NAME}</b> <span class="tag" id="whoMode">{MODE}</span></span>
-<form method="post" action="/support-agent/leave"><button type="submit">not you? / start over</button></form></div>
+<form method="post" action="/support-agent/leave"><button type="submit">not you? / start over</button></form>
+<button type="button" class="reqbtn" id="reqBtn" style="display:none" onclick="toggleList()">My requests</button></div>
 <div class="layout {MODE}" id="layout">
 <aside class="side" id="side"><button class="btn primary" onclick="newConv()">＋ New conversation</button><h4>My requests</h4><div class="list" id="tlist"><div class="sys">Loading…</div></div></aside>
 <section class="main">
@@ -475,8 +477,10 @@ function setHead(t){const st=document.getElementById('hStatus'),S=document.getEl
  if(t.status==='resolved'){S.style.display='';S.innerHTML='<span class="muted" style="font-size:12px">How did we do?</span> '+[1,2,3,4,5].map(n=>`<button class="${t.rating&&n<=t.rating?'on':''}" onclick="rate(${n})">★</button>`).join('');}else{S.style.display='none';}}
 function newConv(){cur=null;setHead(null);log.innerHTML='<div class="sys">Describe your problem or request. Photos of error screens help.<br>Each new topic becomes its own request; you will see it on the left.</div>';markList();T.focus();}
 document.getElementById('hello').innerHTML=document.getElementById('hello').innerHTML;
+function toggleList(){const L=document.getElementById('layout');L.classList.toggle('show');document.getElementById('reqBtn').classList.toggle('on',L.classList.contains('show'));}
 function markList(){document.querySelectorAll('.side .it').forEach(b=>b.classList.toggle('on',Number(b.dataset.id)===cur));}
 async function loadTickets(){if(MODE!=='client')return;const r=await fetch(B+'/tickets');if(!r.ok)return;tickets=await r.json();
+ const rb=document.getElementById('reqBtn');rb.style.display='';const op=tickets.filter(t=>t.status!=='resolved').length;rb.textContent='My requests'+(op?' · '+op+' open':'');
  const L=document.getElementById('tlist');L.innerHTML=tickets.length?tickets.map(t=>`<button class="it" data-id="${t.id}" onclick="openTicket(${t.id})"><b>#${t.id} ${esc(t.title)}</b><small><span class="tag ${t.status}">${LAB[t.status]||t.status}</span>${t.risk&&t.risk.pct>=100?'<span class="tag risk">SLA</span>':''}<span>${fmt(t.last_at||t.created_at)}</span></small></button>`).join(''):'<div class="sys">No requests yet.</div>';markList();}
 async function openTicket(id){const r=await fetch(B+'/tickets/'+id);if(!r.ok)return;const t=await r.json();cur=id;setHead(t);log.innerHTML='';t.messages.forEach(m=>add(m.who,m.text,m.at));markList();}
 async function send(e){e.preventDefault();const text=T.value.trim();const f=IMG.files[0];if(!text&&!f)return;
@@ -484,7 +488,7 @@ async function send(e){e.preventDefault();const text=T.value.trim();const f=IMG.
  TY.textContent='Service desk is typing…';
  try{const r=await fetch(B+'/say',{method:'POST',body:fd});const j=await r.json();TY.textContent='';
   if(!r.ok){add('desk',j.error||'Something went wrong. Please try again.');return;}add('desk',j.text,null,null,j.ticket);
-  if(j.identified&&MODE!=='client'){MODE='client';document.getElementById('layout').className='layout client';document.getElementById('whoName').textContent=j.name;document.getElementById('whoMode').textContent='client';loadTickets();}
+  if(j.identified&&MODE!=='client'){MODE='client';document.getElementById('whoName').textContent=j.name;document.getElementById('whoMode').textContent='client';loadTickets();}
   if(cur&&j.status){const t=tickets.find(x=>x.id===cur);setHead({...(t||{}),id:cur,title:(t||{}).title,status:j.status,channel:'web'});}
   loadTickets();}
  catch(err){TY.textContent='';add('desk','Could not reach the desk. Please try again.');}}
