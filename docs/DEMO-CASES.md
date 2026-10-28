@@ -41,3 +41,36 @@ Cases 6 (console), 10, 12, 14, 15 and the three channels are real already.
 Every connector is registered in Settings → Connectors with the tiers that may use it; the agents call
 `mcp.<connector>.<tool>` through the same authority gate as built-in tools. README must list, per case,
 "real" or "simulated" at submission time.
+
+## Lab architecture — what the real environment is made of
+
+Goal: a small but real environment that judges can trigger from the support page and watch change.
+
+| Layer | Real system | Who provides the MCP server | Desk tools (tier) | Cost |
+|---|---|---|---|---|
+| 1. Closed network | Cloud VMs reachable only over VPN (Hetzner / Oracle Always Free) | — (infrastructure) | — | 0–8 €/month |
+| 2. VPN access | **Tailscale** (API) | **ours, thin**: `vpn_status`, `renew_vpn_key`, `authorize_device`, `list_devices` | L1/L2 | free (3 users / 100 devices) |
+| 3. Employee PCs | Windows VMs on the network (Azure credit / AWS free tier) or a real laptop | **ours: endpoint agent** — `net_test`, `dns_reset`, `disk_report`, `patch_status`, `printer_queue_reset`, `lock_screen`, `driver_rollback`; runs as a service, reaches the desk over Tailscale; **also sends heartbeat and alerts** (offline, disk/CPU/memory thresholds, service crash, critical event-log entries, patch age, VPN state) → proactive tickets | L1/L2 | free |
+| 3b. Live support access | **MeshCentral** (self-hosted; alternatives RustDesk, Tactical RMM) — remote desktop, terminal, files, inventory, events, web API | existing product; the desk gets a "Connect" button on the ticket and logs engineer sessions | human engineers | free, open source |
+| 4. Identity | **Microsoft Entra ID** (free tier tenant) | **ours, thin, over Graph**: `find_user`, `reset_password`, `revoke_sessions`, `add_to_group`, `disable_user` (community alternative: ms-365-mcp-server) | L1/L3 | free |
+| 5. Licences / mail | **Microsoft 365** (1-month trial) | same Graph MCP: `assign_license`, `mailbox_status` | L1/L2 | trial, then ~6 $/user/month |
+| 6. Device management | **Intune** (in the M365 trial) | same Graph MCP: `device_compliance`, `sync_device`, `remote_lock` | L2 | trial, then paid |
+| 7. Security | **Defender for Endpoint / Office 365** (trial) | Microsoft's Sentinel/Defender MCP (preview) or ours over the Graph security API: `isolate`, `release`, `run_scan`, `quarantine_mail`, `block_sender` | L2 | trial, then paid |
+| 8. Servers | 1–2 Linux VMs on the network | **ours**: `inventory`, `snapshot` (cloud API), `apply_patch`, `verify`, `rollback` | L3 | VM cost only |
+| 9. Vendor / courier / SAP | none | stays simulated; human step | L4/L3 | — |
+
+Every MCP server is a small Python process registered in Settings → Connectors with the tiers that may use it;
+the agents call `mcp.<connector>.<tool>` through the same authority gate as built-in tools.
+
+During the hackathon the whole lab costs between nothing and a few euros (VMs); only M365/Defender licences and
+VMs cost money afterwards.
+
+### Build order
+1. Tailscale account + one VM as the "employee laptop" (Tailscale client + endpoint agent) → case 1 real, case 13 real, judge-triggerable with a lab status page.
+2. Endpoint agent alerts (heartbeat, thresholds, event log) → proactive tickets from a real machine.
+3. MeshCentral on the lab VM → "Connect" on escalated tickets, engineer sessions logged.
+4. Entra ID free tenant + Graph MCP → cases 2, 8, 9 (and 16's session revoke) real.
+5. M365 trial (licences) → case 4; Intune → device tools.
+6. Defender trial → cases 17, 18.
+7. Linux server VM + patch tools → case 7.
+8. Fixed-domain deployment of the desk itself (no tunnel) and the WhatsApp go-live.
