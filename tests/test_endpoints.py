@@ -164,3 +164,18 @@ def test_background_update_finishing_resumes_the_ticket(desk, monkeypatch):
     beat("finished 2026-10-28 18:05:00Z; reboot required: False\nDefender: succeeded")
     time.sleep(0.2)
     assert len(started) == 1                               # reported once
+
+
+def test_proactive_finding_messages_the_owner_first(desk):
+    from app.db import Outbound
+    from app.llm import Reply, ScriptedLLM, set_llm
+    from app.main import app
+    from app.proactive import run_proactive_checks
+    token = _enrol(desk, "LT-301", "E1001")
+    TestClient(app).post("/agent/heartbeat", json={"metrics": {**METRICS, "disk_used_pct": 95}},
+                         headers={"Authorization": f"Bearer {token}"})
+    set_llm(ScriptedLLM([Reply(text="Diskiniz %95 dolu; temizleyeyim mi?")] * 5))
+    opened = run_proactive_checks()
+    with session() as db:
+        msgs = [o for o in db.query(Outbound).all() if o.ticket_id in opened]
+        assert any("temizleyeyim" in o.text and o.to == "+15551110001" for o in msgs)

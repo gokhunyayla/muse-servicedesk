@@ -63,8 +63,11 @@ def run_proactive_checks() -> list[int]:
             if dup:
                 continue
             title = f"[Proactive:{f['kind']}] {f['hostname']}"
-            ticket, _ = handle_message(db, f["phone"], f"{f['text']} Owner: {f['employee_no']}. "
-                                                       f"Fix what you can remotely, then tell the employee.", force_new=True)
+            ticket, answer = handle_message(db, f["phone"], f"{f['text']} Owner: {f['employee_no']}. "
+                                                            f"Fix what you can remotely, then tell the employee.", force_new=True)
             ticket.title = title
+            if answer:                               # nobody wrote in: the desk speaks first, on the owner's channel
+                from app.db import Outbound
+                db.add(Outbound(to=f["phone"], ticket_id=ticket.id, text=answer))
             opened.append(ticket.id)
     return opened
