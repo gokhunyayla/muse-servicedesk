@@ -111,6 +111,18 @@ CHANNEL_NAMES = {"tr": {"whatsapp": "WhatsApp", "web": "destek sayfası", "email
                  "en": {"whatsapp": "WhatsApp", "web": "the support page", "email": "e-mail", "api": "the API"}}
 
 
+def _most_recent_conversation(tickets: list, minutes: int = RESUME_MINUTES) -> Ticket | None:
+    """Of several open tickets, the one with the latest message, if that was within `minutes`."""
+    from datetime import timedelta
+    from app.db import _now
+    best, best_at = None, None
+    for t in tickets:
+        msgs = [e for e in t.events if e.kind == "message"]
+        if msgs and (best_at is None or msgs[-1].at > best_at):
+            best, best_at = t, msgs[-1].at
+    return best if best is not None and best_at >= _now() - timedelta(minutes=minutes) else None
+
+
 def recent_switch(db, requester: str, channel: str) -> Ticket | None:
     """An open ticket the employee was working on, on another channel, within the last hour."""
     from datetime import timedelta
@@ -502,11 +514,15 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     elif short and RATING_RE.match(text) and _closing_exchange(db, requester, text) is not None:
         ticket = _closing_exchange(db, requester, text)      # a bare "5" right after a close is the rating
     elif len(open_tickets) > 1 and short:
-        # several tickets open and a short answer: it must name the ticket, otherwise ask
+        # several tickets open and a short answer: a number names the ticket; otherwise the one the desk was
+        # just talking about (latest message within the hour) is meant; ask only when nothing is recent
         named = [t for t in open_tickets if re.search(rf"(?<!\d)#?{t.id}(?!\d)", text)]
+        recent = _most_recent_conversation(open_tickets)
         if named:
             ticket = named[0]
             text = re.sub(rf"#?{ticket.id}", "", text, count=1).strip() or text
+        elif recent is not None:
+            ticket = recent
         else:
             choices = "\n".join(f"#{t.id}: {t.title[:60]}" for t in open_tickets)
             answer = tr_("which_ticket", detect(text, None) or ticket_lang(open_tickets[0]), choices=choices, first=open_tickets[0].id)

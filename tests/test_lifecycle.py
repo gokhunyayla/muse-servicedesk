@@ -177,12 +177,12 @@ def test_unanswered_confirmation_is_auto_closed_after_the_reminder():
 def test_system_texts_follow_the_employees_language():
     from app.i18n import detect
     assert detect("Hello, I cannot join the network") == "en" and detect("vpn bağlanmıyor") == "tr"
-    llm = ScriptedLLM([Reply(text="Looking."), Reply(text="NEW"), Reply(text="Looking.")])
+    llm = ScriptedLLM([Reply(text="Looking."), Reply(text="NEW"), Reply(text="Looking."), Reply(text="Great, closing.")])
     set_llm(llm)
     with session() as db:
         handle_message(db, "+905551110001", "My VPN does not connect from home")
         handle_message(db, "+905551110001", "Also the printer is not printing anything at all")
-        _, answer = handle_message(db, "+905551110001", "yes solved")
-        assert answer.startswith("You have several open tickets")
-        _, answer = handle_message(db, "+905551110001", "#2 close")
+        t, answer = handle_message(db, "+905551110001", "yes solved")           # goes to the printer, the ticket just discussed
+        assert t.id == 2 and "Great" in answer
+        _, answer = handle_message(db, "+905551110001", "#1 close")
         assert "closed at your request" in answer

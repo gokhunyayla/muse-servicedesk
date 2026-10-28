@@ -112,6 +112,24 @@ def test_short_replies_never_trigger_classification():
     assert len(llm.requests) == 2          # no extra SAME/NEW call for a 2-word message
 
 
+def test_short_reply_goes_to_the_ticket_just_discussed_and_asks_only_when_nothing_is_recent():
+    from datetime import timedelta
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum."), Reply(text="NEW"), Reply(text="Yazıcıya bakıyorum."), Reply(text="Tamam, kapatıyorum.")]))
+    with session() as db:
+        a, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor, evden çalışamıyorum")
+        b, _ = handle_message(db, "+905551110001", "Bir de yazıcı hiç çıktı vermiyor, kuyrukta kalıyor")
+        t, answer = handle_message(db, "+905551110001", "evet çözüldü")          # no number: the printer, the one just discussed
+        assert t.id == b.id and "hangisi" not in answer
+    set_llm(ScriptedLLM([Reply(text="ok")]))
+    with session() as db:
+        for tk in db.query(Ticket).all():                                        # hours later: nothing is "just discussed"
+            for e in tk.events:
+                e.at = e.at - timedelta(hours=3)
+            tk.status = "open"
+        t, answer = handle_message(db, "+905551110001", "evet çözüldü")
+        assert "hangisi" in answer
+
+
 def test_short_reply_with_two_open_tickets_asks_which_one_then_routes_by_number():
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
     with session() as db:
@@ -120,17 +138,15 @@ def test_short_reply_with_two_open_tickets_asks_which_one_then_routes_by_number(
     with session() as db:
         b, _ = handle_message(db, "+905551110001", "Bir de yazıcı hiç çıktı vermiyor, kuyrukta kalıyor")
         aid, bid = a.id, b.id
-    llm = ScriptedLLM([Reply(text="should not be called")])
-    set_llm(llm)
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("close_ticket", resolution="printer ok")]), Reply(text="Kapandı.")]))
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", "evet çözüldü")
-        assert "hangisi" in answer and f"#{aid}" in answer and f"#{bid}" in answer
-    assert llm.requests == []                      # no model call for the disambiguation
+        t, answer = handle_message(db, "+905551110001", "evet çözüldü")        # the printer: the ticket just discussed
+        assert t.id == bid and "hangisi" not in answer
     set_llm(ScriptedLLM([Reply(tool_calls=[call("close_ticket", resolution="VPN ok")]), Reply(text="Kapandı.")]))
     with session() as db:
-        t, _ = handle_message(db, "+905551110001", f"#{aid} çözüldü")
+        t, _ = handle_message(db, "+905551110001", f"#{aid} çözüldü")            # a number still picks the ticket explicitly
         assert t.id == aid and t.status == "resolved"
-        assert db.get(Ticket, bid).status == "open"
+        assert db.get(Ticket, bid).status == "resolved"                            # closed by the earlier "evet çözüldü"
 
 
 def test_burst_of_similar_reports_is_linked_at_intake_and_the_agent_is_briefed():
