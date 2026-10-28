@@ -278,7 +278,8 @@ seg('period','p',period,v=>period=v);seg('statusSeg','s',status,v=>status=v);seg
 const qEl=$('#q');if(qEl){qEl.oninput=()=>{q=qEl.value.trim();renderList();};}   // filters the loaded list in place, no refetch
 function pick(o){location.href='/tickets?period='+period+(o?'&owner='+o:'');}
 const TIERS=[['','All tickets'],['L1','L1 · first contact'],['L2','L2 · devices & network'],['L3','L3 · servers & security'],['L4','L4 · vendors & logistics'],['human','Human engineer']];
-async function load(){
+let listSig='';
+async function load(force){
  const qp='?period='+period+(owner?'&owner='+owner:'')+(status?'&status='+status:'');
  $('#scope').textContent=(period==='all'?'all time':'this '+period.replace('today','day'));
  if(MODE==='dashboard'){
@@ -311,10 +312,11 @@ async function load(){
      <small>Looked at ${cl} emerging cluster${cl===1?'':'s'} and ${sig} failure signal${sig===1?'':'s'}${r.finished_at?' · took '+dur((new Date(r.finished_at)-new Date(r.started_at))/1000):''}</small></div></details>`}).join(''):'<small>No runs yet. Press Run now, or switch the mode to automatic in Settings.</small>';
    document.querySelectorAll('.run').forEach(el=>{el.open=openRuns.has(el.dataset.id);el.ontoggle=()=>{el.open?openRuns.add(el.dataset.id):openRuns.delete(el.dataset.id)}});}catch(e){}
  }else{
-  allTs=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
+  const fresh=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
+  const sig=JSON.stringify(fresh),changed=sig!==listSig;listSig=sig;allTs=fresh;
   $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');$('#scope').textContent+=' · '+allTs.length+' tickets';
-  renderList();
-  updateSel();if(cur)show(cur,true);else if(P.get('id')){show(+P.get('id'));}
+  if(changed||!$('#tickets').children.length){const y=$('#tickets').scrollTop;renderList();$('#tickets').scrollTop=y;}   // redraw only when something changed, keep the scroll
+  updateSel();if(cur){if(changed||force)show(cur,true);}else if(P.get('id')){show(+P.get('id'));}
  }
  $('#upd').textContent='updated '+new Date().toLocaleTimeString();
 }
@@ -404,5 +406,5 @@ async function setStatus(id,status){if(status==='resolved'){closeTicket(id);retu
 function closeTicket(id){$('#cTitle').textContent='Close #'+id;$('#closeModal').dataset.id=id;$('#closeModal').classList.add('on');$('#cNote').focus();}
 async function doClose(){const id=$('#closeModal').dataset.id;await fetch('/tickets/'+id+'/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution:$('#cNote').value.trim()||'closed by the service desk'})});
  closeModal('closeModal');await load();show(id);}
-load();setInterval(load,5000);
+load(true);setInterval(()=>load(false),5000);
 </script></body></html>"""
