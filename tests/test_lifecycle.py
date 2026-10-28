@@ -186,3 +186,12 @@ def test_system_texts_follow_the_employees_language():
         assert t.id == 2 and "Great" in answer
         _, answer = handle_message(db, "+905551110001", "#1 close")
         assert "closed at your request" in answer
+
+
+def test_agent_is_told_not_to_repeat_the_no_procedure_line():
+    from app.agents import AGENTS
+    set_llm(ScriptedLLM([Reply(text="Bu konuda hazır bir prosedürümüz yok, genel IT bilgimle yardımcı oluyorum. Güç ışığı yanıyor mu?")]))
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", "bilgisayar açılmıyor")
+        prompt = AGENTS["L1"].system_prompt(t, db)
+        assert "Do NOT say it again" in prompt and "say ONCE" in prompt

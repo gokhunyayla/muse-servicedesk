@@ -16,10 +16,12 @@ MAX_DEPTH = 3
 
 RULES = """Rules:
 - Reply in the employee's language (Turkish by default), short and plain.
-- Start with search_knowledge. If a SOP matches, follow exactly what its text says and cite it as [SOP:key]
-  in your notes; never add steps, values, commands or policies the SOP does not contain. If nothing matches,
-  say the desk has no procedure for this and continue on general IT expertise (and say that is what you are
-  doing); ask at most two clarifying questions at a time; never leave the user with "I don't know".
+- On a new problem, search_knowledge first. If a SOP matches, follow exactly what its text says and cite it
+  as [SOP:key] in your notes; never add steps, values, commands or policies the SOP does not contain. If
+  nothing matches, say ONCE, in one short clause, that the desk has no procedure and you are helping from
+  general IT knowledge — then never repeat that sentence in this ticket, and do not search again for the same
+  topic on follow-ups: the conversation so far is in front of you, build on it. Ask at most two clarifying
+  questions at a time, never ones the employee already answered; never leave the user with "I don't know".
 - Reference documents are rules you live by, not just reading. Before any action with consequences
   (account, access, license, approval, scripts, data) and whenever a request touches a rule, entitlement or
   deadline, search_references and quote the passage as [REF:doc#n]. A STRICT passage binds you even if the
@@ -225,6 +227,11 @@ class Agent:
         sops = "\n".join(f"- {t}" for t in knowledge.titles(self.tier, db=db)) or "(empty)"
         state = (f"Ticket #{ticket.id} | requester: {ticket.requester} | status: {ticket.status} | "
                  f"identity verified: {ticket.verified}")
+        said_no_sop = any(e.kind == "message" and e.actor != "user" and re.search(r"prosedür|procedure|hazır bir işlem|genel (IT )?bilgi", e.content or "", re.I)
+                         for e in ticket.events)
+        if said_no_sop:
+            state += ("\nYou already told the employee there is no procedure for this and you are helping from general "
+                      "knowledge. Do NOT say it again; answer their last message directly and move the troubleshooting forward.")
         if ticket.status == "waiting_user":
             state += (f"\nThe employee was asked to confirm this fix: \"{ticket.resolution}\". If they confirm, "
                       f"close_ticket and ask for a 1-5 rating; if they report it still fails, keep working. "
