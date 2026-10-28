@@ -272,7 +272,10 @@ class Agent:
             rec = systems.get_user(owners[0]) or {}
             state += (f"\nThe directory says this phone/address belongs to {rec.get('name', '?')} ({owners[0]}). The employee "
                       f"is writing about themselves: use {owners[0]} for every action and never another employee number "
-                      f"mentioned earlier in the conversation.")
+                      f"mentioned earlier in the conversation."
+                      + ("" if rec.get("birth_year") else
+                         f" The directory holds no birth year: do NOT ask for employee number or birth year; call "
+                         f"verify_identity with employee_no {owners[0]} and birth_year 0 (the number they write from is the check)."))
         said_no_sop = any(e.kind == "message" and e.actor != "user" and re.search(r"prosedür|procedure|hazır bir işlem|genel (IT )?bilgi", e.content or "", re.I)
                          for e in ticket.events)
         if said_no_sop:
