@@ -658,6 +658,7 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <h3>Incoming (IMAP)</h3><p class="muted">The desk reads this mailbox, opens or continues tickets and answers by mail. Subject tags like <code>[#12]</code> keep a thread on its ticket. Only mail that arrives after enabling is read.</p>
 <form method="post" action="/settings/email">
 <div class="srow"><div><b>Enabled</b></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if ec["enabled"] else ""} {dis}> on</label></div></div>
+<div class="srow"><div><b>Mailbox</b><small>Own mailbox over IMAP/SMTP (settings above), or the Microsoft 365 mailbox configured under <a href="/settings?tab=connectors">Connectors</a> (Graph; also used for sending)</small></div><div class="min"><select name="provider" {dis}><option value="imap" {"selected" if ec.get("provider", "imap") != "graph" else ""}>IMAP / SMTP</option><option value="graph" {"selected" if ec.get("provider") == "graph" else ""}>Microsoft 365 (Graph)</option></select></div></div>
 <div class="srow"><div><b>IMAP host</b><small>e.g. imap.gmail.com, outlook.office365.com</small></div><div class="min"><input name="imap_host" value="{_esc(ec["imap_host"])}" style="width:260px" {dis}></div></div>
 <div class="srow"><div><b>Port</b><small>SSL</small></div><div class="min"><input name="imap_port" type="number" value="{ec["imap_port"]}" style="width:100px" {dis}></div></div>
 <div class="srow"><div><b>Mailbox user</b><small>the desk's address</small></div><div class="min"><input name="user" value="{_esc(ec["user"])}" style="width:260px" {dis}></div></div>
@@ -667,8 +668,24 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 {('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Test connection</button> <button class="btn primary slim" type="submit">Save e-mail</button></div>' if admin else '')}</form>
 <form method="post" action="/settings/secrets?tab=email">{imap_row}{('<div class="row end"><button class="btn primary slim" type="submit">Save password</button></div>' if admin else '')}</form>"""
     elif tab == "connectors":
-        from app import connectors
+        from app import connectors, graph, vault
         rows = connectors.listing()
+        gc = graph.config()
+        dis = "" if admin else "disabled"
+        gst = vault.status("GRAPH_CLIENT_SECRET")
+        gsec = ('<span class="tag active">configured</span> <small class="muted">…' + _esc(gst["hint"]) + '</small>') if gst["configured"] else '<span class="tag disabled">not set</span>'
+        gshown = ("•" * 28 + gst["hint"]) if gst["configured"] else ""
+        m365 = f"""<h3>Microsoft Entra ID / Microsoft 365 <small class="muted">built in</small></h3>
+<p class="muted">One app registration with application permissions. When enabled, the directory tools the agents already have (find the employee, verify, reset password, revoke sessions, licences, groups, on/offboarding) act on the real tenant, and the e-mail channel can use a Microsoft 365 mailbox (Settings → E-mail → Mailbox).</p>
+<form method="post" action="/settings/graph">
+<div class="srow"><div><b>Enabled</b><small>Off = simulated directory</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if gc["enabled"] else ""} {dis}> on</label></div></div>
+<div class="srow"><div><b>Tenant ID</b><small>Entra → Overview</small></div><div class="min"><input name="tenant" value="{_esc(gc["tenant"])}" style="width:300px;font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}></div></div>
+<div class="srow"><div><b>Client ID</b><small>App registrations → the desk's app</small></div><div class="min"><input name="client_id" value="{_esc(gc["client_id"])}" style="width:300px;font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}></div></div>
+<div class="srow"><div><b>Client secret</b><small>Certificates &amp; secrets; stored encrypted</small><div style="margin-top:4px">{gsec}</div></div><div class="min"><input name="GRAPH_CLIENT_SECRET" type="text" autocomplete="off" spellcheck="false" value="{_esc(gshown)}" data-shown="{_esc(gshown)}" onfocus="if(this.value===this.dataset.shown)this.value=''" onblur="if(!this.value)this.value=this.dataset.shown" placeholder="paste a new secret to replace" style="width:300px;font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}></div></div>
+<div class="srow"><div><b>Desk mailbox</b><small>Optional: a Microsoft 365 mailbox the desk reads and sends from</small></div><div class="min"><input name="mailbox" value="{_esc(gc["mailbox"])}" placeholder="support@company.com" style="width:300px" {dis}></div></div>
+<div class="srow"><div><b>Account domain</b><small>UPN domain for accounts the desk creates (empty = tenant default)</small></div><div class="min"><input name="domain" value="{_esc(gc["domain"])}" placeholder="company.com" style="width:300px" {dis}></div></div>
+{_alert('', info)}{('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Save &amp; test</button> <button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
+<h3>MCP connectors</h3>"""
         def ccard(c):
             st = ('<span class="tag active">connected</span>' if c["last_test_ok"] else ('<span class="tag disabled">failed</span>' if c["last_test_ok"] is False else '<span class="tag">untested</span>'))
             tools = ", ".join(c["tools"][:12]) + (f" … +{len(c['tools']) - 12}" if len(c["tools"]) > 12 else "")
@@ -676,7 +693,7 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <small>{_esc(c['url'] or c['command'])} · tiers {', '.join(c['tiers']) or '—'} · {'secrets set' if c['has_secrets'] else 'no secrets'}{(' · tested ' + c['last_test_at'][:16].replace('T', ' ')) if c['last_test_at'] else ''}</small></div>
 {('<p class="muted" style="margin:6px 0 0">Tools: ' + _esc(tools) + '</p>') if c['tools'] else ''}{('<p class="alert bad" style="margin-top:6px">' + _esc(c['last_error']) + '</p>') if c['last_error'] else ''}
 <div class="row end" style="margin-top:8px">{('<button class="btn" onclick="testConn(' + str(c['id']) + ',this)">Test</button> <button class="btn" onclick="editConn(' + str(c['id']) + ')">Edit</button> <button class="btn" onclick="toggleConn(' + str(c['id']) + ',' + ('false' if c['enabled'] else 'true') + ')">' + ('Disable' if c['enabled'] else 'Enable') + '</button> <button class="btn" onclick="delConn(' + str(c['id']) + ')">Remove</button>') if admin else ''}</div></div>"""
-        body = f"""<p class="muted">MCP servers the agents may use as tools: Microsoft 365 / Azure, Cisco, firewalls, ITSM — anything with an MCP endpoint. A connector's tools appear to the chosen tiers as <code>mcp.&lt;name&gt;.&lt;tool&gt;</code>; every call lands on the ticket trail. Credentials are stored encrypted.</p>
+        body = m365 + f"""<p class="muted">MCP servers the agents may use as tools: Cisco, firewalls, ITSM — anything with an MCP endpoint. A connector's tools appear to the chosen tiers as <code>mcp.&lt;name&gt;.&lt;tool&gt;</code>; every call lands on the ticket trail. Credentials are stored encrypted.</p>
 <div class="pagehead" style="margin-bottom:10px"><small class="muted">{len(rows)} connector(s)</small>{('<button class="btn primary slim" onclick="newConn()">+ Add connector</button>') if admin else ''}</div>
 {''.join(ccard(c) for c in rows) or '<p class="muted">No connectors yet.</p>'}
 <div class="modal" id="connModal"><div class="box" style="width:min(680px,100%)"><h3 id="cTitle">Add connector</h3>
@@ -817,6 +834,7 @@ async def settings_email(request: Request, admin: User = Depends(admin_user)):
     value["enabled"] = form.get("enabled") == "1"
     for k in ("imap_host", "user", "folder", "allowed"):
         value[k] = str(form.get(k, "")).strip()
+    value["provider"] = "graph" if form.get("provider") == "graph" else "imap"
     value["last_uid"] = int(get_setting("email", {}).get("last_uid") or 0)
     for k in ("imap_port", "poll_minutes"):
         try:
@@ -834,6 +852,33 @@ async def settings_email(request: Request, admin: User = Depends(admin_user)):
         ok, msg = test_email()
         return RedirectResponse(f"/settings?tab=email&info={quote(("E-mail OK: " if ok else "E-mail failed: ") + msg[:150])}", 303)
     return RedirectResponse("/settings?tab=email&info=E-mail+saved", 303)
+
+
+@router.post("/settings/graph")
+async def settings_graph(request: Request, admin: User = Depends(admin_user)):
+    from app import graph, vault
+    from app.sla import get_setting, put_setting
+    check_origin(request)
+    form = await request.form()
+    cur = get_setting("graph", {})
+    value = {**graph.DEFAULT_GRAPH, **cur}
+    value["enabled"] = form.get("enabled") == "1"
+    for k in ("tenant", "client_id", "mailbox", "domain"):
+        value[k] = str(form.get(k, "")).strip()
+    put_setting("graph", value)
+    sec = str(form.get("GRAPH_CLIENT_SECRET", "")).strip()
+    if sec and not sec.startswith("•") and sec != vault.get("GRAPH_CLIENT_SECRET"):
+        vault.set_many({"GRAPH_CLIENT_SECRET": sec})
+    with session() as db:
+        audit(db, admin.email, "settings.graph", detail=f"enabled={value['enabled']} tenant={value['tenant'][:8]} mailbox={value['mailbox']}", ip=_ip(request))
+    if form.get("action") == "test":
+        try:
+            r = graph.test()
+            msg = f"Connected: {r['tenant']} · {r['users']} users · domains {', '.join(r['domains'][:3])}" + (f" · mailbox {r['mailbox']}" if "mailbox" in r else "")
+        except Exception as e:  # noqa: BLE001
+            msg = "Microsoft 365 failed: " + str(e)[:160]
+        return RedirectResponse(f"/settings?tab=connectors&info={quote(msg)}", 303)
+    return RedirectResponse("/settings?tab=connectors&info=Microsoft+365+saved", 303)
 
 
 @router.post("/settings/supervisor")

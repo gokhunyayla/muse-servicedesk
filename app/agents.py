@@ -488,7 +488,7 @@ def _approval_decision(db, requester: str, text: str):
     m = APPROVAL_RE.search(text)
     if not m:
         return None
-    mine = [e for e, u in systems.USERS.items() if u.get("phone") == requester]
+    mine = systems.employees_by_phone(requester)
     if not mine:
         return None
     pending = (db.query(Approval).filter(Approval.approver.in_(mine), Approval.decision.is_(None))
@@ -677,7 +677,7 @@ def handle_approval(db, approval_id: int, decision: str, by_phone: str) -> tuple
     if a is None or a.decision is not None:
         raise ValueError("unknown or already decided approval")
     from app import systems
-    approver = systems.USERS.get(a.approver, {})
+    approver = systems.get_user(a.approver) or {}
     if approver.get("phone") != by_phone:
         raise PermissionError("only the assigned approver can decide")
     a.decision, a.decided_at = decision, _now()

@@ -9,23 +9,23 @@ version with the simulated cases; the database dump of that run sits in `data/ar
 | # | Case | Channel / model path | Simulated today | Real setup that makes it real |
 |---|------|----------------------|-----------------|-------------------------------|
 | 1 | VPN not connecting | WhatsApp → L1 → endpoint tools | `run_script` on a device table | **Endpoint agent on the laptop** (MCP server: VPN status, DNS reset, profile renew) |
-| 2 | Password reset by voice note | WhatsApp voice → Muse Voice → L1 → identity check | directory `USERS`, `reset_password` | **Microsoft Entra ID / AD** via MCP connector (Graph: user lookup, reset password, revoke sessions) |
+| 2 | Password reset by voice note | WhatsApp voice → Muse Voice → L1 → identity check | — | **real since v0.12: Entra ID through Graph** (`app/graph.py`: user lookup, reset password, revoke sessions) |
 | 3 | Blue-screen photo → L4 | photo → Muse Spark vision → L1 → L2 → L4 | `open_vendor_case`, `create_shipment` | Vendor portal API (Dell/HP/Lenovo warranty + case), courier API (UPS/Yurtiçi) or ITSM connector |
-| 4 | Missing / paid license | WhatsApp → L1 → approval over WhatsApp | license table | **M365 admin (Graph)**: assign licence, check availability |
+| 4 | Missing / paid license | WhatsApp → L1 → approval over WhatsApp | — | **real since v0.12: tenant SKUs + assignLicense through Graph** |
 | 5 | SAP authorisation | L1 → L3 → approval → temporary role | `sap_roles` | SAP user management API (SU01/PFCG via RFC) or ITSM request |
 | 7 | Vulnerability ("php2shell") | L3: inventory, snapshot, patch, verify, rollback | `find_vulnerable`, `snapshot`, `rollback` | **Patch/CMDB source** (Intune, Qualys, or a package inventory agent) + VM snapshot API (vSphere/Proxmox) |
-| 8 / 9 | Onboarding / offboarding | L1 → L3: account, licences, groups, sessions | `create_user`, groups, sessions | Entra ID + M365 + loaner inventory (connector) |
+| 8 / 9 | Onboarding / offboarding | L1 → L3: account, licences, groups, sessions | loaner inventory | **real since v0.12: account, groups, licences, disable, revoke sessions through Graph**; loaners stay simulated |
 | 10 | Mass outage | three similar reports → incident at intake, Supervisor merge, broadcast | nothing; real tickets | nothing — real already |
 | 11 | Software request + manager approval | WhatsApp ONAY/RET | manager phone from directory | Directory connector gives the real manager; approval stays on WhatsApp |
 | 12 | Short video / screen recording | video → frames → vision | nothing | nothing — real already |
 | 13 | Proactive maintenance | scheduler → device table → tickets | disk %, patch age, warranty date | **Endpoint agent** (disk/patch) + vendor warranty API |
 | 14 | Rating + self-written SOPs | WhatsApp → knowledge base | nothing | nothing — real already |
 | 15 | Multilingual | any channel | nothing | nothing — real already |
-| 16 | Visual compliance (sticky note) | camera frame → SAM 3.1 → owner → revoke sessions | `device_owner`, session revoke | Camera/RTSP feed + Entra "revoke sign-in sessions" |
+| 16 | Visual compliance (sticky note) | camera frame → SAM 3.1 → owner → revoke sessions | `device_owner` (camera → desk owner table) | Camera/RTSP feed; **session revoke real since v0.12 (Graph)** |
 | 17 | Malware response | L2: isolate, evidence, scan, release | `isolate`, `malware_scan`, `release` | **EDR connector** (Defender for Endpoint / CrowdStrike: isolate, scan, release) |
 | 18 | Phishing triage | L2: analyse mail, quarantine, block sender | `analyze_email`, `quarantine`, `block_sender` | **Exchange Online / Defender for O365** (Graph security API: quarantine, tenant block) |
 
-Cases 6 (console), 10, 12, 14, 15 and the three channels are real already.
+Cases 6 (console), 10, 12, 14, 15 and the three channels are real already. Since v0.12 the directory side of 2, 4, 8, 9 and 16 is real when Settings → Connectors → Microsoft 365 is enabled (Entra tenant with the cloudrium.com domain).
 
 ## Order that makes the demo most real with least work
 

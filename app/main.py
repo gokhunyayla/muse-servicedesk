@@ -171,7 +171,7 @@ def desk_opens_ticket(p: NewTicket, request: Request, user=Depends(current_user)
     who = p.requester.strip()
     contact = normalise(who) if ("@" in who or who[:1] in "+0123456789") else ""
     if not contact:
-        u = systems.USERS.get(who.upper())
+        u = systems.get_user(who.upper())
         contact = (u or {}).get("phone") or systems.user_email(who.upper()) if u else ""
     if not contact:
         raise HTTPException(422, "unknown employee: give a phone, e-mail or employee number")

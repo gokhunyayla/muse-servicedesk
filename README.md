@@ -64,12 +64,18 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 * **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
   approval over chat (`ONAY 12`), confirmation before closing, satisfaction rating, scheduled follow-ups,
   incident linking for mass outages, proactive tickets from inventory checks, escalation to a human engineer when no tier can solve it, desk-side close from the dashboard.
-* **Connectors (MCP).** Admins register MCP servers under Settings → Connectors — Microsoft 365 / Azure (Graph),
-  Cisco Meraki, firewalls, ITSM, anything with an MCP endpoint (HTTP) or a local command (stdio). Credentials are
-  stored encrypted; a connector's tools appear to the chosen tiers as `mcp.<name>.<tool>` and every call lands on the
-  ticket trail with the same authority rules as built-in tools. Tested end to end against a real stdio MCP server.
-* **Simulated enterprise systems** (`app/systems.py`) stand in for Entra/M365, Defender, SAP, the vendor
-  portal and the courier, behind the same function shapes a real connector would expose.
+* **Microsoft Entra ID / Microsoft 365, built in** (`app/graph.py`). One app registration with application
+  permissions (Settings → Connectors): the directory tools the agents already have — find the employee, verify,
+  reset password, revoke sessions, licences, groups, on/offboarding — act on the real tenant through Microsoft
+  Graph, and the e-mail channel can read and send through a Microsoft 365 mailbox (Exchange Online no longer
+  accepts password sign-in for IMAP). Switched off, the simulated directory below answers instead.
+* **Connectors (MCP).** Admins register MCP servers under Settings → Connectors — Cisco Meraki, firewalls, ITSM,
+  anything with an MCP endpoint (HTTP) or a local command (stdio). Credentials are stored encrypted; a connector's
+  tools appear to the chosen tiers as `mcp.<name>.<tool>` and every call lands on the ticket trail with the same
+  authority rules as built-in tools. Tested end to end against a real stdio MCP server.
+* **Simulated enterprise systems** (`app/systems.py`) stand in for Defender, SAP, the endpoint agent, the vendor
+  portal and the courier (and for the directory when Entra is not connected), behind the same function shapes a
+  real connector would expose.
 
 ### Where Meta's models are used
 
@@ -141,7 +147,10 @@ page at `http://localhost:1002/support-agent` runs the same agents with no publi
 
 ### Test users (simulated directory, `app/systems.py`)
 
-Identity checks ask for employee no + birth year. Say e.g. *"Ayşe Demir, E1001, 1990, TR-LT-101"*.
+With Entra connected, employees are the tenant's users: the employee number is Entra's `employeeId`, the phone
+is `mobilePhone`; a birth year is read from `extensionAttribute1` when present, otherwise identity is the
+sender binding (the number or address the employee writes from must be theirs) plus the one-time code.
+Without Entra, identity checks ask for employee no + birth year. Say e.g. *"Ayşe Demir, E1001, 1990, TR-LT-101"*.
 
 | Employee no | Name | Birth year | Device | Dept | Manager | Seeded state |
 |---|---|---|---|---|---|---|
@@ -165,7 +174,8 @@ answer them from WhatsApp.
 run.py              entry point (API + scheduler)
 app/agents.py       agent loop, tier definitions, handoffs, approvals
 app/tools.py        LLM-callable tools with per-tier authority
-app/systems.py      simulated enterprise systems (directory, EDR, mail, CMDB, vendor, courier)
+app/systems.py      company systems: directory (Entra when connected, else simulated), EDR, CMDB, vendor, courier
+app/graph.py        Microsoft Entra ID / Microsoft 365 through Graph: directory actions and the desk mailbox
 app/knowledge.py    knowledge base (SOPs, drafts)    app/references.py uploaded policies (PDF/DOCX/MD) → passages
 app/llm.py          Meta Model API client (+ scripted model for tests)
 app/voice.py        Muse Voice Transcribe            app/vision.py   SAM 3.1 + frame sampling

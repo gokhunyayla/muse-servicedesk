@@ -110,12 +110,13 @@ def _own_record(requester: str) -> tuple[str, dict] | None:
 def verify_identity(ctx: Ctx, employee_no: str, birth_year: int) -> dict:
     from datetime import timedelta
     from app.db import Setting, _now
-    u = systems.USERS.get(employee_no)
+    u = systems.get_user(employee_no)
     own = _own_record(ctx.ticket.requester)
     if own is not None and own[0] != employee_no:
         return {"ok": False, "error": f"this number/address belongs to {own[1]['name']} ({own[0]}); requests are only for "
                                       f"oneself — the other employee must write to the desk themselves, or the desk opens a ticket for them"}
-    ok = bool(u) and u["birth_year"] == int(birth_year)
+    # a real directory (Entra) may not hold a birth year: then the sender-binding above is the identity check
+    ok = bool(u) and (u["birth_year"] == int(birth_year) if u.get("birth_year") else own is not None and own[0] == employee_no)
     if ok:
         ctx.ticket.verified = True
         hours = int(verification_config().get("identity_hours") or 0)
@@ -149,7 +150,7 @@ def send_verification(ctx: Ctx, employee_no: str) -> dict:
     import secrets
     from datetime import datetime, timedelta
     from app.db import Setting, _now
-    u = systems.USERS.get(employee_no)
+    u = systems.get_user(employee_no)
     if not u:
         return {"ok": False, "error": "unknown employee"}
     requester = ctx.ticket.requester
@@ -295,7 +296,7 @@ def assign_loaner(ctx: Ctx, employee_no: str) -> dict:
 @tool("Create a courier shipment (label + pickup) to send a device to the employee.", ("L4",),
       employee_no=STR, device=STR, case_no=STR)
 def create_shipment(ctx: Ctx, employee_no: str, device: str, case_no: str) -> dict:
-    u = systems.USERS.get(employee_no)
+    u = systems.get_user(employee_no)
     if not u:
         return {"ok": False, "error": "unknown employee"}
     return {"ok": True, **systems.create_shipment(u["name"], device, case_no)}
@@ -349,7 +350,7 @@ def rollback_patch(ctx: Ctx, snapshot_id: str) -> dict:
 # ---- identity, licenses, groups (directory / M365) -----------------------------------------
 
 def _user(employee_no: str) -> dict | None:
-    return systems.USERS.get(employee_no)
+    return systems.get_user(employee_no)
 
 
 @tool("Show an employee's directory record: department, manager, licenses, groups, SAP roles.",
@@ -363,17 +364,21 @@ def get_employee(ctx: Ctx, employee_no: str) -> dict:
 
 @tool("List licenses available in the catalog and whether each needs manager approval.", ("L1",))
 def list_licenses(ctx: Ctx) -> dict:
-    return {"ok": True, "catalog": systems.LICENSE_CATALOG}
+    return {"ok": True, "catalog": systems.license_catalog()}
 
 
 @tool("Assign a license. Licenses marked needs_approval require an approved request first.",
       ("L1",), employee_no=STR, license=STR)
 def assign_license(ctx: Ctx, employee_no: str, license: str) -> dict:
     u = _user(employee_no)
-    if not u or license not in systems.LICENSE_CATALOG:
+    catalog = systems.license_catalog()
+    if not u or license not in catalog:
         return {"ok": False, "error": "unknown employee or license"}
-    if systems.LICENSE_CATALOG[license] and not _approved(ctx, license):
+    if catalog[license] and not _approved(ctx, license):
         return {"ok": False, "error": f"{license} needs manager approval; use request_manager_approval first"}
+    g = systems._graph()
+    if g:
+        return {"ok": True, "employee_no": employee_no, "licenses": g.assign_license(employee_no, license)}
     if license not in u["licenses"]:
         u["licenses"].append(license)
     return {"ok": True, "employee_no": employee_no, "licenses": u["licenses"]}
@@ -384,6 +389,9 @@ def revoke_license(ctx: Ctx, employee_no: str, license: str) -> dict:
     u = _user(employee_no)
     if not u:
         return {"ok": False, "error": "unknown employee"}
+    g = systems._graph()
+    if g:
+        return {"ok": True, "licenses": g.revoke_license(employee_no, license)}
     if license in u["licenses"]:
         u["licenses"].remove(license)
     return {"ok": True, "licenses": u["licenses"]}
@@ -395,6 +403,9 @@ def add_to_group(ctx: Ctx, employee_no: str, group: str) -> dict:
     u = _user(employee_no)
     if not u:
         return {"ok": False, "error": "unknown employee"}
+    g = systems._graph()
+    if g:
+        return {"ok": True, "groups": g.add_to_group(employee_no, group)}
     if group not in u["groups"]:
         u["groups"].append(group)
     return {"ok": True, "groups": u["groups"]}
@@ -406,25 +417,31 @@ def remove_from_groups(ctx: Ctx, employee_no: str, group: str | None = None) -> 
     u = _user(employee_no)
     if not u:
         return {"ok": False, "error": "unknown employee"}
-    u["groups"] = [g for g in u["groups"] if group and g != group]
+    g = systems._graph()
+    if g:
+        return {"ok": True, "groups": g.remove_from_groups(employee_no, group)}
+    u["groups"] = [x for x in u["groups"] if group and x != group]
     return {"ok": True, "groups": u["groups"]}
 
 
 @tool("Create a directory account and mailbox for a new hire.", ("L1",), name=STR, department=STR,
       manager_employee_no=STR, phone=STR)
 def create_account(ctx: Ctx, name: str, department: str, manager_employee_no: str, phone: str) -> dict:
-    if manager_employee_no not in systems.USERS:
+    if not systems.get_user(manager_employee_no):
         return {"ok": False, "error": "unknown manager"}
+    g = systems._graph()
+    if g:
+        emp, upn, pw = g.create_user(name, department, manager_employee_no, phone)
+        return {"ok": True, "employee_no": emp, "upn": upn, "initial_password": pw, "must_change": True}
     emp = systems.create_user(name, department, manager_employee_no, phone)
     return {"ok": True, "employee_no": emp, "upn": f"{emp.lower()}@company.com", "initial_password": systems.reset_password(emp)}
 
 
 @tool("Disable an account immediately (offboarding or compromise).", ("L1", "L3"), employee_no=STR)
 def disable_account(ctx: Ctx, employee_no: str) -> dict:
-    u = _user(employee_no)
-    if not u:
+    if not _user(employee_no):
         return {"ok": False, "error": "unknown employee"}
-    u["enabled"] = False
+    systems.set_enabled(employee_no, False)
     return {"ok": True, "enabled": False}
 
 
@@ -432,6 +449,9 @@ def disable_account(ctx: Ctx, employee_no: str) -> dict:
 def revoke_sessions(ctx: Ctx, employee_no: str) -> dict:
     if not _user(employee_no):
         return {"ok": False, "error": "unknown employee"}
+    g = systems._graph()
+    if g:
+        return {"ok": True, "revoked": g.revoke_sessions(employee_no), "note": "all refresh tokens invalidated; apps sign in again"}
     return {"ok": True, "revoked_sessions": 3}
 
 
@@ -517,11 +537,12 @@ def request_manager_approval(ctx: Ctx, employee_no: str, request: str) -> dict:
     a = Approval(ticket_id=ctx.ticket.id, approver=mgr, request=request)
     ctx.db.add(a)
     ctx.db.flush()
-    ctx.db.add(Outbound(to=systems.USERS[mgr]["phone"], ticket_id=ctx.ticket.id,
+    mgr_rec = systems.get_user(mgr) or {}
+    ctx.db.add(Outbound(to=mgr_rec.get("phone") or systems.user_email(mgr), ticket_id=ctx.ticket.id,
                         text=f"Onay talebi #{a.id}: {u['name']} için \"{request}\". "
                              f"Cevap: ONAY {a.id} veya RET {a.id}"))
     ctx.ticket.status = "waiting_approval"
-    return {"ok": True, "approval_id": a.id, "approver": systems.USERS[mgr]["name"], "status": "waiting_approval"}
+    return {"ok": True, "approval_id": a.id, "approver": mgr_rec.get("name", mgr), "status": "waiting_approval"}
 
 
 # ---- knowledge & learning ------------------------------------------------------------------
@@ -580,7 +601,7 @@ def list_endpoint_scripts(ctx: Ctx) -> dict:
       ALL, employee_no=STR, text=STR)
 def notify_user(ctx: Ctx, employee_no: str, text: str) -> dict:
     from app.db import Outbound
-    u = systems.USERS.get(employee_no)
+    u = systems.get_user(employee_no)
     if not u:
         return {"ok": False, "error": "unknown employee"}
     ctx.db.add(Outbound(to=u["phone"], ticket_id=ctx.ticket.id, text=text))

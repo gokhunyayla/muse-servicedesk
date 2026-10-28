@@ -63,7 +63,7 @@ def process_frame(camera_id: str, image: bytes, mime: str = "image/jpeg") -> lis
     findings = inspect_frame(image, mime)
     results = []
     for f in findings:
-        owner = systems.USERS[cam["employee_no"]]
+        owner = systems.get_user(cam["employee_no"]) or {"name": "?"}
         where = f["boxes"][0] if f["boxes"] else None
         loc = f" at x={where['x1']}-{where['x2']}, y={where['y1']}-{where['y2']}" if where else ""
         text = (f"[Camera {camera_id}, {cam['location']}] Compliance finding: {f['kind']} — {f['evidence']}{loc}. "

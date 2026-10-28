@@ -234,7 +234,7 @@ def remind_approver(ctx: Ctx, ticket_id: int) -> dict:
          .order_by(Approval.id.desc()).first())
     if a is None:
         return {"ok": False, "error": "no pending approval on this ticket"}
-    phone = systems.USERS.get(a.approver, {}).get("phone")
+    phone = (systems.get_user(a.approver) or {}).get("phone")
     if not phone:
         return {"ok": False, "error": "approver has no phone"}
     ctx.db.add(Outbound(to=phone, ticket_id=a.ticket_id,

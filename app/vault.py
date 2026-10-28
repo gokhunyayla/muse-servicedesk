@@ -28,8 +28,9 @@ SPEC = {   # name -> (env fallback, label, group)
     "API_KEY": ("API_KEY", "Integration API key (X-API-Key)", "channels"),
     "TAVILY_API_KEY": ("TAVILY_API_KEY", "Tavily search key (Supervisor research)", "channels"),
     "IMAP_PASSWORD": ("IMAP_PASSWORD", "Mailbox password (e-mail intake)", "channels"),
+    "GRAPH_CLIENT_SECRET": ("GRAPH_CLIENT_SECRET", "Microsoft Entra app client secret", "connectors"),
 }
-SECRET = {"META_API_KEY", "WA_ACCESS_TOKEN", "API_KEY", "TAVILY_API_KEY", "IMAP_PASSWORD"}   # masked in the UI
+SECRET = {"META_API_KEY", "WA_ACCESS_TOKEN", "API_KEY", "TAVILY_API_KEY", "IMAP_PASSWORD", "GRAPH_CLIENT_SECRET"}   # masked in the UI
 
 
 def _fernet() -> Fernet:

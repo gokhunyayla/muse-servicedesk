@@ -265,7 +265,7 @@ def identify(who: dict, text: str) -> tuple[str, dict]:
         m = EMP_RE.search(text)
         if m:
             emp, year = m.group(1).upper(), int(m.group(2))
-            u = systems.USERS.get(emp)
+            u = systems.get_user(emp)
             if u and u.get("birth_year") == year:
                 who.update(employee_no=emp, name=u["name"], phone=u.get("phone") or "", email=systems.user_email(emp), client_id=None)
                 return _welcome(who)
@@ -320,7 +320,7 @@ def _welcome(who: dict) -> tuple[str, dict]:
         open_t = db.query(Ticket).filter(Ticket.requester.in_(addrs), Ticket.status != "resolved").order_by(Ticket.id.desc()).all() if addrs else []
         new = {"mode": "client", "client_id": client.id, "name": client.name, "phone": client.phone, "email": client.email,
                "employee_no": client.employee_no, "lang": who.get("lang", "tr")}
-        u = systems.USERS.get(client.employee_no or "") or {}
+        u = (systems.get_user(client.employee_no) if client.employee_no else None) or {}
         device = u.get("device")
         from app.agents import resume_offer
         offer = resume_offer(db, client.phone or client.email, "web", "tr" if tr else "en") if addrs else None

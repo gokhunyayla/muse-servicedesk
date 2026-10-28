@@ -21,7 +21,8 @@ from app.sla import get_setting
 
 logger = logging.getLogger("channels")
 
-DEFAULT_EMAIL = {"enabled": False, "imap_host": "", "imap_port": 993, "user": "", "folder": "INBOX", "poll_minutes": 2,
+DEFAULT_EMAIL = {"enabled": False, "provider": "imap",   # "imap" = own mailbox (IMAP/SMTP); "graph" = Microsoft 365 mailbox
+                 "imap_host": "", "imap_port": 993, "user": "", "folder": "INBOX", "poll_minutes": 2,
                  "allowed": "",      # optional: comma-separated sender domains/addresses; empty = anyone
                  "last_uid": 0}      # mailbox position: only mail that arrives after the channel is enabled is read
 DEFAULT_PORTAL = {"enabled": True, "title": "IT Service Desk", "note": "", "country": "+90"}
@@ -61,6 +62,13 @@ def portal_config() -> dict:
 
 
 def send_email(to: str, subject: str, text: str) -> tuple[bool, str]:
+    if email_config().get("provider") == "graph":
+        from app import graph
+        try:
+            graph.send_mail(to, subject, text)
+            return True, ""
+        except Exception as e:  # noqa: BLE001
+            return False, f"Microsoft 365: {str(e)[:220]}"
     from app.reports import smtp_config
     c = smtp_config()
     if not c["host"]:
@@ -167,6 +175,10 @@ def mark_baseline() -> int:
     """Remember the newest mail now in the box, so enabling the channel never replays old mail."""
     from app.sla import put_setting
     c = email_config()
+    if c.get("provider") == "graph":
+        from app import graph
+        put_setting("graph", {**get_setting("graph", {}), "last_received": graph.now_iso()})
+        return 1
     if not c["imap_host"]:
         return 0
     try:
@@ -186,11 +198,13 @@ def poll_email(force: bool = False) -> int:
     global _last_poll
     from app.sla import put_setting
     c = email_config()
-    if not c["enabled"] or not c["imap_host"]:
+    if not c["enabled"] or (c.get("provider") != "graph" and not c["imap_host"]):
         return 0
     if not force and time.time() - _last_poll < int(c["poll_minutes"]) * 60:
         return 0
     _last_poll = time.time()
+    if c.get("provider") == "graph":
+        return _poll_graph(c)
     handled = 0
     try:
         box = _box(c)
@@ -222,8 +236,60 @@ def poll_email(force: bool = False) -> int:
     return handled
 
 
+def _poll_graph(c: dict) -> int:
+    """Same contract as the IMAP path, through the Microsoft 365 mailbox: only mail received after the last position."""
+    from app import graph
+    from app.sla import put_setting
+    gc = graph.config()
+    since = gc.get("last_received") or ""
+    if not since:                                        # first run: start from now, never the backlog
+        put_setting("graph", {**get_setting("graph", {}), "last_received": graph.now_iso()})
+        return 0
+    handled = 0
+    try:
+        for m in graph.new_messages(since):
+            put_setting("graph", {**get_setting("graph", {}), "last_received": m["received"]})
+            parsed = _parse_graph(m)
+            if parsed is None or parsed["from"] == gc["mailbox"].lower() or not sender_allowed(parsed["from"], c):
+                continue
+            if not email_config()["enabled"]:
+                break
+            try:
+                ingest_email(parsed)
+                handled += 1
+            except Exception:  # noqa: BLE001
+                logger.exception("e-mail from %s failed", parsed["from"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Microsoft 365 poll failed: %s", e)
+    return handled
+
+
+def _parse_graph(m: dict) -> dict | None:
+    """A Graph message in the shape parse_email() produces (quotes and signatures dropped, [#id] read)."""
+    addr = m["from"]
+    if not addr or _AUTO.search(addr) or _AUTO.search(m["subject"]):
+        return None
+    lines = []
+    for line in (m["raw_text"] or "").splitlines():
+        if line.strip().startswith(">") or re.match(r"^(On .+ wrote:|-----Original Message-----|From: .+)$", line.strip()):
+            break
+        lines.append(line)
+    body = "\n".join(l.rstrip() for l in lines).strip()
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    t = re.search(r"\[#(\d+)\]", m["subject"])
+    return {"from": addr, "name": m.get("name", ""), "subject": m["subject"], "text": body, "image": m.get("image"),
+            "mime": m.get("mime", "image/jpeg"), "ticket_id": int(t.group(1)) if t else None, "message_id": m.get("message_id", "")}
+
+
 def test_email() -> tuple[bool, str]:
     c = email_config()
+    if c.get("provider") == "graph":
+        from app import graph
+        try:
+            r = graph.test()
+            return r.get("mailbox") == "ok", f"{r.get('tenant')}: mailbox {r.get('mailbox', 'not set')}"
+        except Exception as e:  # noqa: BLE001
+            return False, str(e)[:200]
     if not c["imap_host"]:
         return False, "IMAP host missing"
     try:

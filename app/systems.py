@@ -1,5 +1,6 @@
-"""Simulated company systems (directory, endpoints). Each function mirrors what a real
-connector (Entra ID, Intune, VPN gateway) would expose, so swapping one in is local."""
+"""Company systems behind the agents' tools. The directory functions switch to the real Microsoft Entra ID
+tenant when Settings → Connectors → Microsoft 365 is enabled (``app.graph``); until then, and for the
+endpoint/vendor/security systems, the tables below simulate what a connector would return."""
 from __future__ import annotations
 
 import os
@@ -36,7 +37,49 @@ SAP_ROLES = {"SD_DISPLAY": "sales display", "SD_CREATE": "create sales orders", 
              "FI_POST": "post journal entries", "MM_PURCHASE": "create purchase orders"}
 
 
+def _graph():
+    from app import graph
+    return graph if graph.enabled() else None
+
+
+def get_user(employee_no: str) -> dict | None:
+    """Directory record by employee number (Entra when connected, else the simulated table)."""
+    g = _graph()
+    if g:
+        try:
+            return g.get_user(employee_no)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"directory: {e}") from e
+    return USERS.get(employee_no)
+
+
+def employees_by_phone(phone: str) -> list[str]:
+    g = _graph()
+    if g:
+        return g.employees_by_phone(phone)
+    return [e for e, u in USERS.items() if u.get("phone") == phone]
+
+
+def license_catalog() -> dict:
+    """Licence → needs manager approval. With Entra, the tenant's SKUs; approval policy from LICENSE_CATALOG by name."""
+    g = _graph()
+    if g:
+        return {k: LICENSE_CATALOG.get(k, False) for k in g.license_catalog()}
+    return LICENSE_CATALOG
+
+
+def set_enabled(employee_no: str, on: bool) -> None:
+    g = _graph()
+    if g:
+        g.set_enabled(employee_no, on)
+    elif employee_no in USERS:
+        USERS[employee_no]["enabled"] = on
+
+
 def create_user(name: str, department: str, manager: str, phone: str) -> str:
+    g = _graph()
+    if g:
+        return g.create_user(name, department, manager, phone)[0]
     emp = f"E{1000 + len(USERS) + 1}"
     USERS[emp] = {"name": name, "phone": phone, "birth_year": 0, "device": None, "department": department,
                   "manager": manager, "licenses": [], "groups": [], "sap_roles": [], "enabled": True}
@@ -216,6 +259,9 @@ def run_script(hostname: str, script: str) -> dict:
 
 
 def user_by_phone(phone: str) -> tuple[str, dict] | None:
+    g = _graph()
+    if g:
+        return g.user_by_contact(phone)
     for emp, u in USERS.items():
         if u["phone"] == phone:
             return emp, u
@@ -224,7 +270,7 @@ def user_by_phone(phone: str) -> tuple[str, dict] | None:
 
 def user_email(emp: str) -> str:
     """Directory e-mail: explicit when present, otherwise name-derived (ayse.demir@example.com)."""
-    u = USERS.get(emp) or {}
+    u = (get_user(emp) if _graph() else USERS.get(emp)) or {}
     if u.get("email"):
         return u["email"]
     import unicodedata
@@ -235,6 +281,9 @@ def user_email(emp: str) -> str:
 def user_by_contact(contact: str) -> tuple[str, dict] | None:
     """Phone number or e-mail address → directory entry."""
     contact = (contact or "").strip().lower()
+    g = _graph()
+    if g:
+        return g.user_by_contact(contact)
     if "@" in contact:
         for emp, u in USERS.items():
             if user_email(emp).lower() == contact:
@@ -245,4 +294,7 @@ def user_by_contact(contact: str) -> tuple[str, dict] | None:
 
 def reset_password(employee_no: str) -> str:
     """Returns a one-time temporary password (must be changed at next sign-in)."""
+    g = _graph()
+    if g:
+        return g.reset_password(employee_no)
     return "Tmp-" + secrets.token_urlsafe(6)
