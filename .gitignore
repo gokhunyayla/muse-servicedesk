@@ -9,3 +9,4 @@ __pycache__/
 # encryption key for console-managed secrets
 data/.secret_key
 data/references/
+data/server.log

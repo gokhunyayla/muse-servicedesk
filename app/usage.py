@@ -10,14 +10,14 @@ from datetime import timedelta
 from app.db import LlmCall, _now, session
 from app.sla import get_setting
 
-_scope: contextvars.ContextVar = contextvars.ContextVar("llm_scope", default=("other", None, ""))
+_scope: contextvars.ContextVar = contextvars.ContextVar("llm_scope", default=("other", None, "", None))
 DEFAULT_CONTEXT = {"muse-spark-1.3": 128000, "muse-wonder-1.0": 128000}   # editable: Settings → Models
 
 
 class scope:
     """with usage.scope("ticket", 12, "L1"): ...   — attribution for calls made inside."""
-    def __init__(self, kind: str, sid: int | None = None, actor: str = ""):
-        self.value = (kind, sid, actor)
+    def __init__(self, kind: str, sid: int | None = None, actor: str = "", db=None):
+        self.value = (kind, sid, actor, db)     # db: the caller's open session, so recording never opens a second one
 
     def __enter__(self):
         self.token = _scope.set(self.value)
@@ -28,7 +28,7 @@ class scope:
 
 
 def current() -> tuple[str, int | None, str]:
-    return _scope.get()
+    return _scope.get()[:3]
 
 
 def context_windows() -> dict:
@@ -36,13 +36,17 @@ def context_windows() -> dict:
 
 
 def record(model: str, prompt: int, completion: int, latency_ms: int, tool_calls: int = 0, ok: bool = True) -> dict:
-    kind, sid, actor = current()
+    kind, sid, actor, db = _scope.get()
     row = {"model": model, "scope": kind, "scope_id": sid, "actor": actor, "prompt_tokens": int(prompt or 0),
            "completion_tokens": int(completion or 0), "total_tokens": int((prompt or 0) + (completion or 0)),
            "latency_ms": int(latency_ms), "tool_calls": tool_calls, "ok": ok}
     try:
-        with session() as db:
+        if db is not None:                 # inside the caller's transaction (SQLite would otherwise wait on the lock)
             db.add(LlmCall(**row))
+            db.flush()
+        else:
+            with session() as own:
+                own.add(LlmCall(**row))
     except Exception:          # accounting must never break a conversation
         pass
     limit = context_windows().get(model, 128000)
@@ -53,16 +57,24 @@ def record(model: str, prompt: int, completion: int, latency_ms: int, tool_calls
 
 # ---- summaries -------------------------------------------------------------------------------
 
-def summary(since=None, scope_kind: str | None = None, scope_id: int | None = None) -> dict:
-    with session() as db:
-        q = db.query(LlmCall)
-        if since:
-            q = q.filter(LlmCall.at >= since)
-        if scope_kind:
-            q = q.filter(LlmCall.scope == scope_kind)
-        if scope_id is not None:
-            q = q.filter(LlmCall.scope_id == scope_id)
-        rows = q.all()
+def _rows(db, since, scope_kind, scope_id):
+    q = db.query(LlmCall)
+    if since:
+        q = q.filter(LlmCall.at >= since)
+    if scope_kind:
+        q = q.filter(LlmCall.scope == scope_kind)
+    if scope_id is not None:
+        q = q.filter(LlmCall.scope_id == scope_id)
+    return q.all()
+
+
+def summary(since=None, scope_kind: str | None = None, scope_id: int | None = None, db=None) -> dict:
+    """`db`: reuse the caller's open session (needed to see rows recorded in the same transaction)."""
+    if db is not None:
+        rows = _rows(db, since, scope_kind, scope_id)
+    else:
+        with session() as own:
+            rows = _rows(own, since, scope_kind, scope_id)
     by_model: dict = defaultdict(lambda: {"calls": 0, "prompt": 0, "completion": 0, "total": 0, "latency_ms": 0})
     by_scope = Counter()
     by_actor = Counter()

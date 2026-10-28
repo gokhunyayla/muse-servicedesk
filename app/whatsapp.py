@@ -72,22 +72,9 @@ def download_media(media_id: str) -> tuple[bytes, str]:
 
 
 def drain_outbound() -> int:
-    """Send queued messages. Permanent failures (e.g. a number outside the test allow-list) are marked
-    with the error and never retried, so the log stays quiet; transient ones are retried next tick."""
-    sent = 0
-    with session() as db:
-        for o in db.query(Outbound).filter(Outbound.sent.is_(False), Outbound.error == "").limit(50):
-            try:
-                if send(o.to, o.text):
-                    o.sent = True
-                    sent += 1
-            except SendError as e:
-                if e.permanent:
-                    o.error = f"{e.code}: {e}"[:255]
-                    logger.warning("outbound #%s to %s dropped (%s)", o.id, o.to, o.error)
-                else:
-                    logger.error("outbound #%s to %s failed, will retry: %s", o.id, o.to, e)
-    return sent
+    """Deliver queued messages on every channel (WhatsApp, e-mail; the web chat polls its own)."""
+    from app.channels import drain
+    return drain()
 
 
 @router.get("/webhook")
@@ -136,7 +123,7 @@ async def inbound(request: Request) -> dict:
         else:
             continue
         with session() as db:
-            _, answer = handle_message(db, frm, text, image, mime, extra_images=extra)
+            _, answer = handle_message(db, frm, text, image, mime, extra_images=extra, channel="whatsapp")
         try_send(frm, answer)
         handled += 1
     return {"handled": handled}

@@ -34,6 +34,7 @@ class Ticket(Base):
     incident_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)  # parent, for mass outages
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     assignee: Mapped[str] = mapped_column(String(255), default="")   # desk user (name or e-mail) when a human holds it
+    channel: Mapped[str] = mapped_column(String(16), default="whatsapp")   # where the employee last wrote from: whatsapp | web | email | api
     events: Mapped[list["Event"]] = relationship(back_populates="ticket", order_by="Event.id")
 
 
@@ -101,9 +102,29 @@ def init_db(url: str | None = None) -> None:
         server.dispose()
     _engine = create_engine(url, pool_pre_ping=True)
     Base.metadata.create_all(_engine)
+    _add_missing_columns(_engine)
     _Session = sessionmaker(_engine, expire_on_commit=False)
     from app import knowledge
     knowledge.seed_from_files()          # first run: load data/sops/*.md into the knowledge base
+
+
+def _add_missing_columns(engine) -> None:
+    """create_all never alters existing tables; add columns that newer models declare (simple, additive)."""
+    from sqlalchemy import inspect
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                ddl = f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(engine.dialect)}"
+                if col.default is not None and getattr(col.default, "is_scalar", False):
+                    d = col.default.arg
+                    ddl += " DEFAULT " + (f"'{d}'" if isinstance(d, str) else ("1" if d is True else "0" if d is False else str(d)))
+                conn.execute(text(ddl))
 
 
 @contextmanager

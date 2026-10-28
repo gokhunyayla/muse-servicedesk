@@ -16,6 +16,7 @@ from datetime import timedelta
 
 import httpx
 
+from app.channels import reachable
 from app.db import Event, Sop, SupervisorRun, Ticket, _now, log, session
 from app.llm import ContentFiltered, get_llm
 from app.sla import DEFAULT_SLA, get_setting, put_setting, timing
@@ -129,7 +130,7 @@ def create_problem(ctx: Ctx, ticket_ids: list[int], title: str, update: str) -> 
     for t in rest:
         t.incident_id = head.id
         log(ctx.db, t.id, "supervisor", "note", f"linked to problem #{head.id} by the Supervisor")
-    for r in {t.requester for t in ts if t.requester.startswith("+")}:
+    for r in {t.requester for t in ts if reachable(t.requester)}:
         ctx.db.add(Outbound(to=r, ticket_id=head.id, text=f"[#{head.id}] {update}"))
     ctx.db.flush()
     return {"ok": True, "problem_id": head.id, "linked": [t.id for t in rest]}
@@ -202,7 +203,7 @@ def reassign_ticket(ctx: Ctx, ticket_id: int, tier: str, instructions: str) -> d
     answer = AGENTS[tier].run(ctx.db, t, f"[Reassigned to you by the Supervisor] {instructions} Review the trail, act with "
                                          f"your tools, and report what you did.")
     log(ctx.db, t.id, tier, "message", answer)
-    if tier == "L1" and t.requester.startswith("+"):
+    if tier == "L1" and reachable(t.requester):
         from app.db import Outbound
         ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
     return {"ok": True, "owner": tier, "result": answer[:400]}
@@ -215,7 +216,7 @@ def nudge_employee(ctx: Ctx, ticket_id: int, text: str) -> dict:
     t = ctx.db.get(Ticket, int(ticket_id))
     if t is None:
         return {"ok": False, "error": "no such ticket"}
-    if not t.requester.startswith("+"):
+    if not reachable(t.requester):
         return {"ok": False, "error": "requester has no phone"}
     ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
     log(ctx.db, t.id, "supervisor", "message", text)
@@ -399,7 +400,7 @@ def run(trigger: str = "schedule") -> SupervisorRun:
                                        signals=json.dumps(signals, ensure_ascii=False), open_sup=open_sup,
                                        at_risk=json.dumps(risks, ensure_ascii=False), risk_pct=sla_targets().get("at_risk_pct", 80))
                 from app import usage
-                with usage.scope("supervisor", run_id, "SUP"):
+                with usage.scope("supervisor", run_id, "SUP", db=db):
                     summary = _agent_loop(db, prompt, actions)
     except ContentFiltered:
         error = "model request blocked by content filter"

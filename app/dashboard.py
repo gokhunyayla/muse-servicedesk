@@ -373,7 +373,7 @@ function renderTiming(tm){if(!tm)return '';
 async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id)).json();
  $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} ${pill(t.status)}`;
  $('#tactions').innerHTML=`<button class="btn" onclick="openAssign(${t.id})">Assign</button>`+(t.status!=='resolved'?` <button class="btn" onclick="closeTicket(${t.id})">Close</button>`:'');
- $('#meta').innerHTML=`<h4>Details</h4><dl><dt>Requester</dt><dd>${esc(t.requester||'')}</dd><dt>Status</dt><dd><select onchange="setStatus(${t.id},this.value)">${['open','waiting_user','waiting_approval','escalated','resolved'].map(x=>`<option value="${x}" ${x===t.status?'selected':''}>${LABELS[x]}</option>`).join('')}</select></dd><dt>Owner</dt><dd>${esc(AGENT_LABEL[t.owner]||t.owner||'')}</dd>
+ $('#meta').innerHTML=`<h4>Details</h4><dl><dt>Requester</dt><dd>${esc(t.requester||'')} <span class="chip">${esc({whatsapp:'WhatsApp',web:'Web chat',email:'E-mail',api:'API'}[t.channel]||t.channel||'')}</span></dd><dt>Status</dt><dd><select onchange="setStatus(${t.id},this.value)">${['open','waiting_user','waiting_approval','escalated','resolved'].map(x=>`<option value="${x}" ${x===t.status?'selected':''}>${LABELS[x]}</option>`).join('')}</select></dd><dt>Owner</dt><dd>${esc(AGENT_LABEL[t.owner]||t.owner||'')}</dd>
   <dt>Identity</dt><dd>${t.verified?'<span class="tagok">verified</span>':'not verified'}</dd><dt>Opened</dt><dd>${fmt(t.created_at)}</dd>
   ${t.rating?`<dt>Rating</dt><dd>${'★'.repeat(t.rating)}${'☆'.repeat(5-t.rating)}</dd>`:''}
   ${t.incident_id?`<dt>Problem</dt><dd><a href="#" onclick="show(${t.incident_id});return false">#${t.incident_id}</a></dd>`:''}

@@ -94,7 +94,7 @@ class Agent:
         messages = [{"role": "system", "content": self.system_prompt(ticket, db)}, *(history or []),
                     {"role": "user", "content": message}]
         specs = self.tool_specs()
-        with usage.scope("ticket", ticket.id, self.tier):
+        with usage.scope("ticket", ticket.id, self.tier, db=db):
             return self._loop(db, ticket, ctx, llm, messages, specs, depth)
 
     def _loop(self, db, ticket, ctx, llm, messages, specs, depth) -> str:
@@ -159,7 +159,7 @@ AGENTS: dict[str, Agent] = {a.tier: a for a in [
 ]}
 
 
-def _belongs_to(ticket: Ticket, text: str) -> bool:
+def _belongs_to(db, ticket: Ticket, text: str) -> bool:
     """Does this message continue the open ticket, or is it a new problem? The model decides;
     very short messages (confirmations, ratings, approvals) always continue the ticket."""
     if len(text.split()) <= 3 or text.startswith("["):
@@ -170,8 +170,10 @@ def _belongs_to(ticket: Ticket, text: str) -> bool:
               f"\n\nNew message from the same employee: \"{text[:400]}\"\n\n"
               "Is the new message about the SAME problem (a follow-up, more detail, confirmation, or an answer "
               "to our question), or a NEW, unrelated problem? Answer with one word: SAME or NEW.")
+    from app import usage
     try:
-        reply = get_llm().chat([{"role": "user", "content": prompt}], [])
+        with usage.scope("ticket", ticket.id, "route", db=db):
+            reply = get_llm().chat([{"role": "user", "content": prompt}], [])
     except ContentFiltered:
         return True
     return "NEW" not in reply.text.upper()
@@ -228,12 +230,13 @@ def _approval_decision(db, requester: str, text: str):
 
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
                    mime: str = "image/jpeg", extra_images: list[bytes] | None = None,
-                   force_new: bool = False) -> tuple[Ticket, str]:
+                   force_new: bool = False, channel: str | None = None) -> tuple[Ticket, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
     or open a new one, then run L1. `force_new` skips the routing (system-generated tickets)."""
     from app.llm import image_message
+    channel = channel or ("email" if "@" in requester else "whatsapp" if requester.startswith("+") else "api")
     if force_new:
-        ticket = Ticket(requester=requester, title=text[:255])
+        ticket = Ticket(requester=requester, title=text[:255], channel=channel)
         db.add(ticket)
         db.flush()
         log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
@@ -266,15 +269,16 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
             log(db, open_tickets[0].id, "L1", "message", answer)
             db.refresh(open_tickets[0])
             return open_tickets[0], answer
-    elif ticket is not None and not _belongs_to(ticket, text):
+    elif ticket is not None and not _belongs_to(db, ticket, text):
         log(db, ticket.id, "system", "note", f"new unrelated request from requester, opened a separate ticket: {text[:80]}")
         ticket = None
     if ticket is None:
         ticket = _closing_exchange(db, requester, text)
     if ticket is None:
-        ticket = Ticket(requester=requester, title=text[:255])
+        ticket = Ticket(requester=requester, title=text[:255], channel=channel)
         db.add(ticket)
         db.flush()
+    ticket.channel = channel          # replies and reminders follow the employee's latest channel
     history = []
     for e in ticket.events:
         if e.kind == "message":

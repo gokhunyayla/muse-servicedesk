@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from urllib.parse import quote
 from app.config import auth_settings
 from app.db import Session, User, _now, audit, session
 from app.security import check_origin, cookie_secure, rate_limit
@@ -618,11 +619,76 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
             rows = (secret_row("WA_PHONE_NUMBER_ID", "Meta for Developers → WhatsApp → API Setup") + secret_row("WA_ACCESS_TOKEN", "System-user token (never expires)")
                     + secret_row("WA_VERIFY_TOKEN", "Must match the webhook configuration at Meta") + secret_row("DEMO_MANAGER_PHONE", "Seeded managers E1002/E1003 answer approvals from this number")
                     + secret_row("API_KEY", "Required as X-API-Key on /messages, /voice, /image, … when set") + secret_row("TAVILY_API_KEY", "Optional; DuckDuckGo needs no key"))
-            body = f"""<p class="muted">Channel and integration secrets, encrypted in the database. Changes apply immediately, no restart.</p>
-<form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>"""
+            from app.channels import email_config, portal_config
+            from app.config import auth_settings
+            pc, ec = portal_config(), email_config()
+            link = f"{auth_settings.public_url.rstrip('/')}/portal"
+            imap_row = secret_row("IMAP_PASSWORD", "Mailbox password or app password")
+            body = f"""<p class="muted">Employees can reach the desk over WhatsApp, the web chat and e-mail; every channel lands on the same tickets and agents.</p>
+<h3>WhatsApp &amp; integrations</h3>
+<form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
+<h3>Web chat</h3><p class="muted">A public page outside the console where an employee writes as on WhatsApp: <a href="/portal" target="_blank">{_esc(link)}</a></p>
+<form method="post" action="/settings/portal">
+<div class="srow"><div><b>Enabled</b><small>Switch the page off to take the channel down</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if pc["enabled"] else ""} {dis}> on</label></div></div>
+<div class="srow"><div><b>Title</b><small>Shown on the page</small></div><div class="min"><input name="title" value="{_esc(pc["title"])}" style="width:260px" {dis}></div></div>
+<div class="srow"><div><b>Note</b><small>Optional line under the sign-in form</small></div><div class="min"><input name="note" value="{_esc(pc.get("note", ""))}" style="width:260px" {dis}></div></div>
+<div class="srow"><div><b>Country code</b><small>Added to local numbers (05xx…)</small></div><div class="min"><input name="country" value="{_esc(pc.get("country", "+90"))}" style="width:100px" {dis}></div></div>
+{('<div class="row end"><button class="btn primary slim" type="submit">Save web chat</button></div>' if admin else '')}</form>
+<h3>E-mail</h3><p class="muted">The desk reads a mailbox over IMAP, opens or continues tickets and answers by mail (replies use the SMTP settings under Reports). Subject tags like <code>[#12]</code> keep a thread on its ticket.</p>
+<form method="post" action="/settings/email">
+<div class="srow"><div><b>Enabled</b></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if ec["enabled"] else ""} {dis}> on</label></div></div>
+<div class="srow"><div><b>IMAP host</b><small>e.g. imap.gmail.com, outlook.office365.com</small></div><div class="min"><input name="imap_host" value="{_esc(ec["imap_host"])}" style="width:260px" {dis}></div></div>
+<div class="srow"><div><b>Port</b><small>SSL</small></div><div class="min"><input name="imap_port" type="number" value="{ec["imap_port"]}" style="width:100px" {dis}></div></div>
+<div class="srow"><div><b>Mailbox user</b><small>the desk's address</small></div><div class="min"><input name="user" value="{_esc(ec["user"])}" style="width:260px" {dis}></div></div>
+<div class="srow"><div><b>Folder</b></div><div class="min"><input name="folder" value="{_esc(ec["folder"])}" style="width:160px" {dis}></div></div>
+<div class="srow"><div><b>Poll every</b></div><div class="min"><input name="poll_minutes" type="number" min="1" value="{ec["poll_minutes"]}" style="width:100px" {dis}> <span>minutes</span></div></div>
+{('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Test connection</button> <button class="btn primary slim" type="submit">Save e-mail</button></div>' if admin else '')}</form>
+<form method="post" action="/settings/secrets?tab=channels">{imap_row}{('<div class="row end"><button class="btn primary slim" type="submit">Save password</button></div>' if admin else '')}</form>"""
     else:
         body = '<p class="muted">Muse ServiceDesk — autonomous multi-tier IT service desk on Meta Model API. Built for the Meta Global AI Developer Hackathon 2026.</p>'
     return _page("Settings", f'<div class="tabs">{nav}</div>{body}', wide=True, user=user, active="settings")
+
+
+@router.post("/settings/portal")
+async def settings_portal(request: Request, admin: User = Depends(admin_user)):
+    from app.channels import DEFAULT_PORTAL
+    from app.sla import put_setting
+    check_origin(request)
+    form = await request.form()
+    value = dict(DEFAULT_PORTAL)
+    value["enabled"] = form.get("enabled") == "1"
+    value["title"] = str(form.get("title", "")).strip()[:80] or DEFAULT_PORTAL["title"]
+    value["note"] = str(form.get("note", "")).strip()[:200]
+    cc = str(form.get("country", "+90")).strip()
+    value["country"] = cc if cc.startswith("+") and cc[1:].isdigit() and len(cc) <= 5 else "+90"
+    put_setting("portal", value)
+    with session() as db:
+        audit(db, admin.email, "settings.portal", detail=f"enabled={value['enabled']}", ip=_ip(request))
+    return RedirectResponse("/settings?tab=channels&info=Web+chat+saved", 303)
+
+
+@router.post("/settings/email")
+async def settings_email(request: Request, admin: User = Depends(admin_user)):
+    from app.channels import DEFAULT_EMAIL, test_email
+    from app.sla import put_setting
+    check_origin(request)
+    form = await request.form()
+    value = dict(DEFAULT_EMAIL)
+    value["enabled"] = form.get("enabled") == "1"
+    for k in ("imap_host", "user", "folder"):
+        value[k] = str(form.get(k, "")).strip()
+    for k in ("imap_port", "poll_minutes"):
+        try:
+            value[k] = max(1, int(form.get(k, DEFAULT_EMAIL[k])))
+        except (TypeError, ValueError):
+            value[k] = DEFAULT_EMAIL[k]
+    put_setting("email", value)
+    with session() as db:
+        audit(db, admin.email, "settings.email", detail=f"enabled={value['enabled']} host={value['imap_host']}", ip=_ip(request))
+    if form.get("action") == "test":
+        ok, msg = test_email()
+        return RedirectResponse(f"/settings?tab=channels&info={quote(("E-mail OK: " if ok else "E-mail failed: ") + msg[:150])}", 303)
+    return RedirectResponse("/settings?tab=channels&info=E-mail+saved", 303)
 
 
 @router.post("/settings/supervisor")

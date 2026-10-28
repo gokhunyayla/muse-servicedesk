@@ -12,6 +12,8 @@
       so messages sent while the app is offline still arrive once it is back.
 - [x] **Emerging-incident awareness** → the Supervisor merges clusters into problem records and updates everyone.
       Still open: tell *new* reporters of a known problem immediately at intake (before the next Supervisor pass).
+- [x] Web chat (`/portal`) and e-mail intake next to WhatsApp; replies follow the employee's last channel.
+- [ ] One-command local run for judges (SQLite default, MariaDB optional) + demo data.
 - [ ] Deploy to a small public server with a fixed domain + HTTPS (no tunnels, no third-party tunnel accounts).
 - [ ] 3-minute demo video; link in README; tag `v1.0.0`.
 

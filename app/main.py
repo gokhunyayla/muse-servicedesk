@@ -2,6 +2,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
+from app.channels import reachable
 from app.agents import handle_message
 from app.db import Ticket, log, session
 from app.voice import transcribe
@@ -29,6 +30,8 @@ def _apply_console_secrets() -> None:
         pass
 app.include_router(dashboard_router)
 app.include_router(whatsapp_router)
+from app.portal import router as portal_router    # noqa: E402
+app.include_router(portal_router)
 
 
 @app.exception_handler(HTTPException)
@@ -108,7 +111,7 @@ def desk_close(ticket_id: int, d: DeskClose, request: Request, user=Depends(curr
         audit(db, user.email, "ticket.close", target=t.id, detail=d.resolution)
         from app.i18n import t as tr_, ticket_lang
         text = tr_("closed_by_desk", ticket_lang(t), id=t.id, note=d.resolution)
-        if t.requester.startswith("+"):
+        if reachable(t.requester):
             db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
         log(db, t.id, "L1", "message", text)
         return {"id": t.id, "status": "resolved"}
@@ -143,7 +146,7 @@ def merge_into_problem(p: Problem, request: Request, user=Depends(current_user))
             t.incident_id = head.id
             log(db, t.id, "desk", "note", f"linked to problem #{head.id} by the desk")
         if p.update:
-            for r in {t.requester for t in ts if t.requester.startswith("+")}:
+            for r in {t.requester for t in ts if reachable(t.requester)}:
                 db.add(Outbound(to=r, ticket_id=head.id, text=f"[#{head.id}] {p.update}"))
             log(db, head.id, "desk", "note", f"update sent to {len(ts)} employees: {p.update}")
         return {"problem_id": head.id, "linked": [t.id for t in rest]}
@@ -181,7 +184,7 @@ def assign_ticket(ticket_id: int, a: Assignment, request: Request, user=Depends(
         answer = AGENTS[a.owner].run(db, t, f"[Assigned to you by the service desk] {a.note or 'Take over this ticket.'} "
                                             f"Review the trail, act with your tools, and report what you did.")
         log(db, t.id, a.owner, "message", answer)
-        if a.owner == "L1" and t.requester.startswith("+"):
+        if a.owner == "L1" and reachable(t.requester):
             from app.db import Outbound
             db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
         return {"id": t.id, "status": t.status, "owner": t.owner, "reply": answer}
@@ -204,12 +207,12 @@ def desk_reply(ticket_id: int, r: DeskReply, request: Request, user=Depends(curr
             raise HTTPException(404)
         check_origin(request)
         log(db, t.id, f"desk:{user.name}", "message", text)
-        if t.requester.startswith("+"):
+        if reachable(t.requester):
             db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
         if t.status == "waiting_user":
             pass                                   # still waiting for the employee
         audit(db, user.email, "ticket.reply", target=t.id, detail=text)
-        return {"id": t.id, "sent": t.requester.startswith("+")}
+        return {"id": t.id, "sent": reachable(t.requester)}
 
 
 class StatusChange(BaseModel):
@@ -710,6 +713,7 @@ def get_ticket(ticket_id: int, user=Depends(current_user)) -> dict:
         return {"id": t.id, "title": t.title, "status": t.status, "verified": t.verified, "owner": t.owner, "incident_id": t.incident_id,
                 "requester": t.requester, "created_at": t.created_at.isoformat(), "resolution": t.resolution, "rating": t.rating,
                 "assignee": t.assignee,
+                "channel": t.channel,
                 "linked": [c.id for c in db.query(Ticket).filter(Ticket.incident_id == t.id)],
                 "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None, "timing": timing(t, t.events),
                 "ai": __import__("app.usage", fromlist=["summary"]).summary(scope_kind="ticket", scope_id=t.id),

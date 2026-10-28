@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import timedelta
 
+from app.channels import reachable
 from app.db import Approval, ChatMessage, ChatThread, Sop, SupervisorRun, Ticket, _now, audit, log, session
 from app.llm import ContentFiltered, get_llm
 from app.tools import STR, Ctx, run_tool, tool, tools_for
@@ -118,7 +119,7 @@ def assign(ctx: Ctx, ticket_id: int, to: str, note: str = "") -> dict:
         answer = AGENTS[to].run(ctx.db, t, f"[Assigned to you by {user.name} from the desk] {note or 'Take over this ticket.'} "
                                            f"Review the trail, act with your tools, and report what you did.")
         log(ctx.db, t.id, to, "message", answer)
-        if to == "L1" and t.requester.startswith("+"):
+        if to == "L1" and reachable(t.requester):
             ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
         audit(ctx.db, user.email, "ticket.assign", target=t.id, detail=f"chat → {to} {note}".strip())
         return {"ok": True, "owner": to, "agent_reply": answer[:300], "link": f"/tickets?id={t.id}"}
@@ -136,10 +137,10 @@ def message_employee(ctx: Ctx, ticket_id: int, text: str) -> dict:
         return {"ok": False, "error": "no such ticket"}
     user = _user(ctx)
     log(ctx.db, t.id, f"desk:{user.name}", "message", text)
-    if t.requester.startswith("+"):
+    if reachable(t.requester):
         ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=text))
     audit(ctx.db, user.email, "ticket.reply", target=t.id, detail=text)
-    return {"ok": True, "sent": t.requester.startswith("+")}
+    return {"ok": True, "sent": reachable(t.requester)}
 
 
 @tool("Change a ticket's status (open, waiting_user, escalated, resolved) with a note; resolved needs a resolution.",
@@ -155,7 +156,7 @@ def set_ticket_status(ctx: Ctx, ticket_id: int, status: str, note: str = "") -> 
     if status == "resolved":
         resolve(t)
         t.resolution = note or "closed by the service desk"
-        if t.requester.startswith("+"):
+        if reachable(t.requester):
             ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=tr_("closed_by_desk", ticket_lang(t), id=t.id, note=t.resolution)))
     else:
         t.status = status
@@ -182,7 +183,7 @@ def decide_approval(ctx: Ctx, approval_id: int, decision: str) -> dict:
     answer = AGENTS["L1"].run(ctx.db, t, f"[Approval #{a.id} {decision} by {user.name} (service desk)] Request was: {a.request}. "
                                          f"Continue the ticket accordingly and tell the employee.")
     log(ctx.db, t.id, "L1", "message", answer)
-    if t.requester.startswith("+"):
+    if reachable(t.requester):
         ctx.db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
     audit(ctx.db, user.email, "approval.decide", target=a.id, detail=f"chat {decision}")
     return {"ok": True, "ticket": t.id, "agent_reply": answer[:300], "link": f"/tickets?id={t.id}"}
@@ -273,7 +274,7 @@ def ask(user, thread_id: int, text: str) -> dict:
                     *_history(db, th.id)]
         answer = ""
         from app import usage
-        _tok = usage._scope.set(("chat", th.id, "DESK"))
+        _tok = usage._scope.set(("chat", th.id, "DESK", db))
         try:
             for _ in range(MAX_STEPS):
                 reply = llm.chat(messages, specs, heavy=True)
@@ -294,7 +295,7 @@ def ask(user, thread_id: int, text: str) -> dict:
             answer = "The model declined that phrasing; could you say it differently?"
         finally:
             usage._scope.reset(_tok)
-        turn = usage.summary(scope_kind="chat", scope_id=th.id)
+        turn = usage.summary(scope_kind="chat", scope_id=th.id, db=db)
         last = getattr(llm, "last_usage", None) or {}
         msg_usage = {"calls": len(actions) + 1, "prompt_tokens": last.get("prompt_tokens", 0), "completion_tokens": last.get("completion_tokens", 0),
                      "latency_ms": last.get("latency_ms", 0), "context_pct": last.get("context_pct"), "context_limit": last.get("context_limit"),

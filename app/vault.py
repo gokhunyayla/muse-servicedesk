@@ -27,8 +27,9 @@ SPEC = {   # name -> (env fallback, label, group)
     "DEMO_MANAGER_PHONE": ("DEMO_MANAGER_PHONE", "Demo manager phone (approvals go here)", "channels"),
     "API_KEY": ("API_KEY", "Integration API key (X-API-Key)", "channels"),
     "TAVILY_API_KEY": ("TAVILY_API_KEY", "Tavily search key (Supervisor research)", "channels"),
+    "IMAP_PASSWORD": ("IMAP_PASSWORD", "Mailbox password (e-mail intake)", "channels"),
 }
-SECRET = {"META_API_KEY", "WA_ACCESS_TOKEN", "API_KEY", "TAVILY_API_KEY"}   # masked in the UI
+SECRET = {"META_API_KEY", "WA_ACCESS_TOKEN", "API_KEY", "TAVILY_API_KEY", "IMAP_PASSWORD"}   # masked in the UI
 
 
 def _fernet() -> Fernet:
