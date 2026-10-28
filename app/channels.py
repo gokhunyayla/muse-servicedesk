@@ -138,7 +138,11 @@ def ingest_email(parsed: dict) -> tuple[Ticket, str] | None:
     if parsed["subject"] and parsed["ticket_id"] is None and parsed["subject"].lower() not in text.lower():
         text = f"{parsed['subject']}\n{text}".strip()
     with session() as db:
-        ticket, answer = handle_message(db, parsed["from"], text, parsed["image"], parsed["mime"], channel="email")
+        # a reply to one of our mails carries [#id] and continues that ticket; any other mail is a request of its own
+        tagged = db.get(Ticket, parsed["ticket_id"]) if parsed["ticket_id"] else None
+        continues = tagged is not None and tagged.requester == parsed["from"] and tagged.status != "resolved"
+        ticket, answer = handle_message(db, parsed["from"], text, parsed["image"], parsed["mime"], channel="email",
+                                        force_new=not continues, ticket=tagged if continues else None)
         subject, to = _subject(ticket, parsed["subject"]), parsed["from"]
     ok, err = send_email(to, subject, answer)
     if not ok:

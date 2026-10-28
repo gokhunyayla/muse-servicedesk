@@ -169,7 +169,10 @@ def _belongs_to(db, ticket: Ticket, text: str) -> bool:
               "\n".join(f"- {m[:200]}" for m in recent) +
               f"\n\nNew message from the same employee: \"{text[:400]}\"\n\n"
               "Is the new message about the SAME problem (a follow-up, more detail, confirmation, or an answer "
-              "to our question), or a NEW, unrelated problem? Answer with one word: SAME or NEW.")
+              "to our question), or a NEW problem? Rules: a message that states a problem of its own "
+              "(another device, service, account or request) is NEW even if the open ticket is still unresolved; "
+              "if the open ticket has no concrete problem yet (a greeting, a status question), a message that "
+              "states one is NEW. When in doubt, NEW. Answer with one word: SAME or NEW.")
     from app import usage
     try:
         with usage.scope("ticket", ticket.id, "route", db=db):
@@ -230,9 +233,10 @@ def _approval_decision(db, requester: str, text: str):
 
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
                    mime: str = "image/jpeg", extra_images: list[bytes] | None = None,
-                   force_new: bool = False, channel: str | None = None) -> tuple[Ticket, str]:
+                   force_new: bool = False, channel: str | None = None, ticket: Ticket | None = None) -> tuple[Ticket, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
-    or open a new one, then run L1. `force_new` skips the routing (system-generated tickets)."""
+    or open a new one, then run L1. `force_new` skips the routing and always opens a ticket (system-generated
+    tickets, a fresh e-mail); `ticket` pins the message to that ticket (an e-mail reply tagged [#id])."""
     from app.llm import image_message
     channel = channel or ("email" if "@" in requester else "whatsapp" if requester.startswith("+") else "api")
     if force_new:
@@ -240,10 +244,11 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         db.add(ticket)
         db.flush()
         log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
-        answer = AGENTS["L1"].run(db, ticket, text)
+        answer = AGENTS["L1"].run(db, ticket, image_message(text, image, mime) if image else text)
         log(db, ticket.id, "L1", "message", answer)
         db.refresh(ticket)
         return ticket, answer
+    pinned = ticket
     # 1) Is this an approver answering a pending approval? That wins over everything else, and the
     #    decision may sit inside a sentence ("tamam, ONAY 3" / "reddetmek için RET 1").
     decided = _approval_decision(db, requester, text)
@@ -252,9 +257,11 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         return handle_approval(db, approval.id, decision, requester)
     open_tickets = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
                     .order_by(Ticket.id.desc()).all())
-    ticket = open_tickets[0] if open_tickets else None
+    ticket = pinned if pinned is not None else (open_tickets[0] if open_tickets else None)
     short = len(text.split()) <= 3 and not text.startswith("[")
-    if short and RATING_RE.match(text) and _closing_exchange(db, requester, text) is not None:
+    if pinned is not None:
+        pass                                                   # the channel already knows which ticket this is
+    elif short and RATING_RE.match(text) and _closing_exchange(db, requester, text) is not None:
         ticket = _closing_exchange(db, requester, text)      # a bare "5" right after a close is the rating
     elif len(open_tickets) > 1 and short:
         # several tickets open and a short answer: it must name the ticket, otherwise ask

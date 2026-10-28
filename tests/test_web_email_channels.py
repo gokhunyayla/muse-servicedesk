@@ -93,6 +93,20 @@ def test_email_opens_a_ticket_and_answers_by_mail(desk, monkeypatch):
         assert db.query(Outbound).filter(Outbound.sent.is_(True)).count() == 1
 
 
+def test_each_new_mail_is_its_own_ticket_and_tagged_replies_continue(desk, monkeypatch):
+    sent = []
+    monkeypatch.setattr(channels, "send_email", lambda to, subject, text: (sent.append((to, subject, text)) or (True, "")))
+    set_llm(ScriptedLLM([Reply(text="Yazıcıya bakıyorum."), Reply(text="Bilgisayar için güç düğmesine basınca ne oluyor?"),
+                         Reply(text="Tamam, yazıcı için teknisyen yolda.")]))
+    t1, _ = channels.ingest_email(channels.parse_email(_mail().as_bytes()))
+    t2, _ = channels.ingest_email(channels.parse_email(_mail(subject="Bilgisayarım açılmıyor", body="Güç gelmiyor.").as_bytes()))
+    assert t2.id != t1.id and t2.title.startswith("Bilgisayarım")           # an untagged mail never lands on the open ticket
+    t3, _ = channels.ingest_email(channels.parse_email(_mail(subject=f"Re: [#{t1.id}] Yazıcı çalışmıyor", body="Hâlâ sıkışıyor.").as_bytes()))
+    assert t3.id == t1.id and sent[-1][1] == f"[#{t1.id}] Re: Yazıcı çalışmıyor"
+    with session() as db:
+        assert db.query(Ticket).count() == 2
+
+
 def test_email_settings_saved_and_password_in_vault(desk):
     r = desk.post("/settings/email", data={"enabled": "1", "imap_host": "imap.example.com", "imap_port": "993", "user": "desk@example.com",
                                            "folder": "INBOX", "poll_minutes": "5"}, follow_redirects=False)
