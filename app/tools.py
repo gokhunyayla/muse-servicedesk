@@ -85,10 +85,97 @@ def verify_identity(ctx: Ctx, employee_no: str, birth_year: int) -> dict:
     return {"ok": ok}
 
 
-@tool("Reset the employee's password; returns a one-time temporary password.", ("L1", "L3"), employee_no=STR)
+PHRASE_WORDS = ["mavi", "kırmızı", "yeşil", "sarı", "kedi", "köpek", "pencere", "bahçe", "deniz", "dağ", "elma", "kalem", "masa", "bulut", "yıldız"]
+
+
+def _strong_key(ticket_id: int) -> str:
+    return f"verify:{ticket_id}"
+
+
+@tool("Start strong verification before a credential change: sends a one-time code to the employee's OTHER channel "
+      "(e-mail when they write on WhatsApp, WhatsApp otherwise) and returns a random phrase they must say in a VOICE note. "
+      "Tell the employee both; then call check_verification with the code they type back.", ("L1", "L3"), employee_no=STR)
+def send_verification(ctx: Ctx, employee_no: str) -> dict:
+    import hashlib
+    import secrets
+    from datetime import timedelta
+    from app.db import Setting, _now
+    u = systems.USERS.get(employee_no)
+    if not u:
+        return {"ok": False, "error": "unknown employee"}
+    requester = ctx.ticket.requester
+    email, phone = systems.user_email(employee_no), u.get("phone") or ""
+    via, to = ("email", email) if (requester.startswith("+") or not phone) and email else ("whatsapp", phone)
+    if not to:
+        return {"ok": False, "error": "no second channel on file for this employee"}
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    phrase = " ".join(secrets.choice(PHRASE_WORDS) for _ in range(3)) + f" {secrets.randbelow(90) + 10}"
+    row = ctx.db.get(Setting, _strong_key(ctx.ticket.id))
+    value = {"code_hash": hashlib.sha256(f"{ctx.ticket.id}:{code}".encode()).hexdigest(), "phrase": phrase,
+             "until": (_now() + timedelta(minutes=10)).isoformat(), "via": via, "to": to, "tries": 0}
+    if row is None:
+        ctx.db.add(Setting(key=_strong_key(ctx.ticket.id), value=value))
+    else:
+        row.value = value
+    ctx.db.flush()
+    text = f"Muse ServiceDesk verification code: {code} (valid 10 minutes). Type it back in the chat where you asked for the password reset."
+    if via == "email":
+        from app.channels import send_email
+        ok, err = send_email(to, "Your verification code", text)
+    else:
+        from app.whatsapp import try_send
+        ok, err = try_send(to, text), ""
+    masked = (to[:2] + "…" + to[to.index("@"):]) if "@" in to else (to[:4] + "…" + to[-2:])
+    return {"ok": bool(ok), "code_sent_via": via, "code_sent_to": masked, "phrase_to_say": phrase,
+            "error": "" if ok else f"could not send the code: {err}"}
+
+
+@tool("Finish strong verification: the code the employee typed back, checked together with the phrase they said in their "
+      "last voice note. Succeeds only when both match; then account changes are allowed.", ("L1", "L3"), code=STR)
+def check_verification(ctx: Ctx, code: str) -> dict:
+    import hashlib
+    import re
+    from datetime import datetime
+    from app.db import Event, Setting, _now
+    row = ctx.db.get(Setting, _strong_key(ctx.ticket.id))
+    v = row.value if row and row.value else None
+    if not v:
+        return {"ok": False, "error": "no verification in progress; call send_verification first"}
+    if datetime.fromisoformat(v["until"]) < _now():
+        return {"ok": False, "error": "code expired; send a new one"}
+    if v.get("tries", 0) >= 5:
+        return {"ok": False, "error": "too many attempts; send a new code"}
+    v["tries"] = v.get("tries", 0) + 1
+    row.value = dict(v)
+    ctx.db.flush()
+    code_ok = hashlib.sha256(f"{ctx.ticket.id}:{code.strip()}".encode()).hexdigest() == v["code_hash"]
+    voice = (ctx.db.query(Event).filter(Event.ticket_id == ctx.ticket.id, Event.actor == "user", Event.kind == "message")
+             .order_by(Event.id.desc()).all())
+    spoken = next((e.content for e in voice if (e.data or {}).get("voice")), "")
+    if not spoken:
+        return {"ok": False, "code_ok": code_ok, "voice_ok": False, "error": "no voice note yet: ask the employee to say the phrase in a voice note"}
+    norm = lambda t: set(w for w in re.findall(r"[a-zçğıöşü0-9]+", t.lower()) if w)      # noqa: E731
+    want, got = norm(v["phrase"]), norm(spoken)
+    voice_ok = len(want & got) >= max(1, len(want) - 1)
+    if code_ok and voice_ok:
+        ctx.ticket.verified = True
+        row.value = None
+        log(ctx.db, ctx.ticket.id, ctx.agent, "note", f"strong verification passed: code via {v['via']} + spoken phrase")
+        return {"ok": True, "code_ok": True, "voice_ok": True}
+    return {"ok": False, "code_ok": code_ok, "voice_ok": voice_ok,
+            "error": ("wrong code" if not code_ok else "") + ("; " if not code_ok and not voice_ok else "") + ("the voice note did not contain the phrase" if not voice_ok else "")}
+
+
+@tool("Reset the employee's password; returns a one-time temporary password. Needs identity AND strong verification "
+      "(send_verification + check_verification) in this ticket.", ("L1", "L3"), employee_no=STR)
 def reset_password(ctx: Ctx, employee_no: str) -> dict:
     if not ctx.ticket.verified:
         return {"ok": False, "error": "identity not verified in this ticket"}
+    from app.db import Event
+    strong = ctx.db.query(Event).filter(Event.ticket_id == ctx.ticket.id, Event.kind == "note",
+                                        Event.content.like("strong verification passed%")).first()
+    if strong is None:
+        return {"ok": False, "error": "strong verification missing: send_verification, then check_verification with the code"}
     return {"ok": True, "temporary_password": systems.reset_password(employee_no), "must_change": True}
 
 

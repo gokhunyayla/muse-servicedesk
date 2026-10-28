@@ -67,7 +67,7 @@ async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) 
     if not text:
         raise HTTPException(422, "could not transcribe audio")
     with session() as db:
-        ticket, answer = handle_message(db, requester, text)
+        ticket, answer = handle_message(db, requester, text, voice=True)
         if ticket is not None:
             log(db, ticket.id, "user", "note", f"voice note transcribed: {text}")
         return {"ticket_id": ticket.id if ticket else None, "transcript": text, "reply": answer}

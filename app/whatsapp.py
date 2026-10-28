@@ -120,12 +120,13 @@ async def inbound(request: Request) -> dict:
             continue
         frm = "+" + m["from"].lstrip("+")
         kind = m.get("type")
-        text, image, mime, extra = "", None, "image/jpeg", None
+        text, image, mime, extra, voice = "", None, "image/jpeg", None, False
         if kind == "text":
             text = m["text"]["body"]
         elif kind == "audio":
             data, amime = download_media(m["audio"]["id"])
             text = transcribe(data, amime)
+            voice = True
             if not text:
                 from app.i18n import t as tr_
                 try_send(frm, tr_("voice_failed", "tr"))
@@ -142,7 +143,7 @@ async def inbound(request: Request) -> dict:
         else:
             continue
         with session() as db:
-            _, answer = handle_message(db, frm, text, image, mime, extra_images=extra, channel="whatsapp")
+            _, answer = handle_message(db, frm, text, image, mime, extra_images=extra, channel="whatsapp", voice=voice)
         try_send(frm, answer)
         handled += 1
     return {"handled": handled}

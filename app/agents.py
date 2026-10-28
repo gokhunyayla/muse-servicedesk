@@ -31,6 +31,12 @@ RULES = """Rules:
   policy, a limit, a deadline or a rule.
 - You are a service that finishes the job, not a guide: use your tools to fix the problem yourself.
 - Verify identity before any account change. Ask for explicit consent before scripts that need it.
+- A password or credential reset needs more than identity: after verify_identity, call send_verification and
+  tell the employee two things in one message — a code was sent to their other channel (say which, masked)
+  and the exact phrase they must say in a VOICE note. When the code arrives (typed) and the voice note has
+  been received, call check_verification(code). Only after it succeeds call reset_password. If the voice
+  note is missing, ask for it; if the phrase was wrong, ask them to say it again; never skip a step and never
+  read the code or phrase out of a voice note as if it were the typed code.
 - If the problem is outside your tools, hand off to the right tier with a clear summary.
 - If no tier can solve it (needs hands on site, a vendor or budget decision, something nobody is
   authorised to change), don't guess and don't loop: escalate_to_human with what was tried. Never leave
@@ -485,7 +491,8 @@ def _approval_decision(db, requester: str, text: str):
 
 def handle_message(db, requester: str, text: str, image: bytes | None = None,
                    mime: str = "image/jpeg", extra_images: list[bytes] | None = None,
-                   force_new: bool = False, channel: str | None = None, ticket: Ticket | None = None) -> tuple[Ticket | None, str]:
+                   force_new: bool = False, channel: str | None = None, ticket: Ticket | None = None,
+                   voice: bool = False) -> tuple[Ticket | None, str]:
     """Entry point for an employee message (optionally with a photo): reuse the open ticket
     or open a new one, then run L1. `force_new` skips the routing and always opens a ticket (system-generated
     tickets, a fresh e-mail); `ticket` pins the message to that ticket (an e-mail reply tagged [#id])."""
@@ -495,7 +502,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         ticket = Ticket(requester=requester, title=text[:255], channel=channel)
         db.add(ticket)
         db.flush()
-        log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
+        log(db, ticket.id, "user", "message", text, {"has_image": image is not None, "voice": voice})
         answer = AGENTS["L1"].run(db, ticket, image_message(text, image, mime) if image else text)
         log(db, ticket.id, "L1", "message", answer)
         db.refresh(ticket)
@@ -628,7 +635,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     for e in ticket.events:
         if e.kind == "message":
             history.append({"role": "user" if e.actor == "user" else "assistant", "content": e.content})
-    log(db, ticket.id, "user", "message", text, {"has_image": image is not None})
+    log(db, ticket.id, "user", "message", text, {"has_image": image is not None, "voice": voice})
     # a plain "kapat" / "iptal" closes the ticket without a model round-trip
     if ticket.status != "resolved" and CLOSE_RE.match(text):
         run_tool(Ctx(db=db, ticket=ticket, agent="L1"), "close_ticket",
@@ -639,6 +646,8 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         db.refresh(ticket)
         return ticket, answer
     agent_text = f"{text}\n\n{notice}" if notice else text
+    if voice:
+        agent_text = f"[voice note, transcribed] {agent_text}"
     content = image_message(agent_text, image, mime) if image else agent_text
     for extra in extra_images or []:          # video frames: same message, more image parts
         content.append(image_message("", extra, mime)[1])
