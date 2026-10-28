@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import json
 import secrets
 import smtplib
 from datetime import timedelta
@@ -311,20 +312,26 @@ def clients_page(admin: User = Depends(admin_user), info: str = "", error: str =
                      f"<td><span class='tag {'active' if c.enabled else 'disabled'}'>{'active' if c.enabled else 'disabled'}</span></td>"
                      f"<td class='mono muted'>{last}</td>")
             rows += (f"<td class='act'><div class='menu'><button class='kebab' onclick='toggleRow(this)' aria-label='Actions'>⋯</button>"
-                     f"<div class='dropdown right'><form method='post' action='/clients/{c.id}/toggle'><button class=\"{'danger' if c.enabled else ''}\">{'Disable' if c.enabled else 'Enable'}</button></form></div></div></td></tr>")
+                     f"<div class='dropdown right'><button type='button' onclick='editClient({c.id},{json.dumps(c.name)},{json.dumps(c.employee_no)},{json.dumps(c.phone)},{json.dumps(c.email)})'>Edit</button>"
+                     f"<form method='post' action='/clients/{c.id}/toggle'><button class=\"{'danger' if c.enabled else ''}\">{'Disable' if c.enabled else 'Enable'}</button></form></div></div></td></tr>")
     body = f"""
 <div class="pagehead"><p class="muted">Employees who may use the support page (<a href="/support-agent" target="_blank">/support-agent</a>). Everyone in the directory is recognised automatically; add people the directory lacks here. They sign in with a one-time code over WhatsApp or e-mail, never a password, and see only their own tickets.</p>
 <button class="btn primary slim" onclick="openModal('clientModal')">+ Add client</button></div>
 {_alert(error, info)}
 <div class="scroll"><table><thead><tr><th>Client</th><th>Employee no</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead><tbody>{rows or '<tr><td colspan=5 class=muted>No clients yet; the first sign-in from the directory creates one.</td></tr>'}</tbody></table></div>
-<div class="modal {'on' if error else ''}" id="clientModal"><div class="box"><h3>Add a client</h3>
+<div class="modal {'on' if error else ''}" id="clientModal"><div class="box"><h3 id="cmTitle">Add a client</h3>
 <p class="muted">Phone (for WhatsApp codes) or work e-mail, at least one.</p>
-<form method="post" action="/clients">
+<form method="post" action="/clients" id="clientForm">
 <label for="cname">Name</label><input id="cname" name="name" required>
 <label for="cemp">Employee no <small>(optional)</small></label><input id="cemp" name="employee_no">
 <label for="cphone">Mobile number</label><input id="cphone" name="phone" placeholder="+90 5xx xxx xx xx">
 <label for="cmail">Work e-mail</label><input id="cmail" name="email" type="email">
-<div class="row end"><button type="button" class="btn" onclick="closeModal('clientModal')">Cancel</button><button class="btn primary slim" type="submit">Add client</button></div></form></div></div>"""
+<div class="row end"><button type="button" class="btn" onclick="closeModal('clientModal')">Cancel</button><button class="btn primary slim" type="submit" id="cmSave">Add client</button></div></form></div></div>
+<script>
+function editClient(id,name,emp,phone,email){{const f=document.getElementById('clientForm');f.action='/clients/'+id;document.getElementById('cmTitle').textContent='Edit client';document.getElementById('cmSave').textContent='Save';
+ document.getElementById('cname').value=name;document.getElementById('cemp').value=emp||'';document.getElementById('cphone').value=phone||'';document.getElementById('cmail').value=email||'';openModal('clientModal');}}
+document.querySelector('.pagehead .btn').addEventListener('click',()=>{{const f=document.getElementById('clientForm');f.action='/clients';f.reset();document.getElementById('cmTitle').textContent='Add a client';document.getElementById('cmSave').textContent='Add client';}});
+</script>"""
     return _page("Clients", body, wide=True, user=admin, active="clients")
 
 
@@ -344,6 +351,28 @@ async def client_add(request: Request, admin: User = Depends(admin_user)):
         db.add(Client(name=name, employee_no=str(form.get("employee_no", "")).strip()[:32], phone=phone, email=email if "@" in email else ""))
         audit(db, admin.email, "client.added", target=phone or email, detail=name, ip=_ip(request))
     return RedirectResponse("/clients?info=Client+added", 303)
+
+
+@router.post("/clients/{client_id}")
+async def client_edit(request: Request, client_id: int, admin: User = Depends(admin_user)):
+    from app.db import Client
+    from app.support import normalise
+    check_origin(request)
+    form = await request.form()
+    name = str(form.get("name", "")).strip()[:120]
+    phone, email = normalise(str(form.get("phone", ""))), normalise(str(form.get("email", "")))
+    if not name or not (phone or email):
+        return RedirectResponse("/clients?error=Name+and+a+phone+or+e-mail+are+required", 303)
+    with session() as db:
+        c = db.get(Client, client_id)
+        if c is None:
+            raise HTTPException(404)
+        clash = db.query(Client).filter(Client.id != client_id, ((Client.phone == phone) if phone else False) | ((Client.email == email) if email else False)).first()
+        if clash is not None:
+            return RedirectResponse("/clients?error=Another+client+already+has+this+phone+or+e-mail", 303)
+        c.name, c.employee_no, c.phone, c.email = name, str(form.get("employee_no", "")).strip()[:32], phone, email if "@" in email else ""
+        audit(db, admin.email, "client.edited", target=phone or email, detail=name, ip=_ip(request))
+    return RedirectResponse("/clients?info=Client+updated", 303)
 
 
 @router.post("/clients/{client_id}/toggle")

@@ -124,6 +124,15 @@ def test_identified_employee_sees_only_own_tickets(desk):
     desk.post("/clients", data={"name": "Yeni Kişi", "phone": "0555 777 00 00"}, follow_redirects=False)
     assert "kod" in c2.post(f"{B}/say", data={"text": "+905557770000"}).json()["text"] and SENT[-1][0] == "+905557770000"
     assert support.normalise("0555 111 00 01") == "+905551110001" and support.normalise("Ayse@Example.com") == "ayse@example.com"
+    # the admin edits a client: new phone, employee number
+    with session() as db:
+        new_id = db.query(Client).filter(Client.phone == "+905557770000").one().id
+    r = desk.post(f"/clients/{new_id}", data={"name": "Yeni Kişi", "employee_no": "E9001", "phone": "0555 777 00 01", "email": "yeni@example.com"}, follow_redirects=False)
+    assert r.status_code == 303 and "updated" in r.headers["location"]
+    with session() as db:
+        c = db.get(Client, new_id)
+        assert c.phone == "+905557770001" and c.employee_no == "E9001" and c.email == "yeni@example.com"
+    assert "Edit client" in desk.get("/clients").text
 
 
 def _mail(frm="mehmet.kaya@example.com", subject="Yazıcı çalışmıyor", body="3. kat yazıcı kağıt sıkıştırıyor.\n\n> eski alıntı\nOn Mon, X wrote:\n> bla"):
