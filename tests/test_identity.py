@@ -134,3 +134,47 @@ def test_offboarding_disables_revokes_and_strips():
         handle_message(db, "+905551110002", "Ayşe Demir bugün ayrıldı")
     u = systems.USERS["E1001"]
     assert u["enabled"] is False and u["groups"] == [] and u["licenses"] == []
+
+
+def test_identity_is_remembered_for_hours_and_only_for_oneself(desk):
+    from app.agents import AGENTS, handle_message
+    from app.tools import Ctx, run_tool
+    from app.db import Ticket, session
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("verify_identity", employee_no="E1001", birth_year=1990)]), Reply(text="Doğrulandı.")]))
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", "şifremi unuttum, E1001 1990")
+        assert t.verified
+    set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Bakıyorum.")]))                 # a different problem: the router says NEW
+    with session() as db:                                              # a new ticket an hour later: already verified, prompt says so
+        t2, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor")
+        assert t2.id != t.id and t2.verified and "verified earlier today" in AGENTS["L1"].system_prompt(t2, db)
+        assert "do not ask for employee number" in AGENTS["L1"].system_prompt(t2, db)
+    with session() as db:                                              # Ayşe's number cannot verify as Mehmet
+        out = run_tool(Ctx(db=db, ticket=db.get(Ticket, t2.id), agent="L1"), "verify_identity", {"employee_no": "E1002", "birth_year": 1985})
+        assert out["ok"] is False and "only for" in out["error"] and "Mehmet Kaya" in out["error"]
+    r = desk.post("/settings/verification", data={"identity_hours": "0"}, follow_redirects=False)        # 0 = ask on every ticket
+    assert r.status_code == 303
+    set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Bakıyorum.")]))
+    with session() as db:
+        for x in db.query(Ticket):
+            x.status = "resolved"
+    set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Bakıyorum.")]))
+    with session() as db:
+        t3, _ = handle_message(db, "+905551110001", "yazıcı bozuk")
+        assert not t3.verified
+
+
+def test_admin_opens_a_ticket_for_an_employee_from_the_console(desk):
+    from app.db import Outbound, Ticket, session
+    set_llm(ScriptedLLM([Reply(text="Ekran titremesi için sürücüye bakıyorum.")]))
+    r = desk.post("/tickets/new", json={"requester": "E1001", "text": "Laptop ekranı sabahtan beri titriyor", "note": "called in by phone"})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["requester"] == "+905551110001" and "sürücüye" in j["reply"]
+    with session() as db:
+        t = db.get(Ticket, j["id"])
+        assert t.requester == "+905551110001" and t.title.startswith("Laptop ekranı")
+        assert any("opened by the desk on behalf" in e.content for e in t.events if e.kind == "note")
+        assert db.query(Outbound).filter(Outbound.to == "+905551110001").count() == 1      # the reply goes to the employee
+    assert desk.post("/tickets/new", json={"requester": "nobody", "text": "x"}).status_code == 422
+    assert 'id="newBtn"' in desk.get("/tickets", headers={"accept": "text/html"}).text

@@ -757,6 +757,7 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <p class="muted" style="margin-top:14px">E-mail intake and sending live under Settings → E-mail.</p>
 <h3>Credential resets</h3><p class="muted">A reset always needs identity (employee no + birth year) and a one-time code on the employee's other channel. Optionally also a random phrase said in a voice note (liveness, not identity).</p>
 <form method="post" action="/settings/verification">
+<div class="srow"><div><b>Identity stays verified for</b><small>After employee no + birth year, the same phone/e-mail is not asked again within this window (0 = every ticket)</small></div><div class="min"><input name="identity_hours" type="number" min="0" max="168" value="{int(vc.get("identity_hours", 8))}" style="width:90px" {dis}> <span>hours</span></div></div>
 <div class="srow"><div><b>Spoken phrase</b><small>Also require the phrase in a voice note</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="voice_phrase" value="1" {"checked" if vc["voice_phrase"] else ""} {dis}> on</label></div></div>
 {('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
 <h3>Support page</h3><p class="muted">Outside the console, for employees the desk knows (directory or <a href="/clients">Clients</a>): a chat that opens tickets like WhatsApp, and a one-time-code sign-in to follow their own tickets: <a href="/support-agent" target="_blank">{_esc(link)}</a></p>
@@ -778,6 +779,10 @@ async def settings_verification(request: Request, admin: User = Depends(admin_us
     check_origin(request)
     form = await request.form()
     value = {"voice_phrase": form.get("voice_phrase") == "1"}
+    try:
+        value["identity_hours"] = max(0, min(168, int(form.get("identity_hours", 8))))
+    except (TypeError, ValueError):
+        value["identity_hours"] = 8
     put_setting("verification", value)
     with session() as db:
         audit(db, admin.email, "settings.verification", detail=str(value), ip=_ip(request))

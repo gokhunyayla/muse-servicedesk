@@ -30,7 +30,12 @@ RULES = """Rules:
   situation calls for it, and you add_note the reason. If no reference covers it, say so; never invent a
   policy, a limit, a deadline or a rule.
 - You are a service that finishes the job, not a guide: use your tools to fix the problem yourself.
-- Verify identity before any account change. Ask for explicit consent before scripts that need it.
+- Verify identity before any account change. Ask for explicit consent before scripts that need it. If the
+  prompt says identity is already verified for this employee, do not ask again.
+- Requests are for the employee writing, never for someone else: if they ask for a colleague's password,
+  account, licence or data, decline in one line and say the colleague must write to the desk themselves
+  (the desk team can open a ticket for them from the console). Reporting a shared problem (a printer, an
+  outage) is fine.
 - A password or credential reset needs more than identity: after verify_identity, call send_verification and
   tell the employee a code was sent to their other channel (say which, masked) and to type it back here. If
   the result also carries phrase_to_say, tell them that exact phrase must be said in a VOICE note as well.
@@ -249,6 +254,15 @@ class Agent:
         sops = "\n".join(f"- {t}" for t in knowledge.titles(self.tier, db=db)) or "(empty)"
         state = (f"Ticket #{ticket.id} | requester: {ticket.requester} | status: {ticket.status} | "
                  f"identity verified: {ticket.verified}")
+        if db is not None:
+            from app.tools import remembered_identity
+            rem = remembered_identity(db, ticket.requester)
+            if rem and not ticket.verified:
+                ticket.verified = True
+                state = state.replace("identity verified: False", "identity verified: True")
+            if ticket.verified:
+                state += ("\nIdentity is verified" + (f" (verified earlier today as {rem['employee_no']}, valid until {rem['until'][11:16]} UTC)" if rem else "")
+                          + "; do not ask for employee number or birth year again.")
         said_no_sop = any(e.kind == "message" and e.actor != "user" and re.search(r"prosedür|procedure|hazır bir işlem|genel (IT )?bilgi", e.content or "", re.I)
                          for e in ticket.events)
         if said_no_sop:

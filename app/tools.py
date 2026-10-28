@@ -75,13 +75,56 @@ def find_user(ctx: Ctx, phone: str) -> dict:
     return {"ok": True, "employee_no": emp, "name": u["name"], "device": u["device"]}
 
 
-@tool("Verify identity with employee number and birth year. Required before account changes.",
+DEFAULT_VERIFICATION = {"voice_phrase": False, "identity_hours": 8}   # Settings → Channels
+
+
+def verification_config() -> dict:
+    from app.sla import get_setting
+    return {**DEFAULT_VERIFICATION, **get_setting("verification", {})}
+
+
+def _identity_key(requester: str) -> str:
+    return f"identity:{requester}"
+
+
+def remembered_identity(db, requester: str) -> dict | None:
+    """A verification done on this phone/e-mail within identity_hours (so the employee is not asked again)."""
+    from datetime import datetime
+    from app.db import Setting, _now
+    row = db.get(Setting, _identity_key(requester))
+    v = row.value if row and row.value else None
+    if not v or datetime.fromisoformat(v["until"]) < _now():
+        return None
+    return v
+
+
+def _own_record(requester: str) -> tuple[str, dict] | None:
+    return systems.user_by_contact(requester)
+
+
+@tool("Verify identity with employee number and birth year. Required before account changes. Only the employee "
+      "themselves can be verified: the number or address they write from must belong to that employee.",
       ("L1",), employee_no=STR, birth_year=INT)
 def verify_identity(ctx: Ctx, employee_no: str, birth_year: int) -> dict:
+    from datetime import timedelta
+    from app.db import Setting, _now
     u = systems.USERS.get(employee_no)
+    own = _own_record(ctx.ticket.requester)
+    if own is not None and own[0] != employee_no:
+        return {"ok": False, "error": f"this number/address belongs to {own[1]['name']} ({own[0]}); requests are only for "
+                                      f"oneself — the other employee must write to the desk themselves, or the desk opens a ticket for them"}
     ok = bool(u) and u["birth_year"] == int(birth_year)
     if ok:
         ctx.ticket.verified = True
+        hours = int(verification_config().get("identity_hours") or 0)
+        if hours > 0:
+            value = {"employee_no": employee_no, "until": (_now() + timedelta(hours=hours)).isoformat(), "ticket": ctx.ticket.id}
+            row = ctx.db.get(Setting, _identity_key(ctx.ticket.requester))
+            if row is None:
+                ctx.db.add(Setting(key=_identity_key(ctx.ticket.requester), value=value))
+            else:
+                row.value = value
+            ctx.db.flush()
     return {"ok": ok}
 
 
@@ -92,12 +135,7 @@ def _strong_key(ticket_id: int) -> str:
     return f"verify:{ticket_id}"
 
 
-DEFAULT_VERIFICATION = {"voice_phrase": False}     # Settings → Channels: also demand a spoken phrase (liveness) for resets
 
-
-def verification_config() -> dict:
-    from app.sla import get_setting
-    return {**DEFAULT_VERIFICATION, **get_setting("verification", {})}
 
 
 @tool("Start strong verification before a credential change: sends a one-time code to the employee's OTHER channel "

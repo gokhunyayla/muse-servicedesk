@@ -153,6 +153,42 @@ def merge_into_problem(p: Problem, request: Request, user=Depends(current_user))
         return {"problem_id": head.id, "linked": [t.id for t in rest]}
 
 
+class NewTicket(BaseModel):
+    requester: str            # phone, e-mail or employee number of the employee it is for
+    text: str
+    note: str = ""
+
+
+@app.post("/tickets/new")
+def desk_opens_ticket(p: NewTicket, request: Request, user=Depends(current_user)) -> dict:
+    """An admin opens a ticket for an employee (the only way to raise a request for someone else).
+    The agents handle it as if the employee had written; replies go to the employee's channel."""
+    from app import systems
+    from app.support import normalise
+    if user.role != "admin":
+        raise HTTPException(403, "admins only")
+    check_origin(request)
+    who = p.requester.strip()
+    contact = normalise(who) if ("@" in who or who[:1] in "+0123456789") else ""
+    if not contact:
+        u = systems.USERS.get(who.upper())
+        contact = (u or {}).get("phone") or systems.user_email(who.upper()) if u else ""
+    if not contact:
+        raise HTTPException(422, "unknown employee: give a phone, e-mail or employee number")
+    text = p.text.strip()
+    if not text:
+        raise HTTPException(422, "empty request")
+    with session() as db:
+        t, answer = handle_message(db, contact, text, force_new=True, channel="whatsapp" if contact.startswith("+") else "email")
+        log(db, t.id, f"desk:{user.name}", "note", f"opened by the desk on behalf of the employee" + (f": {p.note}" if p.note else ""))
+        audit(db, user.email, "ticket.open_for", target=t.id, detail=f"{contact}: {text[:80]}")
+        from app.channels import reachable
+        if reachable(contact):
+            from app.db import Outbound
+            db.add(Outbound(to=contact, ticket_id=t.id, text=answer))
+        return {"id": t.id, "requester": contact, "reply": answer}
+
+
 class Assignment(BaseModel):
     owner: str                # L1 | L2 | L3 | L4 | human
     note: str = ""

@@ -98,7 +98,7 @@ CATEGORIES = {   # English labels; keywords cover Turkish and English ticket tit
 def _render(user, mode: str) -> str:
     from app.auth import CHAT_WIDGET, RAIL_CSS, rail
     return (PAGE.replace("<!--RAIL_CSS-->", RAIL_CSS).replace("<!--RAIL-->", rail(user, "dash" if mode == "dashboard" else "tickets"))
-            .replace("<!--MODE-->", mode).replace("</body>", CHAT_WIDGET + "</body>"))
+            .replace("<!--MODE-->", mode).replace("<!--ROLE-->", user.role).replace("</body>", CHAT_WIDGET + "</body>"))
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -151,7 +151,7 @@ h3{margin:14px 0 8px;font-size:14px}small{color:var(--muted)}
 <!--RAIL_CSS-->
 main{display:grid;gap:16px;padding:12px 16px 16px}main.dash{grid-template-columns:1fr 1fr 1fr}main.tix{grid-template-columns:340px 1fr;align-items:start}
 @media(max-width:1100px){main.dash{grid-template-columns:1fr 1fr}}@media(max-width:900px){main.dash,main.tix{grid-template-columns:1fr;padding:12px;gap:12px}}
-[data-mode=dashboard] .only-tickets{display:none!important}[data-mode=tickets] .only-dash{display:none!important}
+[data-mode=dashboard] .only-tickets{display:none!important}[data-role=agent] .only-admin{display:none!important}[data-mode=tickets] .only-dash{display:none!important}
 .tl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.search{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);min-width:220px}
 .list{padding:10px}.list .thead{padding:4px 6px 8px}.search.inlist{min-width:0;width:200px;padding:5px 9px;font-size:13px}@media(max-width:700px){.search.inlist{width:100%}}.items{max-height:76vh;overflow:auto;display:flex;flex-direction:column}
 .item{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;padding:9px 8px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
@@ -218,7 +218,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 .meta select{width:100%;font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
 .tool summary small,.sys small{color:var(--muted);font-weight:400;margin-left:4px}
 </style></head><body class="app">
-<!--RAIL--><div class="page" data-mode="<!--MODE-->">
+<!--RAIL--><div class="page" data-mode="<!--MODE-->" data-role="<!--ROLE-->">
 <div class="toolbar"><div class="tl"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
 <div class="seg only-tickets" id="statusSeg"><button data-s="" class="on">Any status</button><button data-s="needs_action" title="Open or escalated: the desk has to act">Needs our action</button><button data-s="unresolved" title="Everything not resolved">Unresolved</button><button data-s="open">Open</button><button data-s="waiting_user">Waiting</button><button data-s="waiting_approval">Approval</button><button data-s="escalated">Escalated</button><button data-s="resolved">Resolved</button></div>
 <div class="seg only-tickets" id="ownerSeg"><button data-o="" class="on">Any tier</button><button data-o="L1">L1</button><button data-o="L2">L2</button><button data-o="L3">L3</button><button data-o="L4">L4</button><button data-o="human">Human</button></div>
@@ -236,13 +236,19 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 <div class="kpis six" id="supKpis" style="margin-top:10px"></div><h4 class="sub">Recent runs</h4><div id="sup" class="runs">—</div></section>
 </main>
 <main class="tix only-tickets">
-<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><input class="search inlist" id="q" type="search" placeholder="Filter by title or requester…" aria-label="Filter tickets"><small id="selinfo"></small><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
+<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><input class="search inlist" id="q" type="search" placeholder="Filter by title or requester…" aria-label="Filter tickets"><small id="selinfo"></small><button class="btn only-admin" id="newBtn" onclick="$('#newModal').classList.add('on');$('#nWho').focus()">New ticket</button><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
 <div class="items" id="tickets"></div></section>
 <section class="card detail" id="detail"><div class="thead"><h3 id="ttitle">Ticket</h3><div class="actions" id="tactions"></div></div>
 <div class="dcols"><div><div id="trail" class="timeline"><small>Select a ticket to see its conversation and what the agents did.</small></div>
 <form class="composer" id="composer" style="display:none" onsubmit="sendReply(event)"><textarea id="replyText" rows="2" placeholder="Write to the employee… (sent over WhatsApp)"></textarea><button class="btn primary" type="submit">Send</button></form></div>
 <aside id="meta" class="meta"></aside></div></section>
 </main></div>
+<div class="modal" id="newModal"><div class="box"><h3>Open a ticket for an employee</h3>
+<small class="muted">Employees can only raise requests for themselves; this is how the desk opens one on their behalf. The agents handle it and reply to the employee on their channel.</small>
+<label>Employee (phone, e-mail or employee no)</label><input id="nWho" placeholder="+90 5xx xxx xx xx · ayse.demir@… · E1001">
+<label>Request, in the employee's words</label><textarea id="nText" rows="3" placeholder="e.g. Laptop screen flickers since this morning"></textarea>
+<label>Desk note (optional, internal)</label><input id="nNote" placeholder="e.g. called in by phone">
+<div class="row"><button class="btn" onclick="closeModal('newModal')">Cancel</button><button class="btn primary" id="nGo" onclick="doNew()">Open ticket</button></div></div></div>
 <div class="modal" id="mergeModal"><div class="box"><h3>Merge into a problem record</h3><small id="mergeList"></small>
 <label>Problem title</label><input id="mTitle" placeholder="e.g. Exchange connectivity outage">
 <label>First update to everyone affected (optional)</label><textarea id="mUpdate" rows="2" placeholder="We are aware of the issue and working on it."></textarea>
@@ -334,6 +340,11 @@ function toggle(id,on){on?sel.add(id):sel.delete(id);updateSel();}
 function updateSel(){$('#mergeBtn').disabled=sel.size<2;$('#selinfo').textContent=selecting&&sel.size?sel.size+' selected':'';}
 function closeModal(id){$('#'+id).classList.remove('on');}
 function openMerge(){$('#mergeList').textContent='Tickets: '+[...sel].sort((a,b)=>a-b).map(i=>'#'+i).join(', ');$('#mergeModal').classList.add('on');$('#mTitle').focus();}
+async function doNew(){const who=$('#nWho').value.trim(),text=$('#nText').value.trim();if(!who)return $('#nWho').focus();if(!text)return $('#nText').focus();
+ $('#nGo').disabled=true;$('#nGo').textContent='Opening…';
+ try{const r=await fetch('/tickets/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requester:who,text,note:$('#nNote').value.trim()})});const j=await r.json();
+  if(!r.ok){alert(j.detail||'Could not open the ticket');}else{closeModal('newModal');$('#nWho').value='';$('#nText').value='';$('#nNote').value='';await load(true);show(j.id);}}
+ finally{$('#nGo').disabled=false;$('#nGo').textContent='Open ticket';}}
 async function doMerge(){const title=$('#mTitle').value.trim();if(!title)return $('#mTitle').focus();
  const r=await fetch('/problems',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_ids:[...sel],title,update:$('#mUpdate').value.trim(),owner:$('#mOwner').value})});
  const j=await r.json();closeModal('mergeModal');sel.clear();selecting=false;$('#tickets').classList.remove('selecting');$('#selectBtn').textContent='Select';$('#mergeBtn').style.display='none';$('#mTitle').value='';$('#mUpdate').value='';await load();if(j.problem_id)show(j.problem_id);}
