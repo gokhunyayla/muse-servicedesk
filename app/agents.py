@@ -54,6 +54,23 @@ RULES = """Rules:
   correct if it is not identical."""
 
 
+def _reopen_if_same(db, requester: str, text: str, channel: str) -> Ticket | None:
+    """A ticket resolved less than REOPEN_HOURS ago and the employee describes the same problem again:
+    reopen it with a note (ITSM practice) instead of a duplicate. Older ones stay closed; a new ticket is opened."""
+    from datetime import timedelta
+    from app.db import _now
+    recent = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status == "resolved",
+                                      Ticket.resolved_at >= _now() - timedelta(hours=REOPEN_HOURS))
+              .order_by(Ticket.id.desc()).first())
+    if recent is None or recent.title.startswith("["):
+        return None
+    if _route(db, recent, text) != "same":
+        return None
+    recent.status, recent.resolved_at, recent.rating, recent.channel = "open", None, recent.rating, channel
+    log(db, recent.id, "system", "note", "reopened: the employee reports the same problem again within 48 h")
+    return recent
+
+
 def requester_history(db, ticket: Ticket, days: int = 60, limit: int = 6) -> str:
     """The requester's other tickets, so the agent notices repeats ("third VPN problem this month")."""
     from datetime import timedelta
@@ -417,6 +434,9 @@ def is_ack(text: str) -> bool:
         return False
     return all(w in ACK_WORDS or re.fullmatch(r"#?\d+(?:/5)?", w) for w in words)
 # "kapat", "iptal", "yanlış talep, kapat", "bileti kapatın", "close", "cancel"
+CLOSE_ALL_RE = re.compile(r"(?:tüm|bütün|hepsi|hepsini|all|every)\b.*?(?:kapat|iptal|close|cancel)|(?:kapat|close)\b.*?\b(?:hepsini|tümünü|all of them|them all)", re.I | re.S)
+LIST_RE = re.compile(r"^\s*(?:(?:açık\s+)?(?:taleplerim|ticket'?lar[ıi]m|kay[ıi]tlar[ıi]m)(?:\s+neler|\s+ne durumda|\s+listele)?|(?:list|show)\s+my\s+(?:open\s+)?(?:tickets|requests)|my\s+(?:open\s+)?(?:tickets|requests))\s*[?.!]*\s*$", re.I)
+REOPEN_HOURS = 48
 CLOSE_RE = re.compile(r"^\s*(?:(?:yanlış|hatalı)\s+talep[\s,.]*)?(?:bileti\s+|talebi\s+)?"
                       r"(?:kapat(?:ın|ınız)?|iptal(?:\s+et(?:in)?)?|close|cancel)[\s.!]*$", re.I)
 
@@ -530,7 +550,25 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
                 _RESUME.set(db, requester, {"ticket": held.id, "pending": text, "until": _t.time() + 15 * 60})
                 log(db, held.id, "system", "note", f"employee switched to {channel}; message unclear, asked for detail")
                 return held, clarify(db, held, text, lang)
-    # 3) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
+    # 3) Requests about the desk itself ("close all my tickets", "what is open?") act on the tickets, never open one.
+    if pinned is None and CLOSE_ALL_RE.search(text) and len(text.split()) <= 12:
+        lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
+        if not open_tickets:
+            return None, tr_("nothing_open", lang)
+        for t in open_tickets:
+            run_tool(Ctx(db=db, ticket=t, agent="L1"), "close_ticket", {"resolution": "closed on the employee's request (all open tickets)"})
+            log(db, t.id, "L1", "tool_call", "close_ticket", {"resolution": "closed on the employee's request (all open tickets)"})
+            log(db, t.id, "user", "message", text)
+            log(db, t.id, "L1", "message", tr_("closed_on_request", lang, id=t.id))
+        ids = ", ".join(f"#{t.id}" for t in open_tickets)
+        return open_tickets[0], tr_("closed_all", lang, ids=ids, n=len(open_tickets))
+    if pinned is None and LIST_RE.match(text):
+        lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
+        if not open_tickets:
+            return None, tr_("nothing_open", lang)
+        lines = "\n".join(f"#{t.id}: {t.title.split(chr(10))[0][:60]} ({tr_('st_' + t.status, lang)})" for t in open_tickets)
+        return open_tickets[0], tr_("open_list", lang, n=len(open_tickets), lines=lines)
+    # 4) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
     if pinned is None and is_greeting(text):
         lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
         offer = resume_offer(db, requester, channel, lang, greeting=True)      # hello on a new channel: greet and offer in one go
@@ -579,6 +617,8 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     if ticket is None:
         if not _is_request(db, text):                       # small talk: answer, open nothing
             return None, tr_("greeting", detect(text, None) or "tr")
+        ticket = _reopen_if_same(db, requester, text, channel)   # the same problem back within 48 h: reopen, don't duplicate
+    if ticket is None:
         ticket = Ticket(requester=requester, title=text[:255], channel=channel)
         db.add(ticket)
         db.flush()

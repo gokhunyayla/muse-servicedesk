@@ -10,3 +10,4 @@ __pycache__/
 data/.secret_key
 data/references/
 data/server.log
+data/archive/

@@ -59,8 +59,8 @@ def test_ticket_waits_for_confirmation_then_closes_with_rating():
         assert db.query(Ticket).count() == 1
     assert "already resolved" in llm.requests[0][0]["content"]
 
-    # once rated, a new message from the same employee is a new ticket
-    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    # once rated, a different problem from the same employee is a new ticket (the router says NEW, so no reopen)
+    set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Bakıyorum.")]))
     with session() as db:
         ticket, _ = handle_message(db, "+905551110001", "yazıcı çalışmıyor")
         assert ticket.id != tid
@@ -195,3 +195,39 @@ def test_agent_is_told_not_to_repeat_the_no_procedure_line():
         t, _ = handle_message(db, "+905551110001", "bilgisayar açılmıyor")
         prompt = AGENTS["L1"].system_prompt(t, db)
         assert "Do NOT say it again" in prompt and "say ONCE" in prompt
+
+
+def test_close_all_and_list_act_on_the_desk_and_open_nothing():
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum."), Reply(text="NEW"), Reply(text="Bakıyorum.")]))
+    with session() as db:
+        handle_message(db, "+905551110001", "VPN bağlanmıyor")
+        handle_message(db, "+905551110001", "yazıcı kağıt sıkıştırıyor")
+        t, answer = handle_message(db, "+905551110001", "açık taleplerim neler?")
+        assert answer.startswith("2 açık talebiniz var") and "#1" in answer and "#2" in answer and db.query(Ticket).count() == 2
+        t, answer = handle_message(db, "+905551110001", "tüm ticket'ları kapatabilirsin")
+        assert "2 açık talebinizi kapattım" in answer and "#1" in answer and "#2" in answer
+        assert db.query(Ticket).count() == 2 and all(x.status == "resolved" for x in db.query(Ticket))
+        _, answer = handle_message(db, "+905551110001", "hepsini kapat")
+        assert answer == "Şu an açık talebiniz yok."
+
+
+def test_same_problem_within_48h_reopens_the_ticket_instead_of_a_duplicate():
+    from datetime import timedelta
+    from app.db import _now
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor")
+        t.status, t.resolved_at, t.rating = "resolved", _now() - timedelta(hours=2), 5
+        tid = t.id
+    set_llm(ScriptedLLM([Reply(text="SAME"), Reply(text="Tekrar bakıyorum.")]))
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "VPN yine koptu, aynı sorun")
+        assert t.id == tid and t.status != "resolved" and "Tekrar" in answer and db.query(Ticket).count() == 1
+        assert any("reopened" in e.content for e in t.events if e.kind == "note")
+    with session() as db:                                                        # three days later: a new ticket
+        t = db.get(Ticket, tid)
+        t.status, t.resolved_at = "resolved", _now() - timedelta(hours=72)
+    set_llm(ScriptedLLM([Reply(text="SAME"), Reply(text="Bakıyorum.")]))
+    with session() as db:
+        t2, _ = handle_message(db, "+905551110001", "VPN yine koptu, aynı sorun")
+        assert t2.id != tid and db.query(Ticket).count() == 2
