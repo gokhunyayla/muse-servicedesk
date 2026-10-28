@@ -151,7 +151,7 @@ def test_identity_is_remembered_for_hours_and_only_for_oneself(desk):
         assert "do not ask for employee number" in AGENTS["L1"].system_prompt(t2, db)
     with session() as db:                                              # Ayşe's number cannot verify as Mehmet
         out = run_tool(Ctx(db=db, ticket=db.get(Ticket, t2.id), agent="L1"), "verify_identity", {"employee_no": "E1002", "birth_year": 1985})
-        assert out["ok"] is False and "only for" in out["error"] and "Mehmet Kaya" in out["error"]
+        assert out["ok"] is False and "only for" in out["error"] and "Ayşe Demir" in out["error"]
     r = desk.post("/settings/verification", data={"identity_hours": "0"}, follow_redirects=False)        # 0 = ask on every ticket
     assert r.status_code == 303
     set_llm(ScriptedLLM([Reply(text="NEW"), Reply(text="Bakıyorum.")]))
