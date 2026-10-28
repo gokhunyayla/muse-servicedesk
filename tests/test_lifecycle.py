@@ -248,3 +248,17 @@ def test_old_sop_keys_move_to_the_english_knowledge_base(tmp_path, monkeypatch):
     with session() as db:
         row = db.query(Sop).one()
         assert row.key == "L1/001-vpn-connection" and row.title == "VPN connection problem" and "vpn_status" in row.content
+
+
+def test_new_shipped_sops_reach_an_existing_knowledge_base(tmp_path, monkeypatch):
+    from pathlib import Path
+    from app.db import Sop
+    monkeypatch.setattr(knowledge, "SOP_DIR", Path(__file__).resolve().parents[1] / "data" / "sops")
+    init_db(f"sqlite:///{tmp_path / 'existing.db'}")
+    with session() as db:
+        db.query(Sop).filter(Sop.key == "L1/010-internet-and-websites").delete()
+        db.query(Sop).filter(Sop.key == "L1/003-printer").one().status = "retired"
+    assert knowledge.seed_from_files() == 1                       # only the missing one comes back
+    with session() as db:
+        assert db.query(Sop).filter(Sop.key == "L1/010-internet-and-websites").one().status == "published"
+        assert db.query(Sop).filter(Sop.key == "L1/003-printer").one().status == "retired"

@@ -74,17 +74,20 @@ def migrate_renamed() -> int:
 
 
 def seed_from_files() -> int:
-    """Load data/sops/<tier>/*.md into the table when it is empty. Returns how many were added."""
+    """Load data/sops/<tier>/*.md: every shipped SOP whose key the table does not have yet (a fresh install gets
+    them all, an existing one gets the SOPs added in later releases; retired or edited ones are left alone).
+    Returns how many were added."""
     migrate_renamed()
     with session() as db:
-        if db.query(Sop).count():
-            return 0
+        have = {k for (k,) in db.query(Sop.key)}
         n = 0
         for tier in ("L1", "L2", "L3", "L4"):
             d = SOP_DIR / tier
             if not d.is_dir():
                 continue
             for p in sorted(d.glob("*.md")):
+                if f"{tier}/{p.stem}" in have:
+                    continue
                 body = p.read_text(encoding="utf-8")
                 title = body.splitlines()[0].lstrip("# ").strip() if body else p.stem
                 content = "\n".join(body.splitlines()[1:]).strip()
