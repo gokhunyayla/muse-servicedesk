@@ -94,8 +94,9 @@ def test_onboarding_from_cv_to_account(fresh):
                          Reply(text="Hesap hazır.")]))
     with session() as db:
         t, _ = handle_message(db, MANAGER, "standart laptop, VPN evet")
-        r = results(t, "complete_onboarding")[0]
+        r = results(t, "record_people_answers")[-1]["completed"]             # the last answer creates the account
         assert r["ok"] and not r["problems"]
+        assert results(t, "complete_onboarding")[0]["status"] == "already done"
         emp = r["employee_no"]
         u = systems.USERS[emp]
         assert u["name"] == "Noah Williams" and u["manager"] == "E1002" and "sales-tr" in u["groups"] and "vpn-users" in u["groups"]
@@ -137,7 +138,8 @@ def test_offboarding_is_scheduled_and_runs_on_the_last_day(fresh):
                          Reply(text="Son gün akşam kapanacak.")]))
     with session() as db:
         t, _ = handle_message(db, mgr_contact, "Liam devralsın, cihaz kuryeyle gelsin")
-        assert results(t, "complete_offboarding")[0]["status"] == "scheduled"
+        assert results(t, "record_people_answers")[0]["completed"]["status"] == "scheduled"
+        assert results(t, "complete_offboarding")[0]["status"] == "already scheduled"     # never twice
         f = db.query(Followup).filter(Followup.note == f"offboarding:{pid}").one()
         f.due_at = f.due_at - timedelta(days=5)                       # the last day has ended
     assert systems.USERS["E1001"]["enabled"] is True

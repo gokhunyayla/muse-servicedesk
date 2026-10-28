@@ -9,8 +9,9 @@ Onboarding (HR: "X starts on Monday in Sales, reports to E1000", CV attached):
 3. Tell HR the manager has been asked; nothing else to do on HR's ticket.
 4. On the manager's ticket (the desk opened it and sent the questions): record_people_answers with whatever they answer,
    one by one or all at once; ask only for what is still missing.
-5. When nothing required is missing, read the answers back in one line and, on their OK, complete_onboarding.
-6. Tell the manager it is done; the first password reaches them in a separate message (never repeat it).
+5. When the last required answer is recorded the desk creates the account at once (the result carries "completed").
+   Tell the manager what was created; the first password reaches them in a separate message (never repeat it).
+   If something failed (e.g. an unknown licence), ask only about that and call complete_onboarding again.
 
 Offboarding (HR: "X leaves on <date>"):
 1. start_offboarding with the employee number and the last day (YYYY-MM-DD).

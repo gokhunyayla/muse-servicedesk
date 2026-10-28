@@ -253,9 +253,19 @@ def _poll_graph(c: dict) -> int:
         put_setting("graph", {**get_setting("graph", {}), "last_received": graph.now_iso()})
         return 0
     handled = 0
+    from datetime import datetime, timedelta
+    seen = list(get_setting("email_seen", {}).get("ids", []))
     try:
         for m in graph.new_messages(since):
-            put_setting("graph", {**get_setting("graph", {}), "last_received": m["received"]})
+            # Graph shows receivedDateTime to the second but compares with milliseconds: "gt <that second>" returns
+            # the same message again. Move one second past it, and remember the message id as a second lock.
+            nxt = (datetime.fromisoformat(m["received"].replace("Z", "+00:00")) + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ") if m.get("received") else since
+            put_setting("graph", {**get_setting("graph", {}), "last_received": max(nxt, since)})
+            mid = m.get("message_id") or m.get("received", "")
+            if mid in seen:
+                continue
+            seen = (seen + [mid])[-300:]
+            put_setting("email_seen", {"ids": seen})
             parsed = _parse_graph(m)
             if parsed is None or parsed["from"] == gc["mailbox"].lower() or not sender_allowed(parsed["from"], c):
                 continue

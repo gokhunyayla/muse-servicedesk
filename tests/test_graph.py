@@ -160,7 +160,9 @@ def test_email_channel_through_the_microsoft_365_mailbox(fake, desk, monkeypatch
         first = db.query(Event).filter(Event.ticket_id == t.id).order_by(Event.id).first()
         assert "eski alıntı" not in (first.content or "")
     assert fake.mail and fake.mail[-1]["subject"].startswith("[#1] Re: VPN") and fake.mail[-1]["toRecipients"][0]["emailAddress"]["address"] == "emma.johnson@cloudrium.com"
-    assert graph.config()["last_received"] == "2026-10-28T12:00:05Z"
+    assert graph.config()["last_received"] == "2026-10-28T12:00:06Z"      # one second past it: Graph compares in ms
+    fake.inbox[0]["receivedDateTime"] = "2026-10-28T12:00:06Z"           # even if the same message came back …
+    assert channels.poll_email(force=True) == 0                            # … its id is remembered: never twice
     # outbound desk messages to that employee go the same way
     ok, err = channels.send_email("emma.johnson@cloudrium.com", "[#1] Re: VPN", "Merhaba")
     assert ok and len(fake.mail) == 2

@@ -88,7 +88,9 @@ def _options_text(lang: str) -> str:
     try:
         g = systems._graph()
         if g:
-            groups = sorted({x["displayName"] for x in g._call("GET", "/groups", params={"$select": "displayName", "$top": 50}).get("value", [])})
+            rows = g._call("GET", "/groups", params={"$select": "displayName,securityEnabled,mailEnabled,groupTypes", "$top": 100}).get("value", [])
+            groups = sorted({x["displayName"] for x in rows if x.get("securityEnabled") and not x.get("mailEnabled")
+                             and "Unified" not in (x.get("groupTypes") or [])})
         else:
             groups = sorted({x for u in systems.USERS.values() for x in u.get("groups", [])})
         if groups:
@@ -186,6 +188,11 @@ def start_onboarding(ctx: Ctx, name: str, start_date: str, department: str, mana
         return {"ok": False, "error": f"{mgr.get('name')} has no phone or e-mail the desk can reach"}
     if personal_phone and systems.employees_by_contact(personal_phone):
         return {"ok": False, "error": "that phone number already belongs to an employee; a number is never shared"}
+    for open_p in ctx.db.query(PeopleProcess).filter(PeopleProcess.kind == "onboarding",
+                                                     PeopleProcess.status.in_(("waiting_manager", "scheduled"))):
+        if open_p.data.get("name", "").lower() == name.strip().lower():
+            return {"ok": True, "process_id": open_p.id, "status": "already in progress; the manager was asked on "
+                    f"ticket #{open_p.manager_ticket_id}", "duplicate": True}
     p = PeopleProcess(kind="onboarding", hr_contact=ctx.ticket.requester, hr_ticket_id=ctx.ticket.id,
                       manager_no=manager_employee_no, manager_contact=contact,
                       data={"name": name.strip(), "start_date": start_date.strip(), "department": department.strip(),
@@ -213,7 +220,11 @@ def record_people_answers(ctx: Ctx, process_id: int, answers: dict) -> dict:
     keys = {q["key"] for q in _questions(p.kind)}
     p.answers = {**(p.answers or {}), **{k: str(v).strip() for k, v in (answers or {}).items() if k in keys and str(v).strip()}}
     p.updated_at = _now()
-    return {"ok": True, "answers": p.answers, "missing": _missing(p)}
+    if _missing(p) or p.status != "waiting_manager":
+        return {"ok": True, "answers": p.answers, "missing": _missing(p)}
+    # every required answer is in: the manager's answers are the decision, carry it out now
+    done = complete_onboarding(ctx, p.id) if p.kind == "onboarding" else complete_offboarding(ctx, p.id)
+    return {"ok": True, "answers": p.answers, "missing": [], "completed": done}
 
 
 def _match_license(answer: str) -> str | None:
@@ -229,6 +240,12 @@ def _match_license(answer: str) -> str | None:
     for k in catalog:
         if friendly.get(k) and friendly[k] in a:
             return k
+    import difflib                                       # a typo ("O365_BUSINESS_ESSENTIAL") is still that licence
+    words = [w for w in a.replace(",", " ").split() if len(w) > 3] or [a]
+    for w in words:
+        hit = difflib.get_close_matches(w, [k.lower() for k in catalog], n=1, cutoff=0.85)
+        if hit:
+            return next(k for k in catalog if k.lower() == hit[0])
     raise ValueError(f"no licence matching '{answer}'; available: {', '.join(catalog) or 'none'}")
 
 
@@ -366,6 +383,10 @@ def start_offboarding(ctx: Ctx, employee_no: str, last_day: str, reason: str = "
     contact = _contact(mgr) if mgr else ""
     if not contact:
         return {"ok": False, "error": "the employee has no manager the desk can reach; ask HR who decides the handover"}
+    for open_p in ctx.db.query(PeopleProcess).filter(PeopleProcess.kind == "offboarding",
+                                                     PeopleProcess.status.in_(("waiting_manager", "scheduled"))):
+        if open_p.data.get("employee_no") == employee_no:
+            return {"ok": True, "process_id": open_p.id, "status": "already in progress", "duplicate": True}
     p = PeopleProcess(kind="offboarding", hr_contact=ctx.ticket.requester, hr_ticket_id=ctx.ticket.id, manager_no=mgr,
                       manager_contact=contact, data={"name": u.get("name", employee_no), "employee_no": employee_no,
                                                     "upn": u.get("upn", ""), "last_day": last_day.strip(), "reason": reason})
@@ -394,6 +415,8 @@ def complete_offboarding(ctx: Ctx, process_id: int) -> dict:
         return {"ok": False, "error": "the manager confirms the offboarding on their own ticket"}
     if _missing(p):
         return {"ok": False, "missing": _missing(p)}
+    if p.status in ("scheduled", "done", "done_with_problems"):
+        return {"ok": True, "status": f"already {p.status}"}
     when = _end_of_day_utc(p.data["last_day"])
     if when > _now():
         p.status = "scheduled"

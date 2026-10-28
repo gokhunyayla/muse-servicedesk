@@ -109,6 +109,26 @@ def toggle_device(device_id: int, request: Request, admin: User = Depends(admin_
     return RedirectResponse("/settings?tab=connectors", 303)
 
 
+@router.post("/people/{process_id}/cancel")
+def cancel_people_process(process_id: int, request: Request, admin: User = Depends(admin_user)) -> dict:
+    """Stop an onboarding/offboarding (a duplicate, a hire that fell through): its tickets close without messages."""
+    from app.db import PeopleProcess, Ticket, log, resolve
+    check_origin(request)
+    with session() as db:
+        p = db.get(PeopleProcess, process_id)
+        if p is None:
+            raise HTTPException(404)
+        p.status = "cancelled"
+        for tid in (p.hr_ticket_id, p.manager_ticket_id):
+            t = db.get(Ticket, tid) if tid else None
+            if t is not None and t.status != "resolved":
+                t.resolution = f"{p.kind} #{p.id} cancelled by {admin.email}"
+                resolve(t)
+                log(db, t.id, "system", "note", t.resolution)
+        audit(db, admin.email, "people.cancelled", target=str(process_id), ip=_ip(request))
+    return {"ok": True, "status": "cancelled"}
+
+
 @router.get("/devices.json")
 def devices_json(admin: User = Depends(admin_user)) -> list[dict]:
     return endpoints.listing()
