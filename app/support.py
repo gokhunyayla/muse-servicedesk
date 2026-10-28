@@ -118,66 +118,27 @@ def old_link():
 
 
 @router.get(BASE, response_class=HTMLResponse)
-def page(request: Request, error: str = "", info: str = "", code_for: str = "") -> str:
+def page(request: Request):
     cfg = portal_config()
     if not cfg["enabled"]:
         return _shell(cfg, '<p class="lead">The support page is switched off. Please write to the service desk over WhatsApp or e-mail.</p>')
     who = _ident(request)
-    if who is not None:
-        return _shell(cfg, APP.replace("{NAME}", _esc(who["name"])).replace("{MODE}", who.get("mode", "guest")), app=True)
-    msg = ('<div class="alert bad">' + _esc(error) + "</div>") if error else (('<div class="alert ok">' + _esc(info) + "</div>") if info else "")
-    if code_for:
-        body = f"""
-<p class="lead">We sent a 6-digit code to <b>{_esc(code_for)}</b>. It is valid for {CODE_MINUTES} minutes.</p>{msg}
-<form method="post" action="{BASE}/verify"><input type="hidden" name="contact" value="{_esc(code_for)}">
-<label for="code">Code</label><input id="code" name="code" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" required autofocus autocomplete="one-time-code">
-<button class="btn primary" type="submit">Sign in</button></form>
-<p class="links"><a href="{BASE}">Start over</a></p>"""
-    else:
-        body = f"""
-<p class="lead">Write to IT as you would on WhatsApp, or sign in to follow your requests.</p>{msg}
-<div class="two">
-<form method="post" action="{BASE}/start" class="pane"><h3>Start a conversation</h3>
-<label for="name">Your name</label><input id="name" name="name" required maxlength="80">
-<label for="contact">Mobile number or work e-mail <small>(the one IT knows you by)</small></label><input id="contact" name="contact" required placeholder="+90 5xx xxx xx xx">
-<button class="btn primary" type="submit">Start chat</button></form>
-<form method="post" action="{BASE}/code" class="pane"><h3>Sign in to see your tickets</h3>
-<label for="contact2">Mobile number or work e-mail</label><input id="contact2" name="contact" required placeholder="+90 5xx xxx xx xx">
-<p class="muted" style="margin:6px 0 0">We send a one-time code over WhatsApp or e-mail. No password.</p>
-<button class="btn primary" type="submit">Send code</button></form></div>
-{('<p class="muted" style="margin-top:14px">' + _esc(cfg["note"]) + '</p>') if cfg.get("note") else ''}"""
-    return _shell(cfg, body, wide=True)
+    if who is None or who.get("mode") not in ("anon", "client"):
+        who = {"mode": "anon", "stage": "ask_contact", "name": ""}
+        resp = HTMLResponse(_render(cfg, who))
+        return _set(resp, who)
+    return HTMLResponse(_render(cfg, who))
 
 
-@router.post(BASE + "/start")
-def start(request: Request, name: str = Form(...), contact: str = Form(...)):
-    rate_limit(request, "support-start", 20, 600)
-    if not portal_config()["enabled"]:
-        raise HTTPException(403)
-    c = normalise(contact)
-    with session() as db:
-        who = recognise(db, c)
-    if who is None:
-        return RedirectResponse(f"{BASE}?error=IT+does+not+know+this+number+or+address.+Use+the+one+in+the+company+directory,+or+ask+the+desk+to+add+you.", 303)
-    who = {**who, "mode": "guest", "name": name.strip()[:80] or who["name"], "since": _now().isoformat(timespec="minutes")}
-    return _set(RedirectResponse(BASE, 303), who)
+def _render(cfg: dict, who: dict) -> str:
+    hello = HELLO["client"].format(name=_esc(who.get("name", ""))) if who["mode"] == "client" else HELLO["anon"]
+    return _shell(cfg, APP.replace("{NAME}", _esc(who.get("name") or "guest")).replace("{MODE}", who["mode"]).replace("{HELLO}", hello), app=True)
 
 
-@router.post(BASE + "/code")
-def send_code(request: Request, contact: str = Form(...)):
-    rate_limit(request, "support-code", 10, 600)
-    if not portal_config()["enabled"]:
-        raise HTTPException(403)
-    c = normalise(contact)
-    with session() as db:
-        who = recognise(db, c)
-        if who is not None:
-            code = f"{secrets.randbelow(1_000_000):06d}"
-            db.query(ClientCode).filter(ClientCode.contact == c, ClientCode.used.is_(False)).update({"used": True})
-            db.add(ClientCode(contact=c, code_hash=_hash(c, code), expires_at=_now() + timedelta(minutes=CODE_MINUTES)))
-            _deliver(c, code)
-    # the same answer whether or not we know the address: no way to probe who is in the directory
-    return RedirectResponse(f"{BASE}?code_for={c}", 303)
+HELLO = {
+    "anon": "Merhaba! Ben IT servis masası asistanıyım. Sizi tanıyabilmem için <b>telefon numaranızı</b> ya da <b>iş e-postanızı</b> yazın; oraya tek kullanımlık bir kod göndereceğim, kodu buraya yazmanız yeterli.<br><small>Hello! I am the IT service desk assistant. To recognise you, type your <b>mobile number</b> or <b>work e-mail</b>; I will send a one-time code there and you type it back here.</small>",
+    "client": "Tekrar hoş geldiniz, <b>{name}</b>. Sorununuzu veya talebinizi yazın; soldaki listede taleplerinizi takip edebilirsiniz.",
+}
 
 
 def _hash(contact: str, code: str) -> str:
@@ -192,29 +153,6 @@ def _deliver(contact: str, code: str) -> None:
     else:
         from app.whatsapp import try_send
         try_send(contact, text)
-
-
-@router.post(BASE + "/verify")
-def verify(request: Request, contact: str = Form(...), code: str = Form(...)):
-    rate_limit(request, "support-verify", 15, 600)
-    c = normalise(contact)
-    with session() as db:
-        row = (db.query(ClientCode).filter(ClientCode.contact == c, ClientCode.used.is_(False), ClientCode.expires_at > _now())
-               .order_by(ClientCode.id.desc()).first())
-        if row is None or row.attempts >= 5:
-            return RedirectResponse(f"{BASE}?code_for={c}&error=Code+expired+or+not+found.+Ask+for+a+new+one.", 303)
-        row.attempts += 1
-        if not secrets.compare_digest(row.code_hash, _hash(c, code.strip())):
-            return RedirectResponse(f"{BASE}?code_for={c}&error=Wrong+code.", 303)
-        row.used = True
-        who = recognise(db, c)
-        if who is None:
-            raise HTTPException(403)
-        client = _ensure_client(db, who)
-        client.last_login_at = _now()
-        payload = {"mode": "client", "client_id": client.id, "name": client.name, "phone": client.phone, "email": client.email,
-                   "employee_no": client.employee_no}
-    return _set(RedirectResponse(BASE, 303), payload)
 
 
 @router.post(BASE + "/leave")
@@ -234,6 +172,8 @@ def _addresses(who: dict) -> list[str]:
 def history(request: Request) -> list[dict]:
     """Guests see only this conversation (from sign-in on); signed-in clients see every message on their tickets."""
     who = _require(request)
+    if who.get("mode") != "client":
+        return []
     addrs = _addresses(who)
     with session() as db:
         q = db.query(Ticket).filter(Ticket.requester.in_(addrs)).order_by(Ticket.id.desc())
@@ -247,8 +187,6 @@ def history(request: Request) -> list[dict]:
             if t is None or t.channel == "web":
                 out.append({"ticket": o.ticket_id, "who": "desk", "text": o.text, "at": o.at.isoformat(timespec="minutes")})
                 o.sent = True
-    if who.get("mode") != "client":
-        out = [m for m in out if m["at"] >= who.get("since", "")]
     return out
 
 
@@ -268,7 +206,9 @@ def updates(request: Request) -> list[dict]:
 
 @router.post(BASE + "/say")
 async def say(request: Request, text: str = Form(""), image: UploadFile | None = File(None), ticket: int | None = Form(None)):
-    who = _require(request)
+    if not portal_config()["enabled"]:
+        raise HTTPException(401)
+    who = _ident(request) or {"mode": "anon", "stage": "ask_contact", "name": ""}     # first message without a page load
     rate_limit(request, "support-say", 60, 300)
     data, mime = None, "image/jpeg"
     if image is not None and image.filename:
@@ -279,12 +219,125 @@ async def say(request: Request, text: str = Form(""), image: UploadFile | None =
     text = text.strip()
     if not text and data is None:
         return JSONResponse({"error": "empty"}, 422)
+    if who.get("mode") != "client":
+        answer, who2 = identify(who, text)
+        resp = JSONResponse({"ticket": None, "status": None, "text": answer, "identified": who2.get("mode") == "client", "name": who2.get("name", "")})
+        return _set(resp, who2)
     with session() as db:
         pinned = _own_ticket(db, who, ticket) if ticket else None
         if ticket and pinned is None:
             raise HTTPException(404)
         t, answer = handle_message(db, requester_of(who), text or "(photo)", data, mime, channel="web", ticket=pinned)
         return {"ticket": t.id if t else None, "status": t.status if t else None, "text": answer}
+
+
+# ---- identification, as a conversation --------------------------------------------------------------
+
+CONTACT_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+|\+?\d[\d ()-]{7,}\d")
+EMP_RE = re.compile(r"\b([A-Z]{1,3}\d{3,6})\b.*?\b(19\d\d|20\d\d)\b", re.I | re.S)
+CODE_RE = re.compile(r"\b(\d{6})\b")
+
+
+def identify(who: dict, text: str) -> tuple[str, dict]:
+    """The assistant's own small talk before the desk: ask for a contact, send a code, check it; fall back to
+    employee number + birth year against the directory. Returns (reply, updated session)."""
+    from app.i18n import detect
+    lang = detect(text, None) or who.get("lang") or "tr"
+    who = {**who, "lang": lang}
+    stage = who.get("stage", "ask_contact")
+    tr = lang == "tr"
+    if stage == "ask_code":
+        m = CODE_RE.search(text)
+        if m:
+            ok = _check_code(who["contact"], m.group(1))
+            if ok:
+                return _welcome(who)
+            who["tries"] = int(who.get("tries", 0)) + 1
+            if who["tries"] >= 5:
+                who.update(stage="ask_contact", tries=0)
+                return ("Kod 5 kez yanlış girildi; güvenlik için baştan alalım. Telefon numaranızı ya da e-postanızı tekrar yazın." if tr else
+                        "Five wrong codes; let us start over. Type your number or e-mail again."), who
+            return ("Kod eşleşmedi. Lütfen gelen 6 haneli kodu tekrar yazın; yeni kod için numaranızı/e-postanızı yeniden yazabilirsiniz." if tr else
+                    "That code does not match. Type the 6-digit code again, or your number/e-mail for a new one."), who
+        # maybe they typed a (new) contact instead
+        stage = "ask_contact"
+    if stage == "ask_employee":
+        m = EMP_RE.search(text)
+        if m:
+            emp, year = m.group(1).upper(), int(m.group(2))
+            u = systems.USERS.get(emp)
+            if u and u.get("birth_year") == year:
+                who.update(employee_no=emp, name=u["name"], phone=u.get("phone") or "", email=systems.user_email(emp), client_id=None)
+                return _welcome(who)
+            return ("Sicil numarası ve doğum yılı dizinle eşleşmedi. Tekrar deneyin veya servis masasına WhatsApp'tan yazın." if tr else
+                    "Employee number and birth year do not match the directory. Try again or write to the desk on WhatsApp."), who
+        if not CONTACT_RE.search(text):
+            return ("Sicil numaranızı ve doğum yılınızı birlikte yazın, örneğin: E1001 1990" if tr else
+                    "Type your employee number and birth year together, e.g. E1001 1990"), who
+        stage = "ask_contact"
+    # ask_contact
+    m = CONTACT_RE.search(text)
+    if not m:
+        return ("Sizi tanıyabilmem için telefon numaranızı ya da iş e-postanızı yazar mısınız? Örn. +90 5xx xxx xx xx" if tr else
+                "To recognise you I need your mobile number or work e-mail, e.g. +90 5xx xxx xx xx"), who
+    contact = normalise(m.group(0))
+    with session() as db:
+        known = recognise(db, contact) if contact else None
+        if known is None:
+            who.update(stage="ask_employee")
+            return (f"{contact or m.group(0)} için dizinde kayıt bulamadım. Sicil numaranızı ve doğum yılınızı yazarsanız oradan doğrulayayım (örn. E1001 1990)." if tr else
+                    f"I could not find {contact or m.group(0)} in the directory. Type your employee number and birth year and I will verify you that way (e.g. E1001 1990)."), who
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        db.query(ClientCode).filter(ClientCode.contact == contact, ClientCode.used.is_(False)).update({"used": True})
+        db.add(ClientCode(contact=contact, code_hash=_hash(contact, code), expires_at=_now() + timedelta(minutes=CODE_MINUTES)))
+    _deliver(contact, code)
+    who.update(stage="ask_code", contact=contact, tries=0, **{k: known[k] for k in ("name", "phone", "email", "employee_no", "client_id")})
+    where = ("WhatsApp" if "@" not in contact else "e-posta") if tr else ("WhatsApp" if "@" not in contact else "e-mail")
+    return (f"Teşekkürler. {contact} adresine {where} ile 6 haneli bir kod gönderdim ({CODE_MINUTES} dk geçerli). Kodu buraya yazın." if tr else
+            f"Thanks. I sent a 6-digit code to {contact} over {where} (valid {CODE_MINUTES} min). Type it here."), who
+
+
+def _check_code(contact: str, code: str) -> bool:
+    with session() as db:
+        row = (db.query(ClientCode).filter(ClientCode.contact == contact, ClientCode.used.is_(False), ClientCode.expires_at > _now())
+               .order_by(ClientCode.id.desc()).first())
+        if row is None or row.attempts >= 5:
+            return False
+        row.attempts += 1
+        if not secrets.compare_digest(row.code_hash, _hash(contact, code)):
+            return False
+        row.used = True
+        return True
+
+
+def _welcome(who: dict) -> tuple[str, dict]:
+    """Identity confirmed: create/refresh the client record, greet with what the desk knows."""
+    tr = who.get("lang", "tr") == "tr"
+    with session() as db:
+        client = _ensure_client(db, who)
+        client.last_login_at = _now()
+        addrs = [a for a in (client.phone, client.email) if a]
+        open_t = db.query(Ticket).filter(Ticket.requester.in_(addrs), Ticket.status != "resolved").order_by(Ticket.id.desc()).all() if addrs else []
+        new = {"mode": "client", "client_id": client.id, "name": client.name, "phone": client.phone, "email": client.email,
+               "employee_no": client.employee_no, "lang": who.get("lang", "tr")}
+        u = systems.USERS.get(client.employee_no or "") or {}
+        device = u.get("device")
+        first = (client.name.split() or [""])[0]
+        if tr:
+            msg = f"Hoş geldiniz {client.name}."
+            if device:
+                msg += f" Kayıtlı cihazınız {device}."
+            msg += (f" {len(open_t)} açık talebiniz var: " + ", ".join(f"#{t.id} {t.title.split(chr(10))[0][:40]}" for t in open_t[:3]) + "."
+                    if open_t else " Şu an açık talebiniz yok.")
+            msg += " Sorununuzu veya talebinizi yazın; soldaki listeden taleplerinizi takip edebilirsiniz."
+        else:
+            msg = f"Welcome, {client.name}."
+            if device:
+                msg += f" Your registered device is {device}."
+            msg += (f" You have {len(open_t)} open request(s): " + ", ".join(f"#{t.id} {t.title.split(chr(10))[0][:40]}" for t in open_t[:3]) + "."
+                    if open_t else " You have no open requests.")
+            msg += " Tell me the problem or request; your requests are listed on the left."
+        return msg, new
 
 
 # ---- my tickets (signed-in clients only) ------------------------------------------------------------
@@ -369,7 +422,7 @@ body.chat{align-items:stretch}.chat .card{width:min(1040px,100%);display:flex;fl
 .chat .brand{flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:8px}.chat .brand h2{font-size:18px}
 .who{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}.who form{display:inline}.who button{border:0;background:none;color:var(--accent);cursor:pointer;font:inherit;font-size:12px;padding:0}
 .tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}.tag.open,.tag.waiting_user,.tag.waiting_approval,.tag.escalated{color:var(--accent);border-color:var(--accent)}.tag.resolved{color:var(--ok);border-color:var(--ok)}.tag.risk{color:var(--bad);border-color:var(--bad)}
-.layout{display:grid;grid-template-columns:270px 1fr;gap:14px;flex:1;min-height:0;margin-top:8px}.layout.guest{grid-template-columns:1fr}
+.layout{display:grid;grid-template-columns:270px 1fr;gap:14px;flex:1;min-height:0;margin-top:8px}.layout.anon{grid-template-columns:1fr}.layout.anon .side{display:none}
 .side{border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}.side .btn{margin:10px;width:auto;padding:8px 10px;font-size:13px}
 .side h4{margin:4px 12px 4px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.side .list{overflow:auto;flex:1}
 .side .it{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:none;color:var(--fg);padding:9px 12px;cursor:pointer;font:inherit}.side .it:hover,.side .it.on{background:var(--bg)}
@@ -391,21 +444,21 @@ body.chat{align-items:stretch}.chat .card{width:min(1040px,100%);display:flex;fl
 """
 
 APP = """
-<div class="who"><span>Signed in as <b>{NAME}</b> <span class="tag">{MODE}</span></span>
-<form method="post" action="/support-agent/leave"><button type="submit">not you?</button></form></div>
+<div class="who"><span><b id="whoName">{NAME}</b> <span class="tag" id="whoMode">{MODE}</span></span>
+<form method="post" action="/support-agent/leave"><button type="submit">not you? / start over</button></form></div>
 <div class="layout {MODE}" id="layout">
 <aside class="side" id="side"><button class="btn primary" onclick="newConv()">＋ New conversation</button><h4>My requests</h4><div class="list" id="tlist"><div class="sys">Loading…</div></div></aside>
 <section class="main">
 <div class="head"><div><b id="hTitle">New conversation</b> <span class="tag" id="hStatus" style="display:none"></span><div class="meta" id="hMeta"></div></div>
 <div id="hActions"><span class="stars" id="stars" style="display:none"></span> <button class="btn" id="btnClose" style="display:none" onclick="closeTicket()">Close request</button></div></div>
-<div class="log" id="log"><div class="sys">Describe your problem or request. Photos of error screens help.<br>Each new topic becomes its own request; you will see it on the left.</div></div>
+<div class="log" id="log"><div class="m desk" id="hello">{HELLO}</div></div>
 <div class="typing" id="typing"></div>
 <form class="composer" id="f" onsubmit="return send(event)">
 <label class="att" title="Attach a photo"><input type="file" id="img" accept="image/*" onchange="preview()"><svg viewBox="0 0 24 24"><path d="M21.4 11.1 12.3 20.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label>
 <textarea id="t" rows="1" placeholder="Describe the problem…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send(event)}"></textarea>
 <button class="btn primary" type="submit">Send</button></form></section></div>
 <script>
-const B='/support-agent',MODE='{MODE}';
+const B='/support-agent';let MODE='{MODE}';
 const log=document.getElementById('log'),T=document.getElementById('t'),TY=document.getElementById('typing'),IMG=document.getElementById('img');
 const LAB={open:'Open',waiting_user:'Waiting for you',waiting_approval:'Waiting for approval',escalated:'With an engineer',resolved:'Resolved'};
 let pendingImg=null,cur=null,tickets=[];
@@ -421,6 +474,7 @@ function setHead(t){const st=document.getElementById('hStatus'),S=document.getEl
  document.getElementById('btnClose').style.display=t.status==='resolved'?'none':'';
  if(t.status==='resolved'){S.style.display='';S.innerHTML='<span class="muted" style="font-size:12px">How did we do?</span> '+[1,2,3,4,5].map(n=>`<button class="${t.rating&&n<=t.rating?'on':''}" onclick="rate(${n})">★</button>`).join('');}else{S.style.display='none';}}
 function newConv(){cur=null;setHead(null);log.innerHTML='<div class="sys">Describe your problem or request. Photos of error screens help.<br>Each new topic becomes its own request; you will see it on the left.</div>';markList();T.focus();}
+document.getElementById('hello').innerHTML=document.getElementById('hello').innerHTML;
 function markList(){document.querySelectorAll('.side .it').forEach(b=>b.classList.toggle('on',Number(b.dataset.id)===cur));}
 async function loadTickets(){if(MODE!=='client')return;const r=await fetch(B+'/tickets');if(!r.ok)return;tickets=await r.json();
  const L=document.getElementById('tlist');L.innerHTML=tickets.length?tickets.map(t=>`<button class="it" data-id="${t.id}" onclick="openTicket(${t.id})"><b>#${t.id} ${esc(t.title)}</b><small><span class="tag ${t.status}">${LAB[t.status]||t.status}</span>${t.risk&&t.risk.pct>=100?'<span class="tag risk">SLA</span>':''}<span>${fmt(t.last_at||t.created_at)}</span></small></button>`).join(''):'<div class="sys">No requests yet.</div>';markList();}
@@ -430,6 +484,7 @@ async function send(e){e.preventDefault();const text=T.value.trim();const f=IMG.
  TY.textContent='Service desk is typing…';
  try{const r=await fetch(B+'/say',{method:'POST',body:fd});const j=await r.json();TY.textContent='';
   if(!r.ok){add('desk',j.error||'Something went wrong. Please try again.');return;}add('desk',j.text,null,null,j.ticket);
+  if(j.identified&&MODE!=='client'){MODE='client';document.getElementById('layout').className='layout client';document.getElementById('whoName').textContent=j.name;document.getElementById('whoMode').textContent='client';loadTickets();}
   if(cur&&j.status){const t=tickets.find(x=>x.id===cur);setHead({...(t||{}),id:cur,title:(t||{}).title,status:j.status,channel:'web'});}
   loadTickets();}
  catch(err){TY.textContent='';add('desk','Could not reach the desk. Please try again.');}}

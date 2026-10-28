@@ -21,18 +21,28 @@ def fresh(tmp_path, monkeypatch):
 B = "/support-agent"
 
 
-def _employee() -> TestClient:
+SENT: list = []
+
+
+def _employee(contact: str = "0555 111 00 01") -> TestClient:
+    """Open the support chat and get identified the way an employee would: contact → code → welcome."""
+    from app import whatsapp, channels
     from app.main import app
+    whatsapp.try_send = lambda to, text: (SENT.append((to, text)) or True)            # codes over WhatsApp
+    channels.send_email = lambda to, subject, text: (SENT.append((to, text)) or (True, ""))   # or e-mail
     c = TestClient(app)
-    assert "Start chat" in c.get(B).text and c.get("/portal", follow_redirects=False).headers["location"] == B
-    r = c.post(f"{B}/start", data={"name": "Ayşe Demir", "contact": "0555 111 00 01"}, follow_redirects=False)
-    assert r.status_code == 303 and "muse_support" in c.cookies
+    assert "tanıyabilmem" in c.get(B).text and c.get("/portal", follow_redirects=False).headers["location"] == B
+    r = c.post(f"{B}/say", data={"text": f"merhaba, numaram {contact}"}).json()
+    assert "kod" in r["text"] and r["identified"] is False
+    code = SENT[-1][1].split("code: ")[1][:6]
+    r = c.post(f"{B}/say", data={"text": code}).json()
+    assert r["identified"] is True and r["text"].startswith("Hoş geldiniz")
     return c
 
 
 def test_web_chat_opens_a_ticket_and_receives_desk_replies(desk):
     emp = _employee()
-    assert "Signed in as <b>Ayşe Demir</b>" in emp.get(B).text
+    assert '<b id="whoName">Ayşe Demir</b>' in emp.get(B).text
     set_llm(ScriptedLLM([Reply(text="VPN için önce ağınızı kontrol edelim.")]))
     r = emp.post("/support-agent/say", data={"text": "vpn bağlanmıyor"}).json()
     assert r["text"].startswith("VPN") and r["ticket"] == 1
@@ -54,35 +64,42 @@ def test_web_chat_opens_a_ticket_and_receives_desk_replies(desk):
         assert db.get(Ticket, 1).channel == "whatsapp" and db.query(Ticket).count() == 1
 
 
-def test_support_page_only_admits_people_the_desk_knows(desk):
+def test_assistant_identifies_the_employee_in_the_conversation(desk):
     from app.main import app
     c = TestClient(app)
-    r = c.post(f"{B}/start", data={"name": "X", "contact": "+905559999999"}, follow_redirects=False)    # unknown number: no chat, no ticket
-    assert "does+not+know" in r.headers["location"] and "muse_support" not in c.cookies
-    r = c.post(f"{B}/start", data={"name": "Ayşe", "contact": "ayse.demir@example.com"}, follow_redirects=False)   # directory e-mail works too
-    assert r.status_code == 303 and "muse_support" in c.cookies
+    r = c.post(f"{B}/say", data={"text": "yazıcım çalışmıyor"}).json()                          # no identity yet: nothing reaches the desk
+    assert r["ticket"] is None and "telefon numaranızı" in r["text"]
+    r = c.post(f"{B}/say", data={"text": "+905559999999"}).json()                                 # unknown number → directory check
+    assert "Sicil" in r["text"] and r["identified"] is False
+    r = c.post(f"{B}/say", data={"text": "E1001 1985"}).json()                                    # wrong birth year
+    assert "eşleşmedi" in r["text"] and r["identified"] is False
+    r = c.post(f"{B}/say", data={"text": "E1001 1990"}).json()                                    # directory fallback works
+    assert r["identified"] is True and "Ayşe Demir" in r["text"] and "TR-LT-101" in r["text"]
+    with session() as db:
+        assert db.query(Ticket).count() == 0
+    emp = _employee("ayse.demir@example.com")                                                      # e-mail works too, code by mail
+    assert SENT[-1][0] == "ayse.demir@example.com"
     r = desk.post("/settings/portal", data={"title": "Help me", "note": "Internal use"}, follow_redirects=False)   # enabled unchecked
     assert r.status_code == 303
-    assert "switched off" in c.get(B).text and c.get(f"{B}/history").status_code == 401
+    assert "switched off" in emp.get(B).text and emp.get(f"{B}/history").status_code == 401
     assert "Support page" in desk.get("/settings?tab=channels").text and "Incoming (IMAP)" in desk.get("/settings?tab=email").text
 
 
-def test_one_time_code_sign_in_shows_only_own_tickets(desk, monkeypatch):
-    from app import support, whatsapp
+def test_identified_employee_sees_only_own_tickets(desk):
+    from app import support
     from app.main import app
-    sent = []
-    monkeypatch.setattr(whatsapp, "try_send", lambda to, text: (sent.append((to, text)) or True))
     set_llm(ScriptedLLM([Reply(text="Bakıyorum."), Reply(text="Bakıyorum."), Reply(text="Tamam, not aldım.")]))
     desk.post("/messages", json={"requester": "+905551110001", "text": "VPN bağlanmıyor"})          # Ayşe's ticket (over WhatsApp)
     desk.post("/messages", json={"requester": "+905551110002", "text": "yazıcı bozuk"})              # Mehmet's ticket
     c = TestClient(app)
-    r = c.post(f"{B}/code", data={"contact": "0555 111 00 01"}, follow_redirects=False)
-    assert "code_for=" in r.headers["location"] and sent[-1][0] == "+905551110001" and "code" in sent[-1][1]
-    code = sent[-1][1].split("code: ")[1][:6]
-    assert "Wrong" in c.post(f"{B}/verify", data={"contact": "+905551110001", "code": "000000"}, follow_redirects=False).headers["location"]
-    r = c.post(f"{B}/verify", data={"contact": "+905551110001", "code": code}, follow_redirects=False)
-    assert r.status_code == 303 and "muse_support" in c.cookies
-    assert "My requests" in c.get(B).text
+    from app import whatsapp
+    whatsapp.try_send = lambda to, text: (SENT.append((to, text)) or True)
+    r = c.post(f"{B}/say", data={"text": "0555 111 00 01"}).json()
+    assert r["identified"] is False
+    assert "eşleşmedi" in c.post(f"{B}/say", data={"text": "000000"}).json()["text"]               # wrong code
+    code = SENT[-1][1].split("code: ")[1][:6]
+    r = c.post(f"{B}/say", data={"text": code}).json()
+    assert r["identified"] is True and "1 açık talebiniz" in r["text"] and "VPN" in r["text"]
     mine = c.get(f"{B}/tickets").json()
     assert [t["title"] for t in mine] == ["VPN bağlanmıyor"]                         # never Mehmet's
     tid = mine[0]["id"]
@@ -97,15 +114,15 @@ def test_one_time_code_sign_in_shows_only_own_tickets(desk, monkeypatch):
         from app.db import Client
         cl = db.query(Client).one()
         assert cl.employee_no == "E1001" and cl.last_login_at is not None
-    # the console lists the client and can disable them; a disabled client cannot start a chat
+    # the console lists the client and can disable them; a disabled client is not recognised any more
     page = desk.get("/clients").text
     assert "Ayşe Demir" in page and "E1001" in page
     desk.post(f"/clients/{cl.id}/toggle", follow_redirects=False)
     c2 = TestClient(app)
-    assert "does+not+know" in c2.post(f"{B}/start", data={"name": "A", "contact": "+905551110001"}, follow_redirects=False).headers["location"]
-    # an admin adds someone the directory lacks: they get in
+    assert "Sicil" in c2.post(f"{B}/say", data={"text": "+905551110001"}).json()["text"]
+    # an admin adds someone the directory lacks: they get a code
     desk.post("/clients", data={"name": "Yeni Kişi", "phone": "0555 777 00 00"}, follow_redirects=False)
-    assert c2.post(f"{B}/start", data={"name": "Yeni", "contact": "+905557770000"}, follow_redirects=False).status_code == 303
+    assert "kod" in c2.post(f"{B}/say", data={"text": "+905557770000"}).json()["text"] and SENT[-1][0] == "+905557770000"
     assert support.normalise("0555 111 00 01") == "+905551110001" and support.normalise("Ayse@Example.com") == "ayse@example.com"
 
 
