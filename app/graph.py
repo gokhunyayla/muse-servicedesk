@@ -353,7 +353,7 @@ def test() -> dict:
     """What the admin sees after Save & test: tenant name, how many users, whether the mailbox answers."""
     org = _call("GET", "/organization", params={"$select": "displayName,verifiedDomains"})
     o = (org.get("value") or [{}])[0]
-    domains = [d["name"] for d in o.get("verifiedDomains", []) if d.get("isVerified")]
+    domains = [d["name"] for d in o.get("verifiedDomains", []) if not d["name"].endswith(".onmicrosoft.com")] or [d["name"] for d in o.get("verifiedDomains", [])]
     count = _call("GET", "/users/$count", headers={"ConsistencyLevel": "eventual"})
     out = {"ok": True, "tenant": o.get("displayName", ""), "domains": domains, "users": count if isinstance(count, int) else "?"}
     mb = config()["mailbox"].strip()
