@@ -53,7 +53,8 @@ def run_due_followups() -> int:
 def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600) -> threading.Thread:
     def loop():
         from app.proactive import run_proactive_checks
-        last_proactive = 0.0
+        from app.sla import get_setting, put_setting
+        last_proactive = float(get_setting("proactive", {}).get("last_run", 0) or 0)   # survives restarts
         while True:
             try:
                 run_due_followups()
@@ -64,6 +65,7 @@ def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600
                 if time.time() - last_proactive >= proactive_every_sec:
                     run_proactive_checks()
                     last_proactive = time.time()
+                    put_setting("proactive", {"last_run": last_proactive})
                 from app import supervisor
                 from app.db import SupervisorRun
                 with session() as db:

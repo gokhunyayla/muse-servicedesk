@@ -33,14 +33,19 @@ def findings() -> list[dict]:
     return out
 
 
+COOLDOWN_DAYS = 7
+
+
 def run_proactive_checks() -> list[int]:
-    """Open one ticket per finding, unless an open ticket already mentions that host and kind."""
+    """Open one ticket per finding — unless one is already open for that host and kind, or one was opened
+    (even if since closed) within the last COOLDOWN_DAYS: a closed finding is not nagged again every run."""
+    from datetime import timedelta
+    from app.db import _now
     opened = []
     for f in findings():
         with session() as db:
-            dup = db.query(Ticket).filter(Ticket.status != "resolved",
-                                          Ticket.title.contains(f["hostname"]),
-                                          Ticket.title.contains(f["kind"])).count()
+            dup = db.query(Ticket).filter(Ticket.title.contains(f["hostname"]), Ticket.title.contains(f["kind"]),
+                                          (Ticket.status != "resolved") | (Ticket.created_at >= _now() - timedelta(days=COOLDOWN_DAYS))).count()
             if dup:
                 continue
             title = f"[Proactive:{f['kind']}] {f['hostname']}"

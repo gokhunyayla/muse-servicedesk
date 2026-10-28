@@ -49,6 +49,17 @@ def test_mass_outage_is_merged_into_one_incident_and_closed_together():
         assert {x.status for x in db.query(Ticket).all()} == {"resolved"}
 
 
+def test_closed_proactive_finding_is_not_reopened_within_the_cooldown():
+    from app.proactive import run_proactive_checks
+    set_llm(ScriptedLLM([Reply(text="ok")] * 6))
+    first = run_proactive_checks()
+    assert first
+    with session() as db:
+        for tid in first:
+            db.get(Ticket, tid).status = "resolved"
+    assert run_proactive_checks() == []                    # closed yesterday-ish: no nagging on the next run / restart
+
+
 def test_proactive_checks_find_disk_patch_and_open_tickets_once():
     kinds = {(f["hostname"], f["kind"]) for f in findings()}
     assert ("TR-LT-102", "disk") in kinds and ("TR-LT-103", "patch") in kinds
