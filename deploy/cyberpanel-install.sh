@@ -12,7 +12,7 @@ DOMAIN="${DOMAIN:?DOMAIN=example.com}"
 SITE_USER="${SITE_USER:?SITE_USER=the CyberPanel site user}"
 DB_NAME="${DB_NAME:?}"; DB_USER="${DB_USER:?}"; DB_PASS="${DB_PASS:?}"
 SITE=/home/$DOMAIN; APP=$SITE/app; SVC=${SERVICE_NAME:-${DOMAIN%%.*}}
-PORT="${PORT:-1002}"
+PORT="${PORT:-8102}"   # unprivileged port: the site user may not bind below 1024
 REPO="${REPO:-https://github.com/gokhunyayla/muse-servicedesk.git}"
 
 urlencode() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
