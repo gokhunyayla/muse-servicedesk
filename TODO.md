@@ -1,6 +1,7 @@
 # TODO
 
 ## Must (before submission)
+- [ ] **Make the demo cases real** one by one — see `docs/DEMO-CASES.md` (endpoint agent → Entra/M365 → Defender). README states real vs simulated per case.
 - [ ] **Real endpoint agent (MCP).** A small MCP server on the employee's laptop exposing real diagnostics
       and fixes: ping/DNS/gateway test, DNS cache reset, VPN status via `scutil`, disk/CPU/process report,
       CUPS queue reset, screen lock. L1/L2 call it instead of the simulated device table. README states
