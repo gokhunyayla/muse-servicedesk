@@ -137,7 +137,7 @@ def _render(cfg: dict, who: dict) -> str:
 
 HELLO = {
     "anon": "Merhaba! Ben IT servis masası asistanıyım. Sizi tanıyabilmem için <b>telefon numaranızı</b> ya da <b>iş e-postanızı</b> yazın; oraya tek kullanımlık bir kod göndereceğim, kodu buraya yazmanız yeterli.<br><small>Hello! I am the IT service desk assistant. To recognise you, type your <b>mobile number</b> or <b>work e-mail</b>; I will send a one-time code there and you type it back here.</small>",
-    "client": "Tekrar hoş geldiniz, <b>{name}</b>. Sorununuzu veya talebinizi yazın; soldaki listede taleplerinizi takip edebilirsiniz.",
+    "client": "Tekrar hoş geldiniz, <b>{name}</b>. Sorununuzu veya talebinizi yazın; taleplerinizi sağ üstteki <b>My requests</b> düğmesinden takip edebilirsiniz.",
 }
 
 
@@ -329,14 +329,14 @@ def _welcome(who: dict) -> tuple[str, dict]:
                 msg += f" Kayıtlı cihazınız {device}."
             msg += (f" {len(open_t)} açık talebiniz var: " + ", ".join(f"#{t.id} {t.title.split(chr(10))[0][:40]}" for t in open_t[:3]) + "."
                     if open_t else " Şu an açık talebiniz yok.")
-            msg += " Sorununuzu veya talebinizi yazın; soldaki listeden taleplerinizi takip edebilirsiniz."
+            msg += " Sorununuzu veya talebinizi yazın; taleplerinizi sağ üstteki My requests düğmesinden takip edebilirsiniz."
         else:
             msg = f"Welcome, {client.name}."
             if device:
                 msg += f" Your registered device is {device}."
             msg += (f" You have {len(open_t)} open request(s): " + ", ".join(f"#{t.id} {t.title.split(chr(10))[0][:40]}" for t in open_t[:3]) + "."
                     if open_t else " You have no open requests.")
-            msg += " Tell me the problem or request; your requests are listed on the left."
+            msg += " Tell me the problem or request; the My requests button at the top right lists yours."
         return msg, new
 
 
