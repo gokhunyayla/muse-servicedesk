@@ -105,6 +105,10 @@ def send_verification(ctx: Ctx, employee_no: str) -> dict:
         return {"ok": False, "error": "unknown employee"}
     requester = ctx.ticket.requester
     email, phone = systems.user_email(employee_no), u.get("phone") or ""
+    from app.db import Client                        # the admin-managed contact record wins over directory defaults
+    c = ctx.db.query(Client).filter((Client.phone == requester) | (Client.email == requester)).first()
+    if c is not None:
+        email, phone = c.email or email, c.phone or phone
     via, to = ("email", email) if (requester.startswith("+") or not phone) and email else ("whatsapp", phone)
     if not to:
         return {"ok": False, "error": "no second channel on file for this employee"}
