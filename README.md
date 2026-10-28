@@ -20,7 +20,7 @@ monitoring (credentials on a sticky note, unlocked screens). No human in the loo
 WhatsApp / API ──► L1  talks to the employee, solves standard problems, hands off ──► ticket store (MariaDB)
                     │   every tier is a tool of the others — no fixed order         full audit trail
                     ├─ L2  device & network diagnosis, malware response (isolate → evidence → scan → release)
-                    ├─ L3  servers, SAP/directory permissions, CVE patching with snapshot, verify, rollback
+                    ├─ L3  servers, directory permissions, CVE patching with snapshot, verify, rollback
                     └─ L4  vendor service cases, loaners, courier shipments
 Camera watcher ──► compliance findings → tickets          Scheduler ──► reminders, follow-ups, proactive checks
 ```
@@ -73,7 +73,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   anything with an MCP endpoint (HTTP) or a local command (stdio). Credentials are stored encrypted; a connector's
   tools appear to the chosen tiers as `mcp.<name>.<tool>` and every call lands on the ticket trail with the same
   authority rules as built-in tools. Tested end to end against a real stdio MCP server.
-* **Simulated enterprise systems** (`app/systems.py`) stand in for Defender, SAP, the endpoint agent, the vendor
+* **Simulated enterprise systems** (`app/systems.py`) stand in for Defender, the vendor
   portal and the courier (and for the directory when Entra is not connected), behind the same function shapes a
   real connector would expose.
 
@@ -96,7 +96,6 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 2. Password reset by voice note — transcription, identity check (employee no + birth year), then a one-time code on the employee's other channel (e-mail); optionally (Settings → Channels) a random phrase said in a voice note; the temporary password is issued only after the code matches
 3. Blue-screen photo → L4: warranty, vendor case, loaner laptop, courier label
 4. Missing / paid license — standard ones assigned, paid ones through manager approval
-5. SAP authorization — L3, role granted after approval, temporary access expiry scheduled
 6. Service desk console — Dashboard (numbers: period, tier cards, KPIs, top issues, tier load, handoffs) and Tickets (filters, search, conversation timeline, reply, status, assign, merge into problem); sign-in, desk users, audit log; responsive, system/light/dark theme
 7. Vulnerability ("are we affected by php2shell?") — inventory scan, change + rollback plan, patch, verify, evidence
 8. Onboarding / 9. Offboarding — account, licenses, groups, sessions, loaner return
@@ -155,11 +154,11 @@ Without Entra, identity checks ask for employee no + birth year. Say e.g. *"Emma
 | Employee no | Name | Birth year | Device | Dept | Manager | Seeded state |
 |---|---|---|---|---|---|---|
 | E1001 | Emma Johnson | 1990 | LT-101 | Sales | E1002 | VPN profile expired |
-| E1002 | Liam Carter | 1985 | LT-102 | Sales | E1003 | disk 97% full, SAP `SD_DISPLAY` |
-| E1003 | Olivia Bennett | 1994 | LT-103 | Finance | — | SAP `FI_DISPLAY`, `FI_POST` |
+| E1002 | Liam Carter | 1985 | LT-102 | Sales | E1003 | disk 97% full |
+| E1003 | Olivia Bennett | 1994 | LT-103 | Finance | — | — |
 
 Useful seeds: licenses `M365-E3`, `Teams-Phone`, `Visio` are self-service; `Project`, `Adobe-CC`, `AutoCAD` need manager
-approval (`ONAY <id>` over chat). SAP roles: `SD_CREATE`, `MM_PURCHASE` go through L3 + approval. Advisory
+approval (`ONAY <id>` over chat). Advisory
 `CVE-2026-4411` ("php2shell") has vulnerable servers in the CMDB. Endpoint scripts: `vpn-reset`, `dns-reset`,
 `printer-fix`, `perf-report`, `driver-rollback`, `disk-cleanup`, `lock-screen`. Cameras: `CAM-SALES-01` (E1001),
 `CAM-FIN-01` (E1003). Manager approval requests go to the manager's seeded phone; point one at your own number to

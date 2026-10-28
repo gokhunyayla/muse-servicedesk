@@ -24,7 +24,7 @@ def call(name, **args):
 
 def test_inventory_scan_finds_only_vulnerable_php_hosts():
     hosts = {h["hostname"] for h in systems.find_vulnerable("CVE-2026-4411")}
-    assert hosts == {"TR-WEB-01", "TR-WEB-02"}   # WEB-03 is on 8.3.6, APP-01 has no php
+    assert hosts == {"WEB-01", "WEB-02"}   # WEB-03 is on 8.3.6, APP-01 has no php
 
 
 def test_l3_patches_with_snapshot_verifies_and_uses_heavy_model():
@@ -33,12 +33,12 @@ def test_l3_patches_with_snapshot_verifies_and_uses_heavy_model():
         Reply(tool_calls=[call("handoff_L3", summary="CVE-2026-4411 php2shell: patch all affected")]),
         Reply(tool_calls=[call("find_vulnerable_servers", cve="CVE-2026-4411")]),             # L3
         Reply(tool_calls=[call("add_note", text="plan: php 8.1.2->8.1.30 on WEB-01/02; rollback: snapshot")]),
-        Reply(tool_calls=[call("apply_patch", hostname="TR-WEB-01", package="php", version="8.1.30"),
-                          call("apply_patch", hostname="TR-WEB-02", package="php", version="8.1.30")]),
-        Reply(tool_calls=[call("verify_patch", hostname="TR-WEB-01", cve="CVE-2026-4411"),
-                          call("verify_patch", hostname="TR-WEB-02", cve="CVE-2026-4411")]),
+        Reply(tool_calls=[call("apply_patch", hostname="WEB-01", package="php", version="8.1.30"),
+                          call("apply_patch", hostname="WEB-02", package="php", version="8.1.30")]),
+        Reply(tool_calls=[call("verify_patch", hostname="WEB-01", cve="CVE-2026-4411"),
+                          call("verify_patch", hostname="WEB-02", cve="CVE-2026-4411")]),
         Reply(text="2 sunucu yamalandı ve doğrulandı."),                                      # L3 done
-        Reply(text="php2shell açığı kapatıldı: TR-WEB-01 ve TR-WEB-02 güncellendi."),         # L1 done
+        Reply(text="php2shell açığı kapatıldı: WEB-01 ve WEB-02 güncellendi."),         # L1 done
     ])
     set_llm(llm)
     with session() as db:
@@ -58,14 +58,14 @@ def test_l3_patches_with_snapshot_verifies_and_uses_heavy_model():
 def test_rollback_restores_the_snapshot():
     set_llm(ScriptedLLM([
         Reply(tool_calls=[call("handoff_L3", summary="patch WEB-01")]),
-        Reply(tool_calls=[call("apply_patch", hostname="TR-WEB-01", package="php", version="8.1.30")]),
-        Reply(tool_calls=[call("rollback_patch", snapshot_id="snap-TR-WEB-01-1")]),
+        Reply(tool_calls=[call("apply_patch", hostname="WEB-01", package="php", version="8.1.30")]),
+        Reply(tool_calls=[call("rollback_patch", snapshot_id="snap-WEB-01-1")]),
         Reply(text="geri alındı"),
         Reply(text="geri alındı"),
     ]))
     with session() as db:
         handle_message(db, "+15551110002", "yama")
-    assert systems.SERVERS["TR-WEB-01"]["packages"]["php"] == "8.1.2"
+    assert systems.SERVERS["WEB-01"]["packages"]["php"] == "8.1.2"
 
 
 def test_only_l3_can_touch_servers():

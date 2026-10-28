@@ -2,7 +2,7 @@
 
 The desk ran every case below against the real Meta models, real WhatsApp, real e-mail and the real support
 page. What is still **simulated** is the system the agent acts on (directory, devices, vendors, mail tenant,
-EDR, SAP). This list says, per case, which real system turns the simulation into a real action — so the
+EDR). This list says, per case, which real system turns the simulation into a real action — so the
 demo can be rebuilt on real infrastructure one case at a time. Tag `v0.11.0-demo-cases` is the last
 version with the simulated cases; the database dump of that run sits in `data/archive/` (local only).
 
@@ -12,7 +12,6 @@ version with the simulated cases; the database dump of that run sits in `data/ar
 | 2 | Password reset by voice note | WhatsApp voice → Muse Voice → L1 → identity check | — | **real since v0.12: Entra ID through Graph** (`app/graph.py`: user lookup, reset password, revoke sessions) |
 | 3 | Blue-screen photo → L4 | photo → Muse Spark vision → L1 → L2 → L4 | `open_vendor_case`, `create_shipment` | Vendor portal API (Dell/HP/Lenovo warranty + case), courier API (UPS/Yurtiçi) or ITSM connector |
 | 4 | Missing / paid license | WhatsApp → L1 → approval over WhatsApp | — | **real since v0.12: tenant SKUs + assignLicense through Graph** |
-| 5 | SAP authorisation | L1 → L3 → approval → temporary role | `sap_roles` | SAP user management API (SU01/PFCG via RFC) or ITSM request |
 | 7 | Vulnerability ("php2shell") | L3: inventory, snapshot, patch, verify, rollback | `find_vulnerable`, `snapshot`, `rollback` | **Patch/CMDB source** (Intune, Qualys, or a package inventory agent) + VM snapshot API (vSphere/Proxmox) |
 | 8 / 9 | Onboarding / offboarding | L1 → L3: account, licences, groups, sessions | loaner inventory | **real since v0.12: account, groups, licences, disable, revoke sessions through Graph**; loaners stay simulated |
 | 10 | Mass outage | three similar reports → incident at intake, Supervisor merge, broadcast | nothing; real tickets | nothing — real already |
@@ -36,7 +35,6 @@ Cases 6 (console), 10, 12, 14, 15 and the three channels are real already. Since
    lookup, password reset, licence assignment, group membership, revoke sessions. A trial tenant works.
 3. **Defender (endpoint + O365)** (cases 17, 18): isolate/scan/release and mail quarantine through Graph security.
 4. **Vendor + courier** (case 3): usually ITSM or manual; keep simulated and say so, or route to a human ticket.
-5. **SAP** (case 5): keep as approval + human engineer unless an SAP sandbox exists.
 
 Every connector is registered in Settings → Connectors with the tiers that may use it; the agents call
 `mcp.<connector>.<tool>` through the same authority gate as built-in tools. README must list, per case,
@@ -57,7 +55,7 @@ Goal: a small but real environment that judges can trigger from the support page
 | 6. Device management | **Intune** (in the M365 trial) | same Graph MCP: `device_compliance`, `sync_device`, `remote_lock` | L2 | trial, then paid |
 | 7. Security | **Defender for Endpoint / Office 365** (trial) | Microsoft's Sentinel/Defender MCP (preview) or ours over the Graph security API: `isolate`, `release`, `run_scan`, `quarantine_mail`, `block_sender` | L2 | trial, then paid |
 | 8. Servers | 1–2 Linux VMs on the network | **ours**: `inventory`, `snapshot` (cloud API), `apply_patch`, `verify`, `rollback` | L3 | VM cost only |
-| 9. Vendor / courier / SAP | none | stays simulated; human step | L4/L3 | — |
+| 9. Vendor / courier | none | stays simulated; human step | L4/L3 | — |
 
 Every MCP server is a small Python process registered in Settings → Connectors with the tiers that may use it;
 the agents call `mcp.<connector>.<tool>` through the same authority gate as built-in tools.

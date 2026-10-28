@@ -8,14 +8,11 @@ import secrets
 
 USERS = {
     "E1001": {"name": "Emma Johnson", "phone": "+15551110001", "birth_year": 1990, "device": "LT-101",
-              "department": "Sales", "manager": "E1002", "licenses": ["M365-E3"], "groups": ["sales-tr"],
-              "sap_roles": [], "enabled": True},
+              "department": "Sales", "manager": "E1002", "licenses": ["M365-E3"], "groups": ["sales-tr"], "enabled": True},
     "E1002": {"name": "Liam Carter", "phone": "+15551110002", "birth_year": 1985, "device": "LT-102",
-              "department": "Sales", "manager": "E1003", "licenses": ["M365-E3", "Visio"], "groups": ["sales-tr", "managers"],
-              "sap_roles": ["SD_DISPLAY"], "enabled": True},
+              "department": "Sales", "manager": "E1003", "licenses": ["M365-E3", "Visio"], "groups": ["sales-tr", "managers"], "enabled": True},
     "E1003": {"name": "Olivia Bennett", "phone": "+15551110003", "birth_year": 1994, "device": "LT-103",
-              "department": "Finance", "manager": None, "licenses": ["M365-E3"], "groups": ["finance", "managers"],
-              "sap_roles": ["FI_DISPLAY", "FI_POST"], "enabled": True},
+              "department": "Finance", "manager": None, "licenses": ["M365-E3"], "groups": ["finance", "managers"], "enabled": True},
 }
 
 _SEED_PHONES = {"E1002": USERS["E1002"]["phone"], "E1003": USERS["E1003"]["phone"]}
@@ -33,8 +30,6 @@ apply_demo_phone(os.getenv("DEMO_MANAGER_PHONE"))
 LICENSE_CATALOG = {   # license -> needs manager approval?
     "M365-E3": False, "Teams-Phone": False, "Visio": False, "Project": True, "Adobe-CC": True, "AutoCAD": True,
 }
-SAP_ROLES = {"SD_DISPLAY": "sales display", "SD_CREATE": "create sales orders", "FI_DISPLAY": "finance display",
-             "FI_POST": "post journal entries", "MM_PURCHASE": "create purchase orders"}
 
 
 def _graph():
@@ -101,7 +96,7 @@ def create_user(name: str, department: str, manager: str, phone: str) -> str:
         return g.create_user(name, department, manager, phone)[0]
     emp = f"E{1000 + len(USERS) + 1}"
     USERS[emp] = {"name": name, "phone": phone, "birth_year": 0, "device": None, "department": department,
-                  "manager": manager, "licenses": [], "groups": [], "sap_roles": [], "enabled": True}
+                  "manager": manager, "licenses": [], "groups": [], "enabled": True}
     return emp
 
 DEVICES = {
@@ -162,10 +157,10 @@ def create_shipment(to_name: str, device: str, case_no: str) -> dict:
 
 
 SERVERS = {   # CMDB: hostname -> software inventory
-    "TR-WEB-01": {"role": "intranet web", "os": "Ubuntu 22.04", "packages": {"php": "8.1.2", "nginx": "1.18.0"}},
-    "TR-WEB-02": {"role": "customer portal", "os": "Ubuntu 22.04", "packages": {"php": "8.1.2", "nginx": "1.18.0"}},
-    "TR-APP-01": {"role": "SAP gateway", "os": "RHEL 9", "packages": {"java": "17.0.9"}},
-    "TR-WEB-03": {"role": "docs site", "os": "Ubuntu 24.04", "packages": {"php": "8.3.6", "nginx": "1.24.0"}},
+    "WEB-01": {"role": "intranet web", "os": "Ubuntu 22.04", "packages": {"php": "8.1.2", "nginx": "1.18.0"}},
+    "WEB-02": {"role": "customer portal", "os": "Ubuntu 22.04", "packages": {"php": "8.1.2", "nginx": "1.18.0"}},
+    "APP-01": {"role": "ERP gateway", "os": "RHEL 9", "packages": {"java": "17.0.9"}},
+    "WEB-03": {"role": "docs site", "os": "Ubuntu 24.04", "packages": {"php": "8.3.6", "nginx": "1.24.0"}},
 }
 
 ADVISORIES = {   # vulnerability feed: CVE id -> affected package, vulnerable versions, fixed version

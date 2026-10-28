@@ -95,20 +95,6 @@ def test_decision_inside_a_sentence_wins_over_open_tickets_of_the_manager():
 
 
 
-def test_sap_role_goes_through_l3_and_needs_approval():
-    set_llm(ScriptedLLM([
-        Reply(tool_calls=[call("handoff_L3", summary="E1001 SD_CREATE rolü istiyor")]),
-        Reply(tool_calls=[call("grant_sap_role", employee_no="E1001", role="SD_CREATE")]),          # L3: blocked
-        Reply(tool_calls=[call("request_manager_approval", employee_no="E1001", request="SAP SD_CREATE")]),
-        Reply(text="onay bekleniyor"), Reply(text="Yönetici onayına gönderildi."),
-    ]))
-    with session() as db:
-        t, _ = handle_message(db, "+15551110001", "SAP'de sipariş açamıyorum, yetki hatası")
-        l3 = [(e.content, e.data) for e in t.events if e.kind == "tool_result" and e.actor == "L3"]
-    assert dict(l3)["grant_sap_role"]["ok"] is False
-    assert t.status == "waiting_approval"
-
-
 def test_onboarding_creates_account_license_and_groups():
     set_llm(ScriptedLLM([
         Reply(tool_calls=[call("create_account", name="Can Yılmaz", department="Sales", manager_employee_no="E1002",

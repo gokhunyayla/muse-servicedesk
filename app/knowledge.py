@@ -44,7 +44,8 @@ RENAMED = {
     "L1/009-acikta-birakilmis-kimlik-bilgisi-kamera-masa-bulgusu-zorunlu-sifre": "L1/009-exposed-credential",
     "L2/001-ag-ve-cihaz-teshisi": "L2/001-network-and-device-diagnosis", "L2/002-zararli-yazilim-mudahalesi": "L2/002-malware-response",
     "L2/003-uzun-sure-guncellenmemis-dizustu-stale-patch-cevrimdisi-cihaz": "L2/003-stale-patch-laptop",
-    "L3/001-degisiklik-yonetimi": "L3/001-change-management", "L3/002-sap-ve-dizin-yetkileri": "L3/002-sap-and-directory-access",
+    "L3/001-degisiklik-yonetimi": "L3/001-change-management", "L3/002-sap-ve-dizin-yetkileri": "L3/002-directory-and-folder-access",
+    "L3/002-sap-and-directory-access": "L3/002-directory-and-folder-access",
     "L3/003-toplu-kesinti": "L3/003-mass-outage", "L4/001-donanim-servis-ve-kargo": "L4/001-hardware-repair-and-shipping",
 }
 

@@ -366,7 +366,7 @@ def _user(employee_no: str) -> dict | None:
     return systems.get_user(employee_no)
 
 
-@tool("Show an employee's directory record: department, manager, licenses, groups, SAP roles.",
+@tool("Show an employee's directory record: department, manager, licenses, groups.",
       ("L1", "L3"), employee_no=STR)
 def get_employee(ctx: Ctx, employee_no: str) -> dict:
     u = _user(employee_no)
@@ -476,19 +476,6 @@ def reset_mfa(ctx: Ctx, employee_no: str) -> dict:
     return {"ok": True, "mfa": "reset; enrol at https://aka.ms/mfasetup"}
 
 
-@tool("Grant an SAP role. Needs an approved manager request. Set days for temporary access.", ("L3",),
-      employee_no=STR, role=STR, days={"type": "integer", "optional": True})
-def grant_sap_role(ctx: Ctx, employee_no: str, role: str, days: int | None = None) -> dict:
-    u = _user(employee_no)
-    if not u or role not in systems.SAP_ROLES:
-        return {"ok": False, "error": "unknown employee or role"}
-    if not _approved(ctx, role):
-        return {"ok": False, "error": f"SAP role {role} needs manager approval; use request_manager_approval first"}
-    if role not in u["sap_roles"]:
-        u["sap_roles"].append(role)
-    return {"ok": True, "sap_roles": u["sap_roles"], "expires_in_days": days}
-
-
 # ---- security: mail & endpoint response -----------------------------------------------------
 
 @tool("Analyze a suspicious e-mail (sender, subject, body with links). Returns safe / suspicious / phishing.",
@@ -537,7 +524,7 @@ def _approved(ctx: Ctx, what: str) -> bool:
                                          Approval.request.contains(what)).count() > 0
 
 
-@tool("Ask the employee's manager to approve something (paid license, SAP role, software). The ticket "
+@tool("Ask the employee's manager to approve something (paid license, access, software). The ticket "
       "waits; you'll be called again when the decision arrives.", ALL, employee_no=STR, request=STR)
 def request_manager_approval(ctx: Ctx, employee_no: str, request: str) -> dict:
     from app.db import Approval, Outbound

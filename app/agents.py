@@ -20,7 +20,7 @@ RULES = """Rules:
   non-disruptive scripts dns-reset, perf-report, patch-status, printer-fix), run it FIRST and tell them what it
   found; ask only what the result does not answer. Don't ask an employee for facts the device can report.
 - Tell the employee only what your tools actually did. A hand-off to a human engineer is "I passed it to an
-  engineer", never "I opened a request in <system>" for a system you have no tool for (Intune, SAP, a vendor).
+  engineer", never "I opened a request in <system>" for a system you have no tool for (Intune, a vendor portal).
 - Work that continues on the device after a script returns (OS updates) reports back to the desk by itself and
   the ticket resumes with the outcome: tell the employee you will let them know, don't ask whether to check.
 - On a new problem, search_knowledge first. If a SOP matches, follow exactly what its text says and cite it
@@ -388,7 +388,7 @@ AGENTS: dict[str, Agent] = {a.tier: a for a in [
                 "plan AND the rollback plan, 3) apply_patch host by host (a snapshot is taken for you), "
                 "4) verify_patch each host; if verification fails, rollback_patch to its snapshot, "
                 "5) add_note with the evidence (versions before/after, snapshot ids). Return a structured summary.",
-          "servers, SAP and directory permissions, vulnerability (CVE) analysis and patching with rollback",
+          "servers, directory and folder permissions, vulnerability (CVE) analysis and patching with rollback",
           heavy=True),
     Agent("L4", "You handle vendors and logistics: service cases, loaner devices, shipping.",
           "hardware repair cases, warranty, loaners, courier shipments"),
