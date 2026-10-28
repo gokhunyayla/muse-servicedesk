@@ -266,3 +266,15 @@ def test_search_result_tells_the_agent_when_nothing_matches():
     with session() as db:
         out = run_tool(Ctx(db=db, ticket=None, agent="L1"), "search_knowledge", {"query": "quantum flux capacitor"})
     assert out["matched"] is False and "No SOP covers this" in out["note"]
+
+
+def test_ticket_list_filters_needs_action_and_unresolved(desk):
+    from app.db import Ticket, session
+    with session() as db:
+        for st in ("open", "waiting_user", "waiting_approval", "escalated", "resolved"):
+            db.add(Ticket(requester="+905551110001", title=st, status=st))
+    hdr = {"accept": "application/json"}
+    assert sorted(t["status"] for t in desk.get("/tickets?status=needs_action", headers=hdr).json()) == ["escalated", "open"]
+    assert sorted(t["status"] for t in desk.get("/tickets?status=unresolved", headers=hdr).json()) == ["escalated", "open", "waiting_approval", "waiting_user"]
+    assert [t["status"] for t in desk.get("/tickets?status=waiting_user", headers=hdr).json()] == ["waiting_user"]
+    assert "Needs our action" in desk.get("/tickets", headers={"accept": "text/html"}).text

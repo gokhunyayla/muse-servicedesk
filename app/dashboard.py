@@ -115,7 +115,11 @@ def tickets(request: Request, status: str | None = None, owner: str | None = Non
         return HTMLResponse(_render(user, "tickets"))
     with session() as db:
         qs = db.query(Ticket).order_by(Ticket.id.desc())
-        if status:
+        if status == "needs_action":                       # the ball is on our side: not waiting on the employee or an approver
+            qs = qs.filter(Ticket.status.in_(("open", "escalated")))
+        elif status == "unresolved":
+            qs = qs.filter(Ticket.status != "resolved")
+        elif status:
             qs = qs.filter(Ticket.status == status)
         if owner:
             qs = qs.filter(Ticket.owner == owner)
@@ -216,7 +220,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 </style></head><body class="app">
 <!--RAIL--><div class="page" data-mode="<!--MODE-->">
 <div class="toolbar"><div class="tl"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
-<div class="seg only-tickets" id="statusSeg"><button data-s="" class="on">Any status</button><button data-s="open">Open</button><button data-s="waiting_user">Waiting</button><button data-s="waiting_approval">Approval</button><button data-s="escalated">Escalated</button><button data-s="resolved">Resolved</button></div>
+<div class="seg only-tickets" id="statusSeg"><button data-s="" class="on">Any status</button><button data-s="needs_action" title="Open or escalated: the desk has to act">Needs our action</button><button data-s="unresolved" title="Everything not resolved">Unresolved</button><button data-s="open">Open</button><button data-s="waiting_user">Waiting</button><button data-s="waiting_approval">Approval</button><button data-s="escalated">Escalated</button><button data-s="resolved">Resolved</button></div>
 <div class="seg only-tickets" id="ownerSeg"><button data-o="" class="on">Any tier</button><button data-o="L1">L1</button><button data-o="L2">L2</button><button data-o="L3">L3</button><button data-o="L4">L4</button><button data-o="human">Human</button></div>
 <input class="search only-tickets" id="q" type="search" placeholder="Search title or requester…"></div>
 <span class="live"><small id="scope"></small> · <i></i><span id="upd">live</span></span></div>
