@@ -84,7 +84,7 @@ def _sign_in(db, user: User, response: Response, days: int = SESSION_DAYS) -> No
 # ---- e-mail ----------------------------------------------------------------------------------
 
 def send_mail(to: str, subject: str, body: str) -> bool:
-    """SMTP from Settings → Reports (or .env); otherwise the message goes to the log so development still works."""
+    """SMTP from Settings → E-mail (or .env); otherwise the message goes to the log so development still works."""
     from app.reports import smtp_config
     c = smtp_config()
     if not c["host"]:
@@ -528,7 +528,7 @@ SLA_FIELDS = [("first_response", "First response", "Time until the employee gets
 def settings_page(user: User = Depends(current_user), tab: str = "sla", info: str = "") -> str:
     from app.sla import sla_targets
     admin = user.role == "admin"
-    tabs = [("sla", "SLA"), ("supervisor", "Supervisor"), ("reports", "Reports"), ("connectors", "Connectors"), ("channels", "Channels"), ("models", "Models"), ("about", "About")]
+    tabs = [("sla", "SLA"), ("supervisor", "Supervisor"), ("reports", "Reports"), ("channels", "Channels"), ("email", "E-mail"), ("connectors", "Connectors"), ("models", "Models"), ("about", "About")]
     nav = "".join(f'<a class="tab {"on" if tab == k else ""}" href="/settings?tab={k}">{v}</a>' for k, v in tabs)
     if tab == "sla":
         t = sla_targets()
@@ -590,15 +590,7 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <div class="srow"><div><b>Daily</b><small>End-of-day report</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="daily" value="1" {"checked" if c.get("daily") else ""} {dis}></label> <input name="daily_at" type="time" value="{_esc(c.get('daily_at','18:00'))}" style="width:120px" {dis}></div></div>
 <div class="srow"><div><b>Weekly</b><small>Last 7 days</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="weekly" value="1" {"checked" if c.get("weekly") else ""} {dis}></label> <select name="weekly_day" style="width:90px" {dis}>{days}</select> <input name="weekly_at" type="time" value="{_esc(c.get('weekly_at','09:00'))}" style="width:120px" {dis}></div></div>
 <div class="srow"><div><b>Monthly</b><small>Last 30 days</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="monthly" value="1" {"checked" if c.get("monthly") else ""} {dis}></label> day <input name="monthly_day" type="number" min="1" max="28" value="{int(c.get('monthly_day',1))}" style="width:70px" {dis}> <input name="monthly_at" type="time" value="{_esc(c.get('monthly_at','09:00'))}" style="width:120px" {dis}></div></div>
-<h3>SMTP</h3>
-<div class="grid">
-<div><label>Host</label><input name="smtp_host" value="{_esc(sm.get('host',''))}" placeholder="smtp.office365.com" {dis}></div>
-<div><label>Port</label><input name="smtp_port" type="number" value="{int(sm.get('port',587))}" {dis}></div>
-<div><label>User</label><input name="smtp_user" value="{_esc(sm.get('user',''))}" autocomplete="off" {dis}></div>
-<div><label>Password <small>(leave blank to keep)</small></label><input name="smtp_password" type="password" autocomplete="new-password" {dis}></div>
-<div><label>From</label><input name="smtp_from" value="{_esc(sm.get('from',''))}" placeholder="servicedesk@company.com" {dis}></div>
-<div><label>STARTTLS</label><label class="check"><input type="checkbox" name="smtp_tls" value="1" {"checked" if sm.get("tls", True) else ""} {dis}> use STARTTLS</label></div>
-</div>
+<p class="muted" style="margin-top:14px">E-mail delivery uses the mailbox under Settings → E-mail.</p>
 {_alert('', info)}
 {('<div class="row end"><button class="btn" type="button" onclick="sendTest(this)">Send test report</button><button class="btn primary slim" type="submit">Save</button></div>' if admin else '<p class="muted">Only admins can change these.</p>')}</form>
 <pre id="repOut" class="muted" style="white-space:pre-wrap;display:none"></pre>
@@ -606,6 +598,44 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <script>async function sendTest(b){{b.disabled=true;b.textContent='Sending…';const o=document.getElementById('repOut');o.style.display='';o.textContent='Writing the daily report with Muse Wonder…';
  try{{const r=await (await fetch('/reports/send',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{kind:'daily'}})}})).json();
  o.textContent=(r.sent?'Sent: ':'Not sent ('+r.error+'): ')+r.subject+String.fromCharCode(10,10)+r.narrative;}}catch(e){{o.textContent='Failed: '+e}}b.disabled=false;b.textContent='Send test report';}}</script>"""
+    elif tab == "email":
+        from app import vault
+        from app.channels import email_config
+        from app.reports import smtp_config
+        dis = "" if admin else "disabled"
+        sm, ec = smtp_config(), email_config()
+        def secret_row(name, hint=""):
+            st = vault.status(name)
+            state = (f'<span class="tag active">configured</span> <small class="muted">…{_esc(st["hint"])} · from {st["source"]}</small>' if st["configured"] else '<span class="tag disabled">not set</span>')
+            shown = ("•" * 28 + st["hint"]) if st["configured"] else ""
+            return (f'<div class="srow"><div><b>{_esc(st["label"])}</b><small>{_esc(hint)}</small><div style="margin-top:4px">{state}</div></div>'
+                    f'<div class="min"><input name="{name}" type="text" autocomplete="off" spellcheck="false" value="{_esc(shown)}" data-shown="{_esc(shown)}" '
+                    f'onfocus="if(this.value===this.dataset.shown)this.value=\'\'" onblur="if(!this.value)this.value=this.dataset.shown" placeholder="paste a new password to replace" '
+                    f'style="width:260px;font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}>'
+                    + (f'<label class="check" style="margin:0 0 0 8px"><input type="checkbox" name="clear_{name}" value="1" {dis}> clear</label>' if st["source"] == "console" else "") + '</div></div>')
+        imap_row = secret_row("IMAP_PASSWORD", "Mailbox password or app password (usually the same as SMTP)")
+        body = f"""<p class="muted">One mailbox for the desk: outgoing mail (ticket replies, sign-in codes, invitations, reports) and, optionally, incoming requests.</p>
+<h3>Outgoing (SMTP)</h3>
+<form method="post" action="/settings/smtp"><div class="grid">
+<div><label>Host</label><input name="smtp_host" value="{_esc(sm.get('host',''))}" placeholder="smtp.gmail.com" {dis}></div>
+<div><label>Port</label><input name="smtp_port" type="number" value="{int(sm.get('port',587))}" {dis}></div>
+<div><label>User</label><input name="smtp_user" value="{_esc(sm.get('user',''))}" autocomplete="off" {dis}></div>
+<div><label>Password <small>(leave blank to keep)</small></label><input name="smtp_password" type="password" autocomplete="new-password" {dis}></div>
+<div><label>From</label><input name="smtp_from" value="{_esc(sm.get('from',''))}" placeholder="servicedesk@company.com" {dis}></div>
+<div><label>STARTTLS</label><label class="check"><input type="checkbox" name="smtp_tls" value="1" {"checked" if sm.get("tls", True) else ""} {dis}> use STARTTLS</label></div>
+</div>{_alert('', info)}
+{('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Send test mail to me</button> <button class="btn primary slim" type="submit">Save SMTP</button></div>' if admin else '')}</form>
+<h3>Incoming (IMAP)</h3><p class="muted">The desk reads this mailbox, opens or continues tickets and answers by mail. Subject tags like <code>[#12]</code> keep a thread on its ticket. Only mail that arrives after enabling is read.</p>
+<form method="post" action="/settings/email">
+<div class="srow"><div><b>Enabled</b></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if ec["enabled"] else ""} {dis}> on</label></div></div>
+<div class="srow"><div><b>IMAP host</b><small>e.g. imap.gmail.com, outlook.office365.com</small></div><div class="min"><input name="imap_host" value="{_esc(ec["imap_host"])}" style="width:260px" {dis}></div></div>
+<div class="srow"><div><b>Port</b><small>SSL</small></div><div class="min"><input name="imap_port" type="number" value="{ec["imap_port"]}" style="width:100px" {dis}></div></div>
+<div class="srow"><div><b>Mailbox user</b><small>the desk's address</small></div><div class="min"><input name="user" value="{_esc(ec["user"])}" style="width:260px" {dis}></div></div>
+<div class="srow"><div><b>Folder</b></div><div class="min"><input name="folder" value="{_esc(ec["folder"])}" style="width:160px" {dis}></div></div>
+<div class="srow"><div><b>Poll every</b></div><div class="min"><input name="poll_minutes" type="number" min="1" value="{ec["poll_minutes"]}" style="width:100px" {dis}> <span>minutes</span></div></div>
+<div class="srow"><div><b>Accept mail from</b><small>Comma-separated domains or addresses; empty = anyone. Only mail that arrives after enabling is read, never the backlog.</small></div><div class="min"><input name="allowed" value="{_esc(ec.get("allowed", ""))}" placeholder="company.com, partner.com" style="width:260px" {dis}></div></div>
+{('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Test connection</button> <button class="btn primary slim" type="submit">Save e-mail</button></div>' if admin else '')}</form>
+<form method="post" action="/settings/secrets?tab=email">{imap_row}{('<div class="row end"><button class="btn primary slim" type="submit">Save password</button></div>' if admin else '')}</form>"""
     elif tab == "connectors":
         from app import connectors
         rows = connectors.listing()
@@ -683,10 +713,10 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
             from app.config import auth_settings
             pc, ec = portal_config(), email_config()
             link = f"{auth_settings.public_url.rstrip('/')}/support-agent"
-            imap_row = secret_row("IMAP_PASSWORD", "Mailbox password or app password")
             body = f"""<p class="muted">Employees can reach the desk over WhatsApp, the web chat and e-mail; every channel lands on the same tickets and agents.</p>
 <h3>WhatsApp &amp; integrations</h3>
 <form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
+<p class="muted" style="margin-top:14px">E-mail intake and sending live under Settings → E-mail.</p>
 <h3>Support page</h3><p class="muted">Outside the console, for employees the desk knows (directory or <a href="/clients">Clients</a>): a chat that opens tickets like WhatsApp, and a one-time-code sign-in to follow their own tickets: <a href="/support-agent" target="_blank">{_esc(link)}</a></p>
 <form method="post" action="/settings/portal">
 <div class="srow"><div><b>Enabled</b><small>Switch the page off to take the channel down</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if pc["enabled"] else ""} {dis}> on</label></div></div>
@@ -694,17 +724,7 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <div class="srow"><div><b>Note</b><small>Optional line under the sign-in form</small></div><div class="min"><input name="note" value="{_esc(pc.get("note", ""))}" style="width:260px" {dis}></div></div>
 <div class="srow"><div><b>Country code</b><small>Added to local numbers (05xx…)</small></div><div class="min"><input name="country" value="{_esc(pc.get("country", "+90"))}" style="width:100px" {dis}></div></div>
 {('<div class="row end"><button class="btn primary slim" type="submit">Save web chat</button></div>' if admin else '')}</form>
-<h3>E-mail</h3><p class="muted">The desk reads a mailbox over IMAP, opens or continues tickets and answers by mail (replies use the SMTP settings under Reports). Subject tags like <code>[#12]</code> keep a thread on its ticket.</p>
-<form method="post" action="/settings/email">
-<div class="srow"><div><b>Enabled</b></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if ec["enabled"] else ""} {dis}> on</label></div></div>
-<div class="srow"><div><b>IMAP host</b><small>e.g. imap.gmail.com, outlook.office365.com</small></div><div class="min"><input name="imap_host" value="{_esc(ec["imap_host"])}" style="width:260px" {dis}></div></div>
-<div class="srow"><div><b>Port</b><small>SSL</small></div><div class="min"><input name="imap_port" type="number" value="{ec["imap_port"]}" style="width:100px" {dis}></div></div>
-<div class="srow"><div><b>Mailbox user</b><small>the desk's address</small></div><div class="min"><input name="user" value="{_esc(ec["user"])}" style="width:260px" {dis}></div></div>
-<div class="srow"><div><b>Folder</b></div><div class="min"><input name="folder" value="{_esc(ec["folder"])}" style="width:160px" {dis}></div></div>
-<div class="srow"><div><b>Poll every</b></div><div class="min"><input name="poll_minutes" type="number" min="1" value="{ec["poll_minutes"]}" style="width:100px" {dis}> <span>minutes</span></div></div>
-<div class="srow"><div><b>Accept mail from</b><small>Comma-separated domains or addresses; empty = anyone. Only mail that arrives after enabling is read, never the backlog.</small></div><div class="min"><input name="allowed" value="{_esc(ec.get("allowed", ""))}" placeholder="company.com, partner.com" style="width:260px" {dis}></div></div>
-{('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Test connection</button> <button class="btn primary slim" type="submit">Save e-mail</button></div>' if admin else '')}</form>
-<form method="post" action="/settings/secrets?tab=channels">{imap_row}{('<div class="row end"><button class="btn primary slim" type="submit">Save password</button></div>' if admin else '')}</form>"""
+"""
     else:
         body = '<p class="muted">Muse ServiceDesk — autonomous multi-tier IT service desk on Meta Model API. Built for the Meta Global AI Developer Hackathon 2026.</p>'
     return _page("Settings", f'<div class="tabs">{nav}</div>{body}', wide=True, user=user, active="settings")
@@ -753,8 +773,8 @@ async def settings_email(request: Request, admin: User = Depends(admin_user)):
         audit(db, admin.email, "settings.email", detail=f"enabled={value['enabled']} host={value['imap_host']}", ip=_ip(request))
     if form.get("action") == "test":
         ok, msg = test_email()
-        return RedirectResponse(f"/settings?tab=channels&info={quote(("E-mail OK: " if ok else "E-mail failed: ") + msg[:150])}", 303)
-    return RedirectResponse("/settings?tab=channels&info=E-mail+saved", 303)
+        return RedirectResponse(f"/settings?tab=email&info={quote(("E-mail OK: " if ok else "E-mail failed: ") + msg[:150])}", 303)
+    return RedirectResponse("/settings?tab=email&info=E-mail+saved", 303)
 
 
 @router.post("/settings/supervisor")
@@ -1014,6 +1034,16 @@ async def settings_reports(request: Request, admin: User = Depends(admin_user)):
     except (TypeError, ValueError):
         pass
     put_setting("reports", rep)
+    with session() as db:
+        audit(db, admin.email, "settings.reports", detail=f"{rep['recipients']} daily={rep['daily']} weekly={rep['weekly']} monthly={rep['monthly']}", ip=_ip(request))
+    return RedirectResponse("/settings?tab=reports&info=Report+settings+saved", 303)
+
+
+@router.post("/settings/smtp")
+async def settings_smtp(request: Request, admin: User = Depends(admin_user)):
+    from app.sla import get_setting, put_setting
+    check_origin(request)
+    form = await request.form()
     saved = get_setting("smtp", {})
     smtp = {"host": str(form.get("smtp_host", "")).strip(), "port": int(form.get("smtp_port") or 587),
             "user": str(form.get("smtp_user", "")).strip(), "from": str(form.get("smtp_from", "")).strip(),
@@ -1021,8 +1051,12 @@ async def settings_reports(request: Request, admin: User = Depends(admin_user)):
             "password": str(form.get("smtp_password") or "") or saved.get("password", "")}
     put_setting("smtp", smtp)
     with session() as db:
-        audit(db, admin.email, "settings.reports", detail=f"{rep['recipients']} daily={rep['daily']} weekly={rep['weekly']} monthly={rep['monthly']} smtp={smtp['host']}", ip=_ip(request))
-    return RedirectResponse("/settings?tab=reports&info=Report+settings+saved", 303)
+        audit(db, admin.email, "settings.smtp", detail=f"host={smtp['host']} user={smtp['user']}", ip=_ip(request))
+    if form.get("action") == "test":
+        from app.channels import send_email
+        ok, err = send_email(admin.email, "Muse ServiceDesk: SMTP test", "If you can read this, outgoing mail works.")
+        return RedirectResponse(f"/settings?tab=email&info={quote('Test mail sent to ' + admin.email if ok else 'Test failed: ' + err)}", 303)
+    return RedirectResponse("/settings?tab=email&info=SMTP+saved", 303)
 
 
 @router.post("/settings/secrets")

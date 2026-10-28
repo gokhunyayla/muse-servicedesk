@@ -59,7 +59,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
   holds what, what is at SLA risk, what waits for me — with links into the console — and actions with the
   user's authority (assign to me, reply to the employee, change status, approve, run the Supervisor, publish a
   draft), every one audited.
-* **Reports.** Daily, weekly and monthly reports (Settings → Reports: recipients, schedule, SMTP): numbers from the
+* **Reports.** Daily, weekly and monthly reports (Settings → Reports: recipients, schedule; mailbox under Settings → E-mail): numbers from the
   ticket store, a narrative by Muse Wonder, delivered as HTML e-mail; history and "send test" in the console.
 * **Ticket lifecycle.** Identity check before account changes, consent before intrusive scripts, manager
   approval over chat (`ONAY 12`), confirmation before closing, satisfaction rating, scheduled follow-ups,
@@ -127,7 +127,7 @@ tickets, no password) or e-mail (Settings → Channels: IMAP mailbox; replies go
 the SMTP settings under Reports, and `[#id]` in the subject keeps a thread on its ticket).
 
 **Secrets:** the Meta API key, WhatsApp token/phone ID/verify token, SMTP, the integration API key and the Tavily
-key are entered by admins in the console (Settings → Models / Channels / Reports) and stored encrypted (Fernet; key
+key are entered by admins in the console (Settings → Models / Channels / E-mail) and stored encrypted (Fernet; key
 in `data/.secret_key`, git-ignored). Nothing secret lives in `.env`. Changes apply immediately.
 
 **Hardening:** PBKDF2 password hashes, HttpOnly/SameSite (Secure on HTTPS) session cookies, login and reset rate limits,

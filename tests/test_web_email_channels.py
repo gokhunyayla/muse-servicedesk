@@ -64,7 +64,7 @@ def test_support_page_only_admits_people_the_desk_knows(desk):
     r = desk.post("/settings/portal", data={"title": "Help me", "note": "Internal use"}, follow_redirects=False)   # enabled unchecked
     assert r.status_code == 303
     assert "switched off" in c.get(B).text and c.get(f"{B}/history").status_code == 401
-    assert "Support page" in desk.get("/settings?tab=channels").text and "E-mail" in desk.get("/settings?tab=channels").text
+    assert "Support page" in desk.get("/settings?tab=channels").text and "Incoming (IMAP)" in desk.get("/settings?tab=email").text
 
 
 def test_one_time_code_sign_in_shows_only_own_tickets(desk, monkeypatch):
@@ -159,7 +159,7 @@ def test_email_settings_saved_and_password_in_vault(desk):
                                            "folder": "INBOX", "poll_minutes": "5"}, follow_redirects=False)
     assert r.status_code == 303 and channels.email_config()["imap_host"] == "imap.example.com" and channels.email_config()["enabled"]
     desk.post("/settings/secrets?tab=channels", data={"IMAP_PASSWORD": "app-pass"}, follow_redirects=False)
-    assert vault.get("IMAP_PASSWORD") == "app-pass" and "app-pass" not in desk.get("/settings?tab=channels").text
+    assert vault.get("IMAP_PASSWORD") == "app-pass" and "app-pass" not in desk.get("/settings?tab=email").text
     assert channels.poll_email(force=True) == 0        # unreachable host: logged, never raises
 
 

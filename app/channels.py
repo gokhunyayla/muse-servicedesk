@@ -64,7 +64,7 @@ def send_email(to: str, subject: str, text: str) -> tuple[bool, str]:
     from app.reports import smtp_config
     c = smtp_config()
     if not c["host"]:
-        return False, "SMTP not configured (Settings → Reports)"
+        return False, "SMTP not configured (Settings → E-mail)"
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = c["from"] or c["user"], to, subject
     msg.set_content(text)

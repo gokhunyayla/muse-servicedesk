@@ -57,14 +57,16 @@ def test_schedule_due_kinds():
 def test_settings_tab_and_manual_send_endpoint(desk, monkeypatch):
     monkeypatch.setattr(reports, "send_html", lambda *a, **k: (True, ""))
     set_llm(ScriptedLLM([Reply(text="ok")]))
-    r = desk.post("/settings/reports", data={"recipients": "a@test, b@test", "language": "tr", "daily": "1", "daily_at": "17:30",
-                                              "smtp_host": "smtp.test", "smtp_port": "587", "smtp_user": "u", "smtp_password": "p", "smtp_from": "desk@test", "smtp_tls": "1"}, follow_redirects=False)
+    r = desk.post("/settings/reports", data={"recipients": "a@test, b@test", "language": "tr", "daily": "1", "daily_at": "17:30"}, follow_redirects=False)
     assert r.status_code == 303
+    r = desk.post("/settings/smtp", data={"smtp_host": "smtp.test", "smtp_port": "587", "smtp_user": "u", "smtp_password": "p", "smtp_from": "desk@test", "smtp_tls": "1"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/settings?tab=email")
     assert reports.config()["recipients"] == "a@test, b@test" and reports.config()["daily_at"] == "17:30"
     assert reports.smtp_config()["host"] == "smtp.test" and reports.smtp_config()["password"] == "p"
     out = desk.post("/reports/send", json={"kind": "daily", "to": "me@test"}).json()
     assert out["sent"] is True and desk.get("/reports").json()[0]["recipients"] == "me@test"
-    assert "SMTP" in desk.get("/settings?tab=reports").text and desk.get(f"/reports/{out['id']}").status_code == 200
+    assert "SMTP" in desk.get("/settings?tab=email").text and "smtp_host" not in desk.get("/settings?tab=reports").text
+    assert desk.get(f"/reports/{out['id']}").status_code == 200
 
 
 def test_whatsapp_delivery_channel(monkeypatch):

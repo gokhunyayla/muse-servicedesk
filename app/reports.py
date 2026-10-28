@@ -1,5 +1,5 @@
 """Daily / weekly / monthly desk reports: numbers from the ticket store, a narrative written by Muse Wonder,
-delivered as an HTML e-mail to the people set under Settings → Reports. SMTP comes from the same settings
+delivered as an HTML e-mail to the people set under Settings → Reports. SMTP comes from Settings → E-mail
 (falling back to .env)."""
 from __future__ import annotations
 
@@ -161,7 +161,7 @@ def render_html(n: dict, text: str, lang: str) -> str:
 def send_html(to: list[str], subject: str, html_body: str, text_body: str) -> tuple[bool, str]:
     c = smtp_config()
     if not c["host"]:
-        return False, "SMTP not configured (Settings → Reports)"
+        return False, "SMTP not configured (Settings → E-mail)"
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = c["from"] or c["user"], ", ".join(to), subject
     msg.set_content(text_body)
