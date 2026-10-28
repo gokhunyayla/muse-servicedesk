@@ -361,9 +361,11 @@ def complete_onboarding(ctx: Ctx, process_id: int) -> dict:
 
 # ---- offboarding ---------------------------------------------------------------------------------------------
 
-@tool("Start offboarding an employee who is leaving. Only people in the HR group may ask for it. last_day as "
-      "YYYY-MM-DD. The desk asks the manager who takes over and how the device comes back; on the last day the "
-      "account is closed, sessions ended, groups and licences removed.",
+@tool("Start offboarding an employee who is leaving. Only people in the HR group may ask for it. employee_no is "
+      "their employee number OR their work e-mail / user name (people without an employee number are identified by "
+      "it; never ask HR for a number when you have the address). last_day as YYYY-MM-DD ('today' → today's date). "
+      "The desk asks the manager who takes over and how the device comes back; on the last day the account is "
+      "closed, sessions ended, groups and licences removed.",
       ("L1",), employee_no=STR, last_day=STR, reason={"type": "string", "optional": True})
 def start_offboarding(ctx: Ctx, employee_no: str, last_day: str, reason: str = "") -> dict:
     if not is_hr(ctx.ticket.requester):

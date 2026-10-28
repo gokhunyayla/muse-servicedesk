@@ -14,6 +14,6 @@ Onboarding (HR: "X starts on Monday in Sales, reports to E1000", CV attached):
    If something failed (e.g. an unknown licence), ask only about that and call complete_onboarding again.
 
 Offboarding (HR: "X leaves on <date>"):
-1. start_offboarding with the employee number and the last day (YYYY-MM-DD).
+1. start_offboarding with the employee number or, when there is none, the work e-mail address, and the last day (YYYY-MM-DD).
 2. On the manager's ticket: record_people_answers (handover, device_return), then complete_offboarding; it runs at the
    end of the last day and tells HR and the manager what was closed.
