@@ -553,7 +553,9 @@ def request_manager_approval(ctx: Ctx, employee_no: str, request: str) -> dict:
 
 @tool("Search the knowledge base (your tier's pool, the shared pool, then other tiers). Do this before acting on "
       "any request. Results carry the full SOP text and a key; follow only what the text says and cite it as "
-      "[SOP:key]. An empty result means the desk has no procedure for this.", ALL, query=STR)
+      "[SOP:key]. An empty result means the desk has no procedure for this. The knowledge base is written in English: "
+      "write the query as short English keywords (e.g. 'printer queue stuck'), whatever language the employee uses, "
+      "and answer the employee in their own language.", ALL, query=STR)
 def search_knowledge(ctx: Ctx, query: str) -> dict:
     from app import knowledge
     results = knowledge.search(ctx.agent, query, db=ctx.db)

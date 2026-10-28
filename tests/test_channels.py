@@ -234,7 +234,7 @@ def test_secrets_are_managed_in_the_console_and_encrypted(desk, tmp_path, monkey
 def test_knowledge_base_search_across_pools_and_human_editing(desk):
     from app import knowledge
     # seeds loaded; L2 can reach an L1 SOP (marked) and the shared pool is seen by everyone
-    hits = knowledge.search("L2", "yazıcı kuyruğu takıldı")
+    hits = knowledge.search("L2", "print spooler")
     assert hits and hits[0]["id"].startswith("L1/") and hits[0]["from_other_tier"] is True and hits[0]["content"]
     r = desk.post("/sops", json={"tier": "shared", "title": "Guest Wi-Fi password", "content": "Ask reception; rotates monthly."}).json()
     assert r["status"] == "published"

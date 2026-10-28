@@ -14,7 +14,7 @@ def fresh_db(tmp_path, monkeypatch):
     init_db(f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setattr(knowledge, "SOP_DIR", tmp_path / "sops")   # don't let tests write real SOPs
     (tmp_path / "sops" / "L1").mkdir(parents=True)
-    (tmp_path / "sops" / "L1" / "001-vpn.md").write_text("# VPN bağlantı sorunu\n\nvpn_status sonra renew_vpn_profile.\n")
+    (tmp_path / "sops" / "L1" / "001-vpn.md").write_text("# VPN connection problem\n\nvpn_status, then renew_vpn_profile.\n")
 
 
 def call(name, **args):
@@ -27,8 +27,8 @@ def test_agent_sees_sop_titles_and_can_read_one():
     with session() as db:
         ticket, _ = handle_message(db, "+15551110001", "vpn")
         res = [e.data for e in ticket.events if e.kind == "tool_result"][0]
-    assert "VPN bağlantı sorunu" in llm.requests[0][0]["content"]
-    assert res["results"][0]["title"] == "VPN bağlantı sorunu"
+    assert "VPN connection problem" in llm.requests[0][0]["content"]
+    assert res["results"][0]["title"] == "VPN connection problem"
 
 
 def test_ticket_waits_for_confirmation_then_closes_with_rating():
@@ -95,7 +95,7 @@ def test_write_sop_adds_to_pool_and_endpoint_scripts_are_allow_listed():
     set_llm(ScriptedLLM([
         Reply(tool_calls=[call("run_endpoint_script", hostname="LT-101", script="rm-rf")]),
         Reply(tool_calls=[call("run_endpoint_script", hostname="LT-101", script="printer-fix")]),
-        Reply(tool_calls=[call("write_sop", title="Yazıcı kuyruğu takılması", content="printer-fix çalıştır.")]),
+        Reply(tool_calls=[call("write_sop", title="Printer queue stuck after update", content="Run printer-fix.")]),
         Reply(text="done"),
     ]))
     with session() as db:
@@ -104,9 +104,9 @@ def test_write_sop_adds_to_pool_and_endpoint_scripts_are_allow_listed():
     assert results[0]["ok"] is False and "allow-listed" in results[0]["error"]
     assert results[1]["ok"] is True
     assert results[2]["status"] == "draft"                                  # agents propose; admins publish
-    assert knowledge.search("L1", "yazıcı kuyruğu")[0]["title"] != "Yazıcı kuyruğu takılması"
+    assert knowledge.search("L1", "printer queue stuck")[0]["title"] != "Printer queue stuck after update"
     knowledge.set_status(results[2]["sop_id"], "published", "admin")
-    assert knowledge.search("L1", "yazıcı kuyruğu")[0]["title"] == "Yazıcı kuyruğu takılması"
+    assert knowledge.search("L1", "printer queue stuck")[0]["title"] == "Printer queue stuck after update"
 
 
 def test_every_tier_has_the_general_tools():
@@ -231,3 +231,20 @@ def test_same_problem_within_48h_reopens_the_ticket_instead_of_a_duplicate():
     with session() as db:
         t2, _ = handle_message(db, "+15551110001", "VPN yine koptu, aynı sorun")
         assert t2.id != tid and db.query(Ticket).count() == 2
+
+
+def test_old_sop_keys_move_to_the_english_knowledge_base(tmp_path, monkeypatch):
+    """A database seeded before the knowledge base moved to English keeps working: rows move to the new keys and text."""
+    from app import knowledge
+    from app.db import Sop, init_db, session
+    from pathlib import Path
+    monkeypatch.setattr(knowledge, "SOP_DIR", Path(__file__).resolve().parents[1] / "data" / "sops")
+    init_db(f"sqlite:///{tmp_path / 'old.db'}")
+    with session() as db:
+        db.query(Sop).delete()
+        db.add(Sop(key="L1/001-vpn-baglanti-sorunu", tier="L1", title="VPN bağlantı sorunu", content="eski metin",
+                   status="published", author="seed", source="seed"))
+    assert knowledge.migrate_renamed() == 1 and knowledge.migrate_renamed() == 0
+    with session() as db:
+        row = db.query(Sop).one()
+        assert row.key == "L1/001-vpn-connection" and row.title == "VPN connection problem" and "vpn_status" in row.content

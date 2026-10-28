@@ -34,8 +34,48 @@ def _slug(title: str) -> str:
 
 # ---- seeding from files (first run only) ------------------------------------------------------
 
+# Shipped SOPs were renamed when the knowledge base moved to English (v0.12). A database seeded before that keeps
+# the old keys; renamed() moves those rows to the new key and the shipped English text, once.
+RENAMED = {
+    "L1/001-vpn-baglanti-sorunu": "L1/001-vpn-connection", "L1/002-sifre-sifirlama": "L1/002-password-reset",
+    "L1/003-yazici": "L1/003-printer", "L1/004-lisans-ve-uygulama-erisimi": "L1/004-licences-and-app-access",
+    "L1/005-oltalama-e-posta": "L1/005-phishing-email", "L1/006-ise-giris-ve-cikis": "L1/006-onboarding-and-offboarding",
+    "L1/007-genel-teshis": "L1/007-general-approach", "L1/008-uyum-ihlali-kamera": "L1/008-camera-compliance-finding",
+    "L1/009-acikta-birakilmis-kimlik-bilgisi-kamera-masa-bulgusu-zorunlu-sifre": "L1/009-exposed-credential",
+    "L2/001-ag-ve-cihaz-teshisi": "L2/001-network-and-device-diagnosis", "L2/002-zararli-yazilim-mudahalesi": "L2/002-malware-response",
+    "L2/003-uzun-sure-guncellenmemis-dizustu-stale-patch-cevrimdisi-cihaz": "L2/003-stale-patch-laptop",
+    "L3/001-degisiklik-yonetimi": "L3/001-change-management", "L3/002-sap-ve-dizin-yetkileri": "L3/002-sap-and-directory-access",
+    "L3/003-toplu-kesinti": "L3/003-mass-outage", "L4/001-donanim-servis-ve-kargo": "L4/001-hardware-repair-and-shipping",
+}
+
+
+def _read(key: str) -> tuple[str, str] | None:
+    p = SOP_DIR / f"{key}.md"
+    if not p.is_file():
+        return None
+    body = p.read_text(encoding="utf-8")
+    return (body.splitlines()[0].lstrip("# ").strip() if body else p.stem), "\n".join(body.splitlines()[1:]).strip()
+
+
+def migrate_renamed() -> int:
+    """Move SOP rows seeded under the old (Turkish) keys to the English keys and text. Idempotent."""
+    n = 0
+    with session() as db:
+        for old, new in RENAMED.items():
+            row = db.query(Sop).filter(Sop.key == old).first()
+            if row is None or db.query(Sop).filter(Sop.key == new).first() is not None:
+                continue
+            got = _read(new)
+            if got is None:
+                continue
+            row.key, (row.title, row.content) = new, got
+            n += 1
+    return n
+
+
 def seed_from_files() -> int:
     """Load data/sops/<tier>/*.md into the table when it is empty. Returns how many were added."""
+    migrate_renamed()
     with session() as db:
         if db.query(Sop).count():
             return 0
