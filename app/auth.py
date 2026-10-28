@@ -316,7 +316,7 @@ def clients_page(admin: User = Depends(admin_user), info: str = "", error: str =
                      f"<form method='post' action='/clients/{c.id}/toggle'><button class=\"{'danger' if c.enabled else ''}\">{'Disable' if c.enabled else 'Enable'}</button></form></div></div></td></tr>")
     body = f"""
 <div class="pagehead"><p class="muted">Employees who may use the support page (<a href="/support-agent" target="_blank">/support-agent</a>). Everyone in the directory is recognised automatically; add people the directory lacks here. They sign in with a one-time code over WhatsApp or e-mail, never a password, and see only their own tickets.</p>
-<button class="btn primary slim" onclick="openModal('clientModal')">+ Add client</button></div>
+<button class="btn primary slim" onclick="openModal('clientModal')">+ Add client</button><form method="post" action="/clients/sync" style="display:inline;margin-left:8px"><button class="btn slim" type="submit" title="Add everyone in the directory who has a phone or an employee number">Sync from directory</button></form></div>
 {_alert(error, info)}
 <div class="scroll"><table><thead><tr><th>Client</th><th>Employee no</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead><tbody>{rows or '<tr><td colspan=5 class=muted>No clients yet; the first sign-in from the directory creates one.</td></tr>'}</tbody></table></div>
 <div class="modal {'on' if error else ''}" id="clientModal"><div class="box"><h3 id="cmTitle">Add a client</h3>
@@ -351,6 +351,41 @@ async def client_add(request: Request, admin: User = Depends(admin_user)):
         db.add(Client(name=name, employee_no=str(form.get("employee_no", "")).strip()[:32], phone=phone, email=email if "@" in email else ""))
         audit(db, admin.email, "client.added", target=phone or email, detail=name, ip=_ip(request))
     return RedirectResponse("/clients?info=Client+added", 303)
+
+
+@router.post("/clients/sync")
+def clients_sync(request: Request, admin: User = Depends(admin_user)):
+    """Everyone in the directory with a phone or an employee number becomes a client (mailboxes and service accounts,
+    which have neither, are skipped). Existing clients are matched by phone or e-mail and only filled in, never overwritten."""
+    from app import systems
+    from app.db import Client
+    from app.support import normalise
+    check_origin(request)
+    added = updated = 0
+    with session() as db:
+        for u in systems.directory_people():
+            phone, email = normalise(u.get("phone") or ""), (u.get("email") or "").lower()
+            emp = u.get("employee_no") or ""
+            has_number = bool(emp) and emp.lower() != (u.get("upn") or "").lower() and "@" not in emp
+            if not (phone or has_number):
+                continue
+            c = None
+            if phone:
+                c = db.query(Client).filter(Client.phone == phone).first()
+            if c is None and email:
+                c = db.query(Client).filter(Client.email == email).first()
+            if c is None:
+                db.add(Client(name=u.get("name", "")[:120], phone=phone, email=email, employee_no=emp if has_number else ""))
+                added += 1
+            else:
+                changed = False
+                for field, value in (("phone", phone), ("email", email), ("employee_no", emp if has_number else "")):
+                    if value and not getattr(c, field):
+                        setattr(c, field, value)
+                        changed = True
+                updated += changed
+        audit(db, admin.email, "clients.synced", detail=f"added={added} updated={updated}", ip=_ip(request))
+    return RedirectResponse(f"/clients?info={added}+added,+{updated}+updated+from+the+directory", 303)
 
 
 @router.post("/clients/{client_id}")

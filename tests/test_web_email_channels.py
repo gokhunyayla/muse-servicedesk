@@ -237,3 +237,16 @@ def test_stale_and_duplicate_whatsapp_messages_are_skipped(desk, monkeypatch):
     assert old["handled"] == 0 and fresh["handled"] == 1 and again["handled"] == 0
     with session() as db:
         assert db.query(Ticket).count() == 1
+
+
+def test_clients_sync_from_the_directory(desk):
+    from app.db import Client
+    r = desk.post("/clients/sync", follow_redirects=False)
+    assert r.status_code == 303 and "added" in r.headers["location"]
+    with session() as db:
+        names = {c.name for c in db.query(Client).all()}
+        assert {"Emma Johnson", "Liam Carter", "Olivia Bennett"} <= names
+        n = db.query(Client).count()
+    desk.post("/clients/sync", follow_redirects=False)                     # running it again adds nobody twice
+    with session() as db:
+        assert db.query(Client).count() == n

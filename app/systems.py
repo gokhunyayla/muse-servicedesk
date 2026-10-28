@@ -63,6 +63,14 @@ def employees_by_phone(phone: str) -> list[str]:
     return [e for e, u in USERS.items() if u.get("phone") == phone]
 
 
+def directory_people() -> list[dict]:
+    """Everyone in the directory: Entra's enabled members when connected, else the simulated table."""
+    g = _graph()
+    if g:
+        return g.list_people()
+    return [{"employee_no": e, **u, "email": user_email(e), "upn": user_email(e)} for e, u in USERS.items() if u.get("enabled", True)]
+
+
 def employees_by_contact(contact: str) -> list[str]:
     """Every employee a phone number or e-mail address belongs to."""
     g = _graph()

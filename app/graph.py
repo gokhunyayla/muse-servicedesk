@@ -193,6 +193,17 @@ def user_by_contact(contact: str) -> tuple[str, dict] | None:
     return hits[0] if hits else None
 
 
+def list_people() -> list[dict]:
+    """Every enabled member account (no guests), as directory records with their employee number."""
+    out, url = [], "/users"
+    params = {"$filter": "accountEnabled eq true and userType eq 'Member'", "$select": USER_FIELDS, "$top": 999, "$count": "true"}
+    while url:
+        d = _call("GET", url, params=params, headers={"ConsistencyLevel": "eventual"})
+        out += [{"employee_no": _emp_no(u), **_record(u)} for u in d.get("value", [])]
+        url, params = d.get("@odata.nextLink"), None
+    return out
+
+
 def search(query: str) -> list[dict]:
     d = _call("GET", "/users", params={"$search": f'"displayName:{query}" OR "mail:{query}"', "$select": USER_FIELDS, "$top": 5},
               headers={"ConsistencyLevel": "eventual"})
