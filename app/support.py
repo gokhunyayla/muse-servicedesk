@@ -416,7 +416,7 @@ function add(who,text,at,img,ticket){const d=document.createElement('div');d.cla
 function preview(){const f=IMG.files[0];if(!f)return;pendingImg=URL.createObjectURL(f);TY.textContent='Photo attached: '+f.name;}
 function setHead(t){const st=document.getElementById('hStatus'),S=document.getElementById('stars');
  if(!t){document.getElementById('hTitle').textContent='New conversation';st.style.display='none';document.getElementById('hMeta').textContent='';document.getElementById('btnClose').style.display='none';S.style.display='none';return;}
- document.getElementById('hTitle').textContent='#'+t.id+' · '+(t.title||'').split('\n')[0].slice(0,70);st.style.display='';st.textContent=LAB[t.status]||t.status;st.className='tag '+t.status;
+ document.getElementById('hTitle').textContent='#'+t.id+' · '+(t.title||'').split(String.fromCharCode(10))[0].slice(0,70);st.style.display='';st.textContent=LAB[t.status]||t.status;st.className='tag '+t.status;
  document.getElementById('hMeta').textContent='opened '+fmt(t.created_at)+' · via '+t.channel+(t.resolution?' · '+t.resolution:'');
  document.getElementById('btnClose').style.display=t.status==='resolved'?'none':'';
  if(t.status==='resolved'){S.style.display='';S.innerHTML='<span class="muted" style="font-size:12px">How did we do?</span> '+[1,2,3,4,5].map(n=>`<button class="${t.rating&&n<=t.rating?'on':''}" onclick="rate(${n})">★</button>`).join('');}else{S.style.display='none';}}
