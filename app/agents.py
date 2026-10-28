@@ -249,6 +249,9 @@ class Agent:
     heavy: bool = False   # use the heavy model (Muse Wonder): for production-impacting change planning
 
     def system_prompt(self, ticket: Ticket, db=None) -> str:
+        def _real(host: str) -> bool:
+            from app import endpoints
+            return endpoints.get(host) is not None
         from app import knowledge
         peers = "\n".join(f"- {a.tier}: {a.capabilities}" for a in AGENTS.values() if a.tier != self.tier)
         sops = "\n".join(f"- {t}" for t in knowledge.titles(self.tier, db=db)) or "(empty)"
@@ -270,6 +273,9 @@ class Agent:
             owners = []
         if len(owners) == 1:
             rec = systems.get_user(owners[0]) or {}
+            if rec.get("device"):
+                state += (f"\nTheir device is {rec['device']}; use it for device tools without asking for the hostname"
+                          + (" (a real machine with the endpoint agent: its scripts really run)." if _real(rec["device"]) else "."))
             state += (f"\nThe directory says this phone/address belongs to {rec.get('name', '?')} ({owners[0]}). The employee "
                       f"is writing about themselves: use {owners[0]} for every action and never another employee number "
                       f"mentioned earlier in the conversation."

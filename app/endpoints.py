@@ -97,7 +97,32 @@ def finish(db, d: Device, job_id: int, ok: bool, output: str) -> bool:
     if j.ticket_id:
         db.add(Event(ticket_id=j.ticket_id, actor="system", kind="note",
                      content=f"[{d.hostname}] {j.script}: {'ok' if ok else 'failed'}", data={"output": j.output[:2000]}))
+        if j.requested_by.endswith("|resume"):
+            import threading
+            threading.Thread(target=resume_with_result, args=(j.id,), daemon=True).start()
     return True
+
+
+def resume_with_result(job_id: int) -> None:
+    """A device answered after the agent stopped waiting: let the ticket's agent read the result and tell the
+    employee, on whatever channel the ticket is on."""
+    import logging
+    from app.agents import AGENTS, log
+    from app.db import Outbound, Ticket
+    try:
+        with session() as db:
+            j = db.get(DeviceJob, job_id)
+            t = db.get(Ticket, j.ticket_id) if j and j.ticket_id else None
+            if t is None or t.status == "resolved":
+                return
+            dev = db.get(Device, j.device_id)
+            tier = t.owner if t.owner in AGENTS else "L1"
+            answer = AGENTS[tier].run(db, t, f"[Result from {dev.hostname}: {j.script} {'succeeded' if j.ok else 'failed'}] "
+                                             f"{j.output[:3000]}\nContinue the ticket with this result and tell the employee.")
+            log(db, t.id, tier, "message", answer)
+            db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
+    except Exception:  # noqa: BLE001
+        logging.getLogger("endpoints").exception("resuming ticket for job %s failed", job_id)
 
 
 # ---- the desk side (agent tools, proactive checks) ------------------------------------------------
@@ -171,6 +196,12 @@ def run(hostname: str, script: str, ticket_id: int | None, requested_by: str, wa
                 return {"ok": bool(j.ok), "hostname": d.hostname, "script": script, "output": j.output, "job": job_id,
                         "real_device": True}
         time.sleep(1)
+    with session() as own:                           # the tool gives up waiting: the result will resume the ticket
+        j = own.get(DeviceJob, job_id)
+        if j.status in ("done", "failed"):
+            return {"ok": bool(j.ok), "hostname": d.hostname, "script": script, "output": j.output, "job": job_id,
+                    "real_device": True}
+        j.requested_by = (j.requested_by + "|resume")[:64]
     return {"ok": True, "hostname": d.hostname, "script": script, "job": job_id, "status": "queued",
             "note": "the device has not answered yet; its result will be added to this ticket when it does",
             "real_device": True}

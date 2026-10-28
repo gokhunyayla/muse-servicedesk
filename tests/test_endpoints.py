@@ -104,3 +104,34 @@ def test_live_metrics_raise_proactive_findings(desk):
                          headers={"Authorization": f"Bearer {token}"})
     kinds = {(f["hostname"], f["kind"]) for f in findings()}
     assert ("LT-201", "disk") in kinds and ("LT-201", "service") in kinds
+
+
+def test_late_device_result_resumes_the_ticket(desk, monkeypatch):
+    """The agent stopped waiting; when the machine answers, the ticket continues and the employee hears back."""
+    from app import endpoints as ep
+    from app.db import Outbound
+    from app.llm import Reply, ScriptedLLM, set_llm
+    from app.main import app
+    token = _enrol(desk)
+    h = {"Authorization": f"Bearer {token}"}
+    c = TestClient(app)
+    c.post("/agent/heartbeat", json={"metrics": METRICS}, headers=h)
+    with session() as db:
+        t = Ticket(requester="+15551110001", title="slow laptop")
+        db.add(t)
+        db.flush()
+        tid = t.id
+    r = ep.run("LT-101", "perf-report", tid, "L1", wait=1)            # nobody answers within the wait
+    assert r["status"] == "queued"
+    set_llm(ScriptedLLM([Reply(text="Raporu aldım: işlemci %95, Chrome çok kaynak kullanıyor.")]))
+    started = []
+    monkeypatch.setattr(ep, "resume_with_result", lambda job_id: started.append(job_id))
+    job = c.get("/agent/jobs?wait=0", headers=h).json()["jobs"][0]
+    c.post(f"/agent/jobs/{job['id']}/result", json={"ok": True, "output": "CPU 95%"}, headers=h)
+    time.sleep(0.2)
+    assert started == [job["id"]]
+    monkeypatch.undo()
+    ep.resume_with_result(job["id"])                                   # what the background thread does
+    with session() as db:
+        out = db.query(Outbound).filter(Outbound.ticket_id == tid).all()
+        assert out and "Raporu aldım" in out[-1].text and out[-1].to == "+15551110001"

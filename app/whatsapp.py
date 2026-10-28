@@ -109,6 +109,13 @@ def _extract(payload: dict) -> list[dict]:
 @router.post("/webhook")
 async def inbound(request: Request) -> dict:
     payload = await request.json()
+    # the agent loop blocks (model calls, waiting for a device): never on the event loop, or every other
+    # request (the endpoint agent's poll, the console) stalls behind it
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(_handle_payload, payload)
+
+
+def _handle_payload(payload: dict) -> dict:
     handled = 0
     for m in _extract(payload):
         mid, ts = m.get("id"), int(m.get("timestamp") or 0)

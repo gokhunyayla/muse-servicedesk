@@ -229,6 +229,11 @@ async def say(request: Request, text: str = Form(""), image: UploadFile | None =
         answer, who2 = identify(who, text)
         resp = JSONResponse({"ticket": None, "status": None, "text": answer, "identified": who2.get("mode") == "client", "name": who2.get("name", "")})
         return _set(resp, who2)
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(_say_desk, who, text, data, mime, ticket)
+
+
+def _say_desk(who: dict, text: str, data, mime: str, ticket: int | None) -> dict:
     with session() as db:
         pinned = _own_ticket(db, who, ticket) if ticket else None
         if ticket and pinned is None:

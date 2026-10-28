@@ -65,7 +65,13 @@ def post_message(msg: Incoming) -> dict:
 @app.post("/voice", dependencies=[Depends(api_key)])
 async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) -> dict:
     """A voice note: transcribe it, then handle it like a text message."""
-    text = transcribe(await audio.read(), audio.content_type or "audio/wav")
+    from starlette.concurrency import run_in_threadpool
+    raw = await audio.read()
+    return await run_in_threadpool(_voice_sync, requester, raw, audio.content_type or "audio/wav")
+
+
+def _voice_sync(requester: str, raw: bytes, mime: str) -> dict:
+    text = transcribe(raw, mime)
     if not text:
         raise HTTPException(422, "could not transcribe audio")
     with session() as db:
@@ -78,11 +84,14 @@ async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) 
 @app.post("/image", dependencies=[Depends(api_key)])
 async def post_image(requester: str = Form(...), text: str = Form(""), image: UploadFile = File(...)) -> dict:
     """A photo or screenshot with an optional caption."""
-    data = await image.read()
-    with session() as db:
-        ticket, answer = handle_message(db, requester, text or "(sent a photo)", data,
-                                        image.content_type or "image/jpeg")
-        return {"ticket_id": ticket.id if ticket else None, "reply": answer}
+    from starlette.concurrency import run_in_threadpool
+    data, mime = await image.read(), image.content_type or "image/jpeg"
+
+    def go() -> dict:
+        with session() as db:
+            ticket, answer = handle_message(db, requester, text or "(sent a photo)", data, mime)
+            return {"ticket_id": ticket.id if ticket else None, "reply": answer}
+    return await run_in_threadpool(go)
 
 
 class Decision(BaseModel):
@@ -699,7 +708,14 @@ async def post_video(requester: str = Form(...), text: str = Form(""), video: Up
     """A short screen recording or phone clip: sample frames and let L1 look at them."""
     from app.llm import image_message
     from app.vision import sample_frames
-    frames = sample_frames(await video.read())
+    from starlette.concurrency import run_in_threadpool
+    raw = await video.read()
+    return await run_in_threadpool(_video_sync, requester, text, raw)
+
+
+def _video_sync(requester: str, text: str, raw: bytes) -> dict:
+    from app.vision import sample_frames
+    frames = sample_frames(raw)
     if not frames:
         raise HTTPException(422, "could not read video")
     with session() as db:
@@ -713,9 +729,11 @@ async def post_video(requester: str = Form(...), text: str = Form(""), video: Up
 
 @app.post("/camera/{camera_id}", dependencies=[Depends(api_key)])
 async def post_camera_frame(camera_id: str, image: UploadFile = File(...)) -> dict:
+    from starlette.concurrency import run_in_threadpool
     from app.camera import process_frame
+    data, mime = await image.read(), image.content_type or "image/jpeg"
     try:
-        return {"findings": process_frame(camera_id, await image.read(), image.content_type or "image/jpeg")}
+        return {"findings": await run_in_threadpool(process_frame, camera_id, data, mime)}
     except KeyError as e:
         raise HTTPException(404, str(e))
 
