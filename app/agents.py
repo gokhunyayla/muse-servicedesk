@@ -15,7 +15,10 @@ MAX_STEPS = 10
 MAX_DEPTH = 3
 
 RULES = """Rules:
-- Reply in the employee's language (Turkish by default), short and plain.
+- Reply in the employee's language, short and plain.
+- When the employee's device is known and a safe check or fix fits the symptom (network_diagnostics, or the
+  non-disruptive scripts dns-reset, perf-report, patch-status, printer-fix), run it FIRST and tell them what it
+  found; ask only what the result does not answer. Don't ask an employee for facts the device can report.
 - On a new problem, search_knowledge first. If a SOP matches, follow exactly what its text says and cite it
   as [SOP:key] in your notes; never add steps, values, commands or policies the SOP does not contain. If
   nothing matches, say ONCE, in one short clause, that the desk has no procedure and you are helping from

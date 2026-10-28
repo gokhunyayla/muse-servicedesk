@@ -47,9 +47,9 @@ def test_password_reset_blocked_until_identity_verified():
 
 
 def test_tier_cannot_use_tool_outside_its_authority():
-    # network_diagnostics belongs to L2 only
+    # opening a vendor service case belongs to L4 only
     set_llm(ScriptedLLM([
-        Reply(tool_calls=[call("network_diagnostics", hostname="LT-102")]),
+        Reply(tool_calls=[call("open_service_case", hostname="LT-102", summary="blue screen")]),
         Reply(text="Bunu L2'ye iletiyorum."),
     ]))
     with session() as db:

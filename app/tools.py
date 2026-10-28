@@ -267,7 +267,7 @@ def renew_vpn_profile(ctx: Ctx, hostname: str) -> dict:
     return {"ok": True, "hostname": hostname, "vpn_profile": "valid"}
 
 
-@tool("Run network diagnostics (reachability, DNS) on a laptop.", ("L2",), hostname=STR)
+@tool("Read a device's network and health state (online, DNS, disk, CPU, memory, patch age, services). Read-only.", ("L1", "L2"), hostname=STR)
 def network_diagnostics(ctx: Ctx, hostname: str) -> dict:
     d = systems.device(hostname)
     if not d:
