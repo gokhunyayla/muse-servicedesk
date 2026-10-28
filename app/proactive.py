@@ -11,8 +11,13 @@ from app.db import Ticket, session
 
 
 def findings() -> list[dict]:
+    """With a real directory (Entra) only real machines count: the simulated inventory belongs to the simulated
+    directory and its owners are not real people."""
+    from app import endpoints
+    real_directory = systems._graph() is not None
+    devices = endpoints.all_states() if real_directory else systems.all_devices()
     out = []
-    for host, d in systems.all_devices().items():
+    for host, d in devices.items():
         owner = systems.device_owner(host)
         if not owner:
             continue
@@ -33,7 +38,7 @@ def findings() -> list[dict]:
             if int(m.get("critical_events_24h", 0) or 0) >= 5:
                 add("events", f"[Proactive] {host}: {m['critical_events_24h']} critical/error system events in 24 hours.")
     soon = (date.today() + timedelta(days=30)).isoformat()
-    for host, w in systems.WARRANTY.items():
+    for host, w in ({} if real_directory else systems.WARRANTY).items():
         owner = systems.device_owner(host)
         if owner and date.today().isoformat() <= w["valid_until"] <= soon:
             emp, u = owner
