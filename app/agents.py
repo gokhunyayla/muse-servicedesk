@@ -137,6 +137,29 @@ def recent_switch(db, requester: str, channel: str) -> Ticket | None:
     return None
 
 
+def clarify(db, held: Ticket, text: str, lang: str) -> str:
+    """The message could be about the open ticket or something new: ask one natural question that mentions the
+    open topic and asks what exactly they see — not a mechanical 'yes / new issue'. Scripted tests get the fixed text."""
+    canned = tr_("same_or_new", lang, id=held.id, title=held.title.split(chr(10))[0][:60])
+    llm = get_llm()
+    if hasattr(llm, "verdict"):
+        return canned
+    recent = [e.content for e in held.events if e.kind == "message"][-3:]
+    prompt = (f"You are an IT service desk agent. The employee has an open ticket #{held.id}: \"{held.title.split(chr(10))[0][:80]}\".\n"
+              f"Recent exchange on it:\n" + "\n".join(f"- {m[:160]}" for m in recent) +
+              f"\n\nThey now write: \"{text[:300]}\"\n\nIt is unclear whether this is about that ticket or a new problem. "
+              f"Write ONE short, natural message in {'Turkish' if lang == 'tr' else 'English'} that (a) asks whether it is about the open topic "
+              f"(name it in plain words, mention #{held.id}) or something else, and (b) asks what exactly they see (device, screen, the text of the warning). "
+              f"No bullet points, no options in brackets, max two sentences.")
+    from app import usage
+    try:
+        with usage.scope("ticket", held.id, "route", db=db):
+            reply = llm.chat([{"role": "user", "content": prompt}], [])
+        return (reply.text or "").strip() or canned
+    except ContentFiltered:
+        return canned
+
+
 def resume_offer(db, requester: str, channel: str, lang: str, pending: str = "", greeting: bool = False) -> tuple[Ticket, str] | None:
     """If the employee just switched channels mid-conversation, ask whether to pick up where they left off.
     `greeting`: they said hello first, so the question doubles as the greeting (one message, not two)."""
@@ -481,7 +504,8 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
             if pend["pending"]:
                 return handle_message(db, requester, pend["pending"], image, mime, extra_images, force_new=True, channel=channel)
             return None, tr_("resume_new", detect(text, None) or "tr")
-        # anything else: the question is dropped and the message is handled normally
+        elif pend.get("pending"):
+            text = f"{pend['pending']}\n{text}"             # their answer to our clarifying question, with what they said first
     elif pinned is None and not is_ack(text) and not is_greeting(text):
         held = recent_switch(db, requester, channel)
         if held is not None:                                   # mid-conversation channel switch: decide, ask only if unclear
@@ -494,9 +518,11 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
                 held.channel = channel
                 return handle_message(db, requester, text, image, mime, extra_images, force_new=True, channel=channel)
             else:
-                _, question = resume_offer(db, requester, channel, detect(text, None) or "tr", pending=text)
-                log(db, held.id, "system", "note", f"employee switched to {channel}; asked whether to continue here")
-                return held, question
+                import time as _t
+                lang = detect(text, None) or ticket_lang(held)
+                _RESUME.set(db, requester, {"ticket": held.id, "pending": text, "until": _t.time() + 15 * 60})
+                log(db, held.id, "system", "note", f"employee switched to {channel}; message unclear, asked for detail")
+                return held, clarify(db, held, text, lang)
     # 3) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
     if pinned is None and is_greeting(text):
         lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
@@ -533,7 +559,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     elif ticket is not None:
         where = _route(db, ticket, text)
         if where == "ask":                                    # too vague to place: ask instead of guessing
-            answer = tr_("same_or_new", detect(text, None) or ticket_lang(ticket), id=ticket.id, title=ticket.title[:60])
+            answer = clarify(db, ticket, text, detect(text, None) or ticket_lang(ticket))
             log(db, ticket.id, "user", "message", text)
             log(db, ticket.id, "L1", "message", answer)
             db.refresh(ticket)

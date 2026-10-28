@@ -188,10 +188,19 @@ def test_channel_switch_continues_silently_and_asks_only_when_unclear():
         db.get(Ticket, t2.id).status = "resolved"
         db.get(Ticket, tid).channel = "web"                     # the VPN conversation was last on the web
         held, answer = handle_message(db, "+905551110001", "yine olmadı", channel="whatsapp")
-        assert held.id == tid and "devam edelim mi" in answer and "destek sayfası" in answer
+        assert held.id == tid and f"#{tid}" in answer and "yeni bir konu mu" in answer       # a clarifying question, nothing opened
         t, answer = handle_message(db, "+905551110001", "evet", channel="whatsapp")
         assert t.id == tid and t.channel == "whatsapp" and answer == "Bakıyorum."
         assert [e.content for e in t.events if e.kind == "message" and e.actor == "user"][-1] == "yine olmadı"
+    # a free-text answer to the clarifying question: both sentences travel together into routing
+    set_llm(ScriptedLLM([Reply(text="UNCLEAR"), Reply(text="SAME"), Reply(text="Tamam.")]))
+    with session() as db:
+        db.get(Ticket, tid).channel = "web"
+        handle_message(db, "+905551110001", "ekranda garip bir uyarı var", channel="whatsapp")
+        t, answer = handle_message(db, "+905551110001", "modemin ekranında, line error yazıyor", channel="whatsapp")
+        assert t.id == tid and answer == "Tamam."
+        last = [e.content for e in t.events if e.kind == "message" and e.actor == "user"][-1]
+        assert last.startswith("ekranda garip bir uyarı var") and "line error" in last
     # a hello on the other channel: one message that greets and offers, never two
     agents._RESUME.clear()
     with session() as db:
