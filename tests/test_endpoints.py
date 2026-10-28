@@ -48,7 +48,7 @@ def test_enrolment_heartbeat_and_auth(desk):
     assert c.post("/agent/heartbeat", json={}, headers={"Authorization": "Bearer nope"}).status_code == 401
     r = c.post("/agent/heartbeat", json={"version": "1.0.0", "os": "Windows Server 2022", "metrics": METRICS},
                headers={"Authorization": f"Bearer {token}"})
-    assert r.json()["hostname"] == "LT-101" and r.json()["agent_version"] == "1.1.0"     # agents update themselves to this
+    assert r.json()["hostname"] == "LT-101" and r.json()["agent_version"] == "1.2.0"     # agents update themselves to this
     st = systems.device("LT-101")
     assert st["real"] and st["online"] and st["disk_used_pct"] == 41 and st["os_patch_days"] == 4
     assert systems.device_owner("LT-101")[0] == "E1001"
@@ -135,3 +135,32 @@ def test_late_device_result_resumes_the_ticket(desk, monkeypatch):
     with session() as db:
         out = db.query(Outbound).filter(Outbound.ticket_id == tid).all()
         assert out and "Raporu aldım" in out[-1].text and out[-1].to == "+15551110001"
+
+
+def test_background_update_finishing_resumes_the_ticket(desk, monkeypatch):
+    from app import endpoints as ep
+    from app.main import app
+    token = _enrol(desk)
+    h = {"Authorization": f"Bearer {token}"}
+    c = TestClient(app)
+    c.post("/agent/heartbeat", json={"metrics": METRICS}, headers=h)
+    with session() as db:
+        t = Ticket(requester="+15551110001", title="updates")
+        db.add(t)
+        db.flush()
+        tid = t.id
+    started = []
+    monkeypatch.setattr(ep, "resume_with_result", lambda job_id, text=None: started.append((job_id, text)))
+    ep.run("LT-101", "install-updates", tid, "L1", wait=0)
+    job = c.get("/agent/jobs?wait=0", headers=h).json()["jobs"][0]
+    c.post(f"/agent/jobs/{job['id']}/result", json={"ok": True, "output": "Started installing 2 update(s)"}, headers=h)
+    started.clear()                                        # the "queued" resume, not what this test is about
+    beat = lambda run: c.post("/agent/heartbeat", json={"metrics": {**METRICS, "updates_run": run}}, headers=h)
+    beat("started 2026-10-28 17:47:00Z")
+    assert started == []                                   # still running
+    beat("finished 2026-10-28 18:05:00Z; reboot required: False\nDefender: succeeded")
+    time.sleep(0.2)
+    assert len(started) == 1 and "Defender: succeeded" in started[0][1]
+    beat("finished 2026-10-28 18:05:00Z; reboot required: False\nDefender: succeeded")
+    time.sleep(0.2)
+    assert len(started) == 1                               # reported once

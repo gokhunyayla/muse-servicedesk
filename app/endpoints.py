@@ -71,7 +71,11 @@ def heartbeat(db, d: Device, payload: dict) -> None:
     d.agent_version = str(payload.get("version", d.agent_version))[:32]
     m = payload.get("metrics")
     if isinstance(m, dict):
+        before = str((d.metrics or {}).get("updates_run", ""))
         d.metrics = {k: v for k, v in m.items() if isinstance(k, str) and len(k) < 40}
+        after = str(d.metrics.get("updates_run", ""))
+        if after != before and after.startswith(("finished", "failed")):
+            _background_finished(db, d, "install-updates", after)
 
 
 def take_jobs(db, d: Device) -> list[dict]:
@@ -103,7 +107,23 @@ def finish(db, d: Device, job_id: int, ok: bool, output: str) -> bool:
     return True
 
 
-def resume_with_result(job_id: int) -> None:
+def _background_finished(db, d: Device, script: str, outcome: str) -> None:
+    """A script that keeps running on the device after its job returned (OS updates) has finished: hand the
+    outcome to the ticket that started it, once."""
+    cutoff = _now() - timedelta(days=1)
+    j = (db.query(DeviceJob).filter(DeviceJob.device_id == d.id, DeviceJob.script == script, DeviceJob.status == "done",
+                                    DeviceJob.created_at >= cutoff).order_by(DeviceJob.id.desc()).first())
+    if j is None or j.ticket_id is None or "|reported" in j.requested_by:
+        return
+    j.requested_by = (j.requested_by + "|reported")[:64]
+    db.add(Event(ticket_id=j.ticket_id, actor="system", kind="note", content=f"[{d.hostname}] {script} finished in the background",
+                 data={"output": outcome[:2000]}))
+    db.flush()
+    import threading
+    threading.Thread(target=resume_with_result, args=(j.id, f"{script} finished in the background: {outcome}"), daemon=True).start()
+
+
+def resume_with_result(job_id: int, text: str | None = None) -> None:
     """A device answered after the agent stopped waiting: let the ticket's agent read the result and tell the
     employee, on whatever channel the ticket is on."""
     import logging
@@ -117,8 +137,9 @@ def resume_with_result(job_id: int) -> None:
                 return
             dev = db.get(Device, j.device_id)
             tier = t.owner if t.owner in AGENTS else "L1"
-            answer = AGENTS[tier].run(db, t, f"[Result from {dev.hostname}: {j.script} {'succeeded' if j.ok else 'failed'}] "
-                                             f"{j.output[:3000]}\nContinue the ticket with this result and tell the employee.")
+            what = text or f"{j.script} {'succeeded' if j.ok else 'failed'}: {j.output[:3000]}"
+            answer = AGENTS[tier].run(db, t, f"[Result from {dev.hostname}] {what}\n"
+                                             f"Continue the ticket with this result and tell the employee.")
             log(db, t.id, tier, "message", answer)
             db.add(Outbound(to=t.requester, ticket_id=t.id, text=answer))
     except Exception:  # noqa: BLE001

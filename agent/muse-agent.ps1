@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.1.0"
+$Version = "1.2.0"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -94,6 +94,9 @@ function Get-Metrics {
   try { Resolve-DnsName -Name "www.microsoft.com" -QuickTimeout -ErrorAction Stop | Out-Null } catch { $dnsOk = $false }
   $crit = 0
   try { $crit = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Level = 1, 2; StartTime = (Get-Date).AddDays(-1) } -ErrorAction Stop).Count } catch {}
+  $run = Join-Path $Home_ "updates-result.txt"
+  $updatesRun = if (Test-Path $run) { (Get-Content $run -Raw).Trim() } else { "" }
+  if ($updatesRun.Length -gt 1500) { $updatesRun = $updatesRun.Substring(0, 1500) }
   $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254*" } | Select-Object -First 1).IPAddress
   return @{
     disk_used_pct      = [int](100 - ($disk.FreeSpace / $disk.Size * 100))
@@ -107,6 +110,7 @@ function Get-Metrics {
     critical_events_24h = $crit
     dns_ok             = $dnsOk
     ip                 = $ip
+    updates_run        = $updatesRun
   }
 }
 
@@ -201,7 +205,7 @@ try {
       Unregister-ScheduledTask -TaskName "MuseAgentInstallUpdates" -Confirm:$false -ErrorAction SilentlyContinue
       Register-ScheduledTask -TaskName "MuseAgentInstallUpdates" -Action $action -Principal $principal | Out-Null
       Start-ScheduledTask -TaskName "MuseAgentInstallUpdates"
-      return "Started installing $($todo.Count) update(s) in the background: $($titles -join '; '). This usually takes 10-30 minutes; patch-status shows the outcome and whether a restart is needed."
+      return "Started installing $($todo.Count) update(s) in the background: $($titles -join '; '). This usually takes 10-30 minutes; the desk is told automatically when it finishes (result and whether a restart is needed)."
     }
     "driver-rollback" {
       throw "driver rollback is not enabled on this device (servers keep their certified drivers); hand off to L2/L4"
