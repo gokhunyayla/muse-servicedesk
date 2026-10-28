@@ -297,7 +297,7 @@ async function load(force){
   try{const ss=await (await fetch('/supervisor/stats?period='+period)).json();$('#supMode').textContent=ss.mode==='auto'?'· automatic':'· manual';
    $('#supKpis').innerHTML=[['Runs',ss.runs],['Problems merged',ss.problems],['SOPs drafted',ss.sops_drafted],['SOPs published',ss.sops_published],['SLA actions',ss.sla_actions||0],['Human asks',ss.human_asks]].map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');}catch(e){}
   try{const ai=await (await fetch('/ai/usage?period='+period)).json();
-   $('#aiKpis').innerHTML=[['Calls',ai.calls],['Tokens',fmtTok(ai.total_tokens)],['Prompt / completion',fmtTok(ai.prompt_tokens)+' / '+fmtTok(ai.completion_tokens)],['Avg latency',(ai.avg_latency_ms/1000).toFixed(1)+' s'],['Tokens per ticket',fmtTok(ai.tokens_per_ticket)],['Largest prompt',fmtTok(ai.max_prompt_tokens)+' ('+Math.round(100*ai.max_prompt_tokens/(ai.context_windows[Object.keys(ai.by_model)[0]]||128000))+'% ctx)']]
+   $('#aiKpis').innerHTML=[['Calls',ai.calls],['Tokens',fmtTok(ai.total_tokens)],...(ai.priced?[['Cost',ai.cost_label||'—'],['Cost per ticket',ai.cost_per_ticket_label||'—']]:[]),['Prompt / completion',fmtTok(ai.prompt_tokens)+' / '+fmtTok(ai.completion_tokens)],['Avg latency',(ai.avg_latency_ms/1000).toFixed(1)+' s'],['Tokens per ticket',fmtTok(ai.tokens_per_ticket)],['Largest prompt',fmtTok(ai.max_prompt_tokens)+' ('+Math.round(100*ai.max_prompt_tokens/(ai.context_windows[Object.keys(ai.by_model)[0]]||128000))+'% ctx)']]
     .map(([k,v])=>`<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join('');
    $('#aiModels').innerHTML=Object.entries(ai.by_model).map(([m,v])=>`<span class="chip">${esc(m)}: ${v.calls} calls · ${fmtTok(v.total)} tok · ${(v.avg_latency_ms/1000).toFixed(1)} s</span>`).join(' ')+(Object.keys(ai.by_scope).length?' · by scope: '+Object.entries(ai.by_scope).map(([k,v])=>`${esc(k)} ${fmtTok(v)}`).join(', '):'');}catch(e){}
   try{const rk=await (await fetch('/sla/at-risk')).json();
@@ -394,7 +394,7 @@ async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id))
   ${renderTiming(t.timing)}
   ${t.resolution?`<h4>Resolution</h4><div>${esc(t.resolution)}</div>`:''}
   <h4>Activity</h4><div class="muted">${t.events.filter(e=>e.kind==='tool_call').length} tool calls · ${t.events.filter(e=>e.kind==='handoff').length} handoffs · ${t.events.filter(e=>e.kind==='message').length} messages</div>
-  ${t.ai&&t.ai.calls?`<h4>AI usage</h4><div class="muted">${t.ai.calls} model calls · ${fmtTok(t.ai.total_tokens)} tokens · avg ${(t.ai.avg_latency_ms/1000).toFixed(1)} s${Object.keys(t.ai.by_actor||{}).length?' · '+Object.entries(t.ai.by_actor).map(([k,v])=>k+' '+fmtTok(v)).join(', '):''}</div>`:''}`;
+  ${t.ai&&t.ai.calls?`<h4>AI usage</h4><div class="muted">${t.ai.calls} model calls · ${fmtTok(t.ai.total_tokens)} tokens${t.ai.priced?' · cost '+t.ai.cost_label:''} · avg ${(t.ai.avg_latency_ms/1000).toFixed(1)} s${Object.keys(t.ai.by_actor||{}).length?' · '+Object.entries(t.ai.by_actor).map(([k,v])=>k+' '+fmtTok(v)).join(', '):''}</div>`:''}`;
  $('#trail').innerHTML=renderTimeline(t.events);$('#composer').style.display='';
  document.querySelectorAll('.item').forEach(r=>r.classList.toggle('on',+r.dataset.id===t.id));
  if(!quiet){$('#trail').scrollTop=1e9;if(window.innerWidth<900)$('#detail').scrollIntoView({behavior:'smooth'});}}

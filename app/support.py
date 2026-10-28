@@ -322,6 +322,8 @@ def _welcome(who: dict) -> tuple[str, dict]:
                "employee_no": client.employee_no, "lang": who.get("lang", "tr")}
         u = systems.USERS.get(client.employee_no or "") or {}
         device = u.get("device")
+        from app.agents import resume_offer
+        offer = resume_offer(db, client.phone or client.email, "web", "tr" if tr else "en") if addrs else None
         first = (client.name.split() or [""])[0]
         if tr:
             msg = f"Hoş geldiniz {client.name}."
@@ -330,6 +332,8 @@ def _welcome(who: dict) -> tuple[str, dict]:
             msg += (f" {len(open_t)} açık talebiniz var: " + ", ".join(f"#{t.id} {t.title.split(chr(10))[0][:40]}" for t in open_t[:3]) + "."
                     if open_t else " Şu an açık talebiniz yok.")
             msg += " Sorununuzu veya talebinizi yazın; taleplerinizi sağ üstteki My requests düğmesinden takip edebilirsiniz."
+            if offer:
+                msg += "\n\n" + offer[1]
         else:
             msg = f"Welcome, {client.name}."
             if device:
@@ -337,6 +341,8 @@ def _welcome(who: dict) -> tuple[str, dict]:
             msg += (f" You have {len(open_t)} open request(s): " + ", ".join(f"#{t.id} {t.title.split(chr(10))[0][:40]}" for t in open_t[:3]) + "."
                     if open_t else " You have no open requests.")
             msg += " Tell me the problem or request; the My requests button at the top right lists yours."
+            if offer:
+                msg += "\n\n" + offer[1]
         return msg, new
 
 

@@ -24,10 +24,17 @@ def call(_name, **args):
 
 
 def seed(texts_by_phone):
+    """Reports spread over hours: intake sees nothing unusual (it links only bursts within minutes),
+    so the pattern is the Supervisor's to find."""
+    from datetime import timedelta
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")] * len(texts_by_phone)))
     with session() as db:
-        for phone, text in texts_by_phone:
-            handle_message(db, phone, text)
+        for i, (phone, text) in enumerate(texts_by_phone):
+            t, _ = handle_message(db, phone, text)
+            t.created_at = t.created_at - timedelta(hours=len(texts_by_phone) - i)
+            for e in t.events:
+                e.at = e.at - timedelta(hours=len(texts_by_phone) - i)
+            db.flush()
 
 
 def test_pre_analysis_finds_clusters_and_failures():
@@ -109,12 +116,15 @@ def test_sla_at_risk_detection_and_supervisor_actions():
     # ticket 1: L1 holding it for 25 of 30 minutes → at risk (default 80%); ticket 2: waiting for approval
     seed([("+905551110001", "VPN bağlanmıyor"), ("+905551110002", "Project lisansı lazım")])
     with session() as db:
+        from app.db import _now
         t1 = db.get(Ticket, 1)
-        t1.created_at = t1.created_at - timedelta(minutes=25)
+        t1.created_at = _now() - timedelta(minutes=25)
         for e in db.query(Event).filter_by(ticket_id=1):
             e.at = t1.created_at + timedelta(seconds=5)
         t2 = db.get(Ticket, 2)
-        t2.status = "waiting_approval"
+        t2.status, t2.created_at = "waiting_approval", _now() - timedelta(minutes=2)       # fresh: not at risk
+        for e in db.query(Event).filter_by(ticket_id=2):
+            e.at = t2.created_at + timedelta(seconds=5)
         db.add(Approval(ticket_id=2, approver="E1002", request="Project lisansı"))
     with session() as db:
         risks = at_risk(db)

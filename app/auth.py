@@ -693,8 +693,8 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
                     + (f'<label class="check" style="margin:0 0 0 8px"><input type="checkbox" name="clear_{name}" value="1" {dis}> clear</label>' if st["source"] == "console" else "")
                     + '</div></div>')
         if tab == "models":
-            from app.usage import context_windows
-            cw = context_windows()
+            from app.usage import context_windows, pricing
+            cw, pr = context_windows(), pricing()
             rows = secret_row("META_API_KEY", "From dev.meta.ai; used by every agent, voice, vision and SAM call")
             body = f"""<p class="muted">Keys live encrypted in the database and are managed here; <code>.env</code> is only a fallback for first run.</p>
 <form method="post" action="/settings/secrets?tab=models">{rows}
@@ -704,7 +704,13 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <form method="post" action="/settings/context">
 <div class="srow"><div><b>{_esc(cfg.meta_model)}</b><small>agents</small></div><div class="min"><input name="{_esc(cfg.meta_model)}" type="number" min="1000" step="1000" value="{cw.get(cfg.meta_model, 128000)}" {dis}> <span>tokens</span></div></div>
 <div class="srow"><div><b>{_esc(cfg.meta_model_heavy)}</b><small>heavy</small></div><div class="min"><input name="{_esc(cfg.meta_model_heavy)}" type="number" min="1000" step="1000" value="{cw.get(cfg.meta_model_heavy, 128000)}" {dis}> <span>tokens</span></div></div>
-{('<div class="row end"><button class="btn primary slim" type="submit">Save context windows</button></div>' if admin else '')}</form>"""
+{('<div class="row end"><button class="btn primary slim" type="submit">Save context windows</button></div>' if admin else '')}</form>
+<h3>Pricing</h3><p class="muted">What a token costs you, per 1M tokens. With prices set, the console, ticket details and reports show what each request, day and period cost in money.</p>
+<form method="post" action="/settings/pricing">
+<div class="srow"><div><b>Currency symbol</b></div><div class="min"><input name="currency" value="{_esc(pr["currency"])}" style="width:70px" {dis}></div></div>
+<div class="srow"><div><b>{_esc(cfg.meta_model)}</b><small>prompt / completion per 1M tokens</small></div><div class="min"><input name="{_esc(cfg.meta_model)}__prompt" type="number" min="0" step="0.01" value="{pr["models"].get(cfg.meta_model, {}).get("prompt", 0)}" style="width:100px" {dis}> / <input name="{_esc(cfg.meta_model)}__completion" type="number" min="0" step="0.01" value="{pr["models"].get(cfg.meta_model, {}).get("completion", 0)}" style="width:100px" {dis}></div></div>
+<div class="srow"><div><b>{_esc(cfg.meta_model_heavy)}</b><small>prompt / completion per 1M tokens</small></div><div class="min"><input name="{_esc(cfg.meta_model_heavy)}__prompt" type="number" min="0" step="0.01" value="{pr["models"].get(cfg.meta_model_heavy, {}).get("prompt", 0)}" style="width:100px" {dis}> / <input name="{_esc(cfg.meta_model_heavy)}__completion" type="number" min="0" step="0.01" value="{pr["models"].get(cfg.meta_model_heavy, {}).get("completion", 0)}" style="width:100px" {dis}></div></div>
+{('<div class="row end"><button class="btn primary slim" type="submit">Save pricing</button></div>' if admin else '')}</form>"""
         else:
             rows = (secret_row("WA_PHONE_NUMBER_ID", "Meta for Developers → WhatsApp → API Setup") + secret_row("WA_ACCESS_TOKEN", "System-user token (never expires)")
                     + secret_row("WA_VERIFY_TOKEN", "Must match the webhook configuration at Meta") + secret_row("DEMO_MANAGER_PHONE", "Seeded managers E1002/E1003 answer approvals from this number")
@@ -925,7 +931,7 @@ function link(r){{if(r.scope==='ticket'&&r.scope_id)return `<a href="/tickets?id
 async function load(){{$('#csv').href='/ai/calls.csv?period='+period;
  const [d,t,c]=await Promise.all([fetch('/ai/daily?period='+period).then(r=>r.json()),fetch('/ai/tools?period='+period).then(r=>r.json()),fetch('/ai/calls?period='+period+(scope?'&scope='+scope:'')).then(r=>r.json())]);
  const max=Math.max(1,...d.map(x=>x.tokens));
- $('#daily').innerHTML=d.length?d.map(x=>`<div class="drow"><span class="dd">${{x.day}}</span><div class="bar"><i style="width:${{Math.round(100*x.tokens/max)}}%"></i></div><small>${{x.calls}} calls · ${{tok(x.tokens)}} tok · ${{(x.avg_latency_ms/1000).toFixed(1)}} s${{x.errors?' · <span class=bad>'+x.errors+' errors</span>':''}}</small></div>`).join(''):'<small class="muted">No calls in this period.</small>';
+ $('#daily').innerHTML=d.length?d.map(x=>`<div class="drow"><span class="dd">${{x.day}}</span><div class="bar"><i style="width:${{Math.round(100*x.tokens/max)}}%"></i></div><small>${{x.calls}} calls · ${{tok(x.tokens)}} tok${{x.cost_label?' · '+x.cost_label:''}} · ${{(x.avg_latency_ms/1000).toFixed(1)}} s${{x.errors?' · <span class=bad>'+x.errors+' errors</span>':''}}</small></div>`).join(''):'<small class="muted">No calls in this period.</small>';
  $('#tools').innerHTML=t.map(x=>`<tr><td><code>${{esc(x.tool)}}</code></td><td>${{x.calls}}</td><td>${{x.failures}}</td><td class="${{x.failure_rate>20?'bad':''}}">${{x.failure_rate}}%</td><td class="muted">${{Object.entries(x.tiers).map(([k,v])=>k+' '+v).join(', ')}}</td></tr>`).join('')||'<tr><td colspan=5 class=muted>none</td></tr>';
  $('#count').textContent=c.length+' shown';
  $('#calls').innerHTML=c.map(r=>`<tr class="${{r.ok?'':'bad'}}"><td class="mono">${{new Date(r.at+'Z').toLocaleString([], {{dateStyle:'short',timeStyle:'medium'}})}}</td><td>${{esc(r.model)}}</td><td>${{link(r)}}</td><td>${{esc(r.actor)}}</td><td>${{tok(r.prompt_tokens)}}</td><td>${{tok(r.completion_tokens)}}</td><td><b>${{tok(r.total_tokens)}}</b></td><td>${{(r.latency_ms/1000).toFixed(2)}} s</td><td>${{r.tool_calls}}</td><td>${{r.ok?'':'<span class="tag disabled">error</span>'}}</td></tr>`).join('')||'<tr><td colspan=10 class=muted>none</td></tr>';}}
@@ -1076,6 +1082,28 @@ async def settings_secrets(request: Request, admin: User = Depends(admin_user), 
         with session() as db:
             audit(db, admin.email, "settings.secrets", detail=", ".join(f"{k}:{'cleared' if v is None else 'set'}" for k, v in changes.items()), ip=_ip(request))
     return RedirectResponse(f"/settings?tab={tab}&info={'Saved' if changes else 'Nothing+changed'}", 303)
+
+
+@router.post("/settings/pricing")
+async def settings_pricing(request: Request, admin: User = Depends(admin_user)):
+    from app.sla import put_setting
+    from app.usage import DEFAULT_PRICING
+    check_origin(request)
+    form = await request.form()
+    value = {"currency": str(form.get("currency", "$")).strip()[:4] or "$", "models": {}}
+    for k, v in form.items():
+        if "__" in str(k):
+            model, kind = str(k).rsplit("__", 1)
+            try:
+                value["models"].setdefault(model, {"prompt": 0.0, "completion": 0.0})[kind] = max(0.0, float(v or 0))
+            except (TypeError, ValueError):
+                pass
+    for m, d in DEFAULT_PRICING["models"].items():
+        value["models"].setdefault(m, dict(d))
+    put_setting("pricing", value)
+    with session() as db:
+        audit(db, admin.email, "settings.pricing", detail=str(value), ip=_ip(request))
+    return RedirectResponse("/settings?tab=models&info=Pricing+saved", 303)
 
 
 @router.post("/settings/context")

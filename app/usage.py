@@ -12,6 +12,34 @@ from app.sla import get_setting
 
 _scope: contextvars.ContextVar = contextvars.ContextVar("llm_scope", default=("other", None, "", None))
 DEFAULT_CONTEXT = {"muse-spark-1.3": 128000, "muse-wonder-1.0": 128000}   # editable: Settings → Models
+# price per 1M tokens, in the currency below; 0 = unknown (then no money figures are shown). Settings → Models.
+DEFAULT_PRICING = {"currency": "$", "models": {"muse-spark-1.3": {"prompt": 0.0, "completion": 0.0},
+                                               "muse-wonder-1.0": {"prompt": 0.0, "completion": 0.0}}}
+
+
+def pricing() -> dict:
+    saved = get_setting("pricing", {})
+    out = {"currency": saved.get("currency") or DEFAULT_PRICING["currency"], "models": dict(DEFAULT_PRICING["models"])}
+    out["models"].update(saved.get("models", {}))
+    return out
+
+
+def priced() -> bool:
+    return any(float(v.get("prompt", 0) or 0) + float(v.get("completion", 0) or 0) > 0 for v in pricing()["models"].values())
+
+
+def cost_of(prompt_tokens: int, completion_tokens: int, model: str, p: dict | None = None) -> float:
+    p = p or pricing()
+    rates = p["models"].get(model) or {}
+    return (float(prompt_tokens or 0) * float(rates.get("prompt", 0) or 0) + float(completion_tokens or 0) * float(rates.get("completion", 0) or 0)) / 1_000_000
+
+
+def money(amount: float | None, p: dict | None = None) -> str:
+    """'$0.0123' / '$1.24' — or '' when nothing is priced."""
+    if amount is None or not priced():
+        return ""
+    cur = (p or pricing())["currency"]
+    return f"{cur}{amount:.4f}" if amount < 0.1 else f"{cur}{amount:.2f}"
 
 
 class scope:
@@ -92,7 +120,14 @@ def summary(since=None, scope_kind: str | None = None, scope_id: int | None = No
         del m["latency_ms"]
     total = sum(r.total_tokens for r in rows)
     tickets = {r.scope_id for r in rows if r.scope == "ticket" and r.scope_id}
+    p = pricing()
+    cost = sum(cost_of(r.prompt_tokens, r.completion_tokens, r.model, p) for r in rows)
+    for name, m in by_model.items():
+        m["cost"] = round(cost_of(m["prompt"], m["completion"], name, p), 6)
     return {"calls": len(rows), "total_tokens": total, "prompt_tokens": sum(r.prompt_tokens for r in rows),
+            "cost": round(cost, 6), "cost_label": money(cost, p), "currency": p["currency"], "priced": priced(),
+            "cost_per_ticket": round(cost / len(tickets), 6) if tickets else 0.0,
+            "cost_per_ticket_label": money(cost / len(tickets), p) if tickets else "",
             "completion_tokens": sum(r.completion_tokens for r in rows),
             "avg_latency_ms": round(sum(r.latency_ms for r in rows) / len(rows)) if rows else 0,
             "max_prompt_tokens": max((r.prompt_tokens for r in rows), default=0),
@@ -133,16 +168,19 @@ def daily(since=None) -> list[dict]:
             q = q.filter(LlmCall.at >= since)
         rows = q.all()
     days: dict = {}
+    p = pricing()
     for r in rows:
         d = r.at.replace(tzinfo=UTC).astimezone(tz).strftime("%Y-%m-%d")
-        x = days.setdefault(d, {"day": d, "calls": 0, "tokens": 0, "latency_ms": 0, "errors": 0})
+        x = days.setdefault(d, {"day": d, "calls": 0, "tokens": 0, "latency_ms": 0, "errors": 0, "cost": 0.0})
         x["calls"] += 1
         x["tokens"] += r.total_tokens
+        x["cost"] += cost_of(r.prompt_tokens, r.completion_tokens, r.model, p)
         x["latency_ms"] += r.latency_ms
         x["errors"] += 0 if r.ok else 1
     out = sorted(days.values(), key=lambda x: x["day"])
     for x in out:
         x["avg_latency_ms"] = round(x["latency_ms"] / x["calls"]) if x["calls"] else 0
+        x["cost"], x["cost_label"] = round(x["cost"], 6), money(x["cost"], p)
         del x["latency_ms"]
     return out
 

@@ -60,3 +60,22 @@ def test_ai_activity_endpoints_and_page(desk):
     csv = desk.get("/ai/calls.csv?period=all").text.splitlines()
     assert csv[0].startswith("id,at,model") and len(csv) == 4
     assert "AI activity" in desk.get("/ai").text
+
+
+def test_pricing_turns_tokens_into_money_everywhere(desk):
+    set_llm(ScriptedLLM([Reply(text="ok")]))
+    desk.post("/messages", json={"requester": "+905551110001", "text": "yazıcı"})
+    assert usage.summary()["priced"] is False and usage.summary()["cost_label"] == ""          # unpriced: no money shown
+    r = desk.post("/settings/pricing", data={"currency": "$", "muse-spark-1.3__prompt": "0.5", "muse-spark-1.3__completion": "2",
+                                             "muse-wonder-1.0__prompt": "3", "muse-wonder-1.0__completion": "15"}, follow_redirects=False)
+    assert r.status_code == 303
+    s = usage.summary()
+    expected = (s["prompt_tokens"] * 0.5 + s["completion_tokens"] * 2) / 1_000_000
+    assert s["priced"] and abs(s["cost"] - expected) < 1e-6 and s["cost_label"].startswith("$") and s["cost_per_ticket"] == s["cost"]
+    assert desk.get("/tickets/1").json()["ai"]["cost_label"] == s["cost_label"]
+    assert desk.get("/ai/daily?period=all").json()[0]["cost_label"] == s["cost_label"]
+    assert "Pricing" in desk.get("/settings?tab=models").text
+    from app import reports
+    n = reports.numbers("daily")
+    assert n["ai"]["priced"] and n["ai"]["cost_label"] == s["cost_label"]
+    assert "AI cost" in reports.render_html(n, "narrative", "en") and "maliyet" in reports.render_text(n, "x", "tr", "Daily")

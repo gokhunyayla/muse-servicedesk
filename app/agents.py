@@ -40,11 +40,103 @@ RULES = """Rules:
   don't ask for a rating.
 - When you solve something no SOP covered, write_sop (it becomes a draft for an admin) so the next agent has it.
 - Record important decisions with add_note.
+- Employee history is in your prompt. If the same problem recurred (two or more similar tickets in the last
+  30 days), say so to the employee in one line and go for a lasting fix (hand off the device to L2, or L4 for
+  replacement) instead of repeating the quick fix; add_note the pattern.
+- If the employee is clearly frustrated, angry, or asks for a person, acknowledge it in one calm sentence and
+  escalate_to_human right away with what was tried; do not argue and do not keep troubleshooting.
 - Messages may come from voice notes: numbers can be spelled out ("e bin bir" = E1001,
   "bin dokuz yüz doksan" = 1990). Interpret them; don't ask the user to retype.
 - When the employee types back a password, code or ID you gave them, compare it character by character
   and point out any difference (trailing dot or space, O vs 0, l vs I, wrong case). Never say it is
   correct if it is not identical."""
+
+
+def requester_history(db, ticket: Ticket, days: int = 60, limit: int = 6) -> str:
+    """The requester's other tickets, so the agent notices repeats ("third VPN problem this month")."""
+    from datetime import timedelta
+    from app.db import _now
+    rows = (db.query(Ticket).filter(Ticket.requester == ticket.requester, Ticket.id != ticket.id,
+                                    Ticket.created_at >= _now() - timedelta(days=days))
+            .order_by(Ticket.id.desc()).limit(limit).all())
+    out = []
+    for t in rows:
+        when = t.created_at.strftime("%d %b")
+        res = (t.resolution or "").split("\n")[0][:80]
+        out.append(f"- #{t.id} {when} · {t.title.split(chr(10))[0][:60]} · {t.status}" + (f" · {res}" if res else ""))
+    return "\n".join(out)
+
+
+RESUME_MINUTES = 60
+_RESUME: dict = {}          # requester -> {"ticket": id, "pending": first message on the new channel, "until": epoch}
+YES_RE = re.compile(r"^\s*(evet|devam|oradan|aynen|tabii|tamam|ok(?:ey)?|yes|continue|sure|yep|same)\b", re.I)
+NO_RE = re.compile(r"^\s*(hay[ıi]r|yeni|ba[şs]ka|farkl[ıi]|no|new|different|other)\b", re.I)
+CHANNEL_NAMES = {"tr": {"whatsapp": "WhatsApp", "web": "destek sayfası", "email": "e-posta", "api": "API"},
+                 "en": {"whatsapp": "WhatsApp", "web": "the support page", "email": "e-mail", "api": "the API"}}
+
+
+def recent_switch(db, requester: str, channel: str) -> Ticket | None:
+    """An open ticket the employee was working on, on another channel, within the last hour."""
+    from datetime import timedelta
+    from app.db import _now
+    for t in (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
+              .order_by(Ticket.id.desc()).all()):
+        if t.channel == channel or t.channel == "api":
+            continue
+        last = [e for e in t.events if e.kind == "message"]
+        if last and last[-1].at >= _now() - timedelta(minutes=RESUME_MINUTES):
+            return t
+    return None
+
+
+def resume_offer(db, requester: str, channel: str, lang: str, pending: str = "") -> tuple[Ticket, str] | None:
+    """If the employee just switched channels mid-conversation, ask whether to pick up where they left off."""
+    import time as _t
+    t = recent_switch(db, requester, channel)
+    if t is None:
+        return None
+    _RESUME[requester] = {"ticket": t.id, "pending": pending, "until": _t.time() + 15 * 60}
+    names = CHANNEL_NAMES["tr" if lang == "tr" else "en"]
+    return t, tr_("resume_offer", lang, chan=names.get(t.channel, t.channel), id=t.id, title=t.title.split(chr(10))[0][:50])
+
+
+def _similar_recent(db, ticket: Ticket, text: str, minutes: int = 15) -> list[Ticket]:
+    """Other people's fresh tickets about the same thing: same category, or two shared words."""
+    from datetime import timedelta
+    from app.dashboard import CATEGORIES
+    from app.db import _now
+    low = text.lower()
+    cat = next((k for k, words in CATEGORIES.items() if any(w in low for w in words)), None)
+    words = {w for w in re.findall(r"[a-zçğıöşü0-9]{4,}", low)}
+    out = []
+    for t in (db.query(Ticket).filter(Ticket.requester != ticket.requester, Ticket.id != ticket.id, Ticket.status != "resolved",
+                                      Ticket.created_at >= _now() - timedelta(minutes=minutes)).all()):
+        tl = t.title.lower()
+        if t.title.startswith("[Proactive"):
+            continue
+        tcat = next((k for k, ws in CATEGORIES.items() if any(w in tl for w in ws)), None)
+        shared = words & {w for w in re.findall(r"[a-zçğıöşü0-9]{4,}", tl)}
+        if (cat and tcat == cat and cat != "other") or len(shared) >= 2:
+            out.append(t)
+    return out
+
+
+def emerging_incident(db, ticket: Ticket, text: str) -> str:
+    """Three reports of the same thing within minutes: link them under one problem at intake and brief the agent."""
+    similar = _similar_recent(db, ticket, text)
+    if len(similar) < 2:
+        return ""
+    head = next((db.get(Ticket, t.incident_id) for t in similar if t.incident_id), None) or sorted(similar, key=lambda t: t.id)[0]
+    for t in [*similar, ticket]:
+        if t.id != head.id and not t.incident_id:
+            t.incident_id = head.id
+            log(db, t.id, "system", "note", f"linked at intake to possible incident #{head.id}: {len(similar) + 1} similar reports in 15 min")
+    log(db, head.id, "system", "note", f"possible incident: {len(similar) + 1} similar reports in 15 min ({', '.join('#' + str(t.id) for t in similar)}, #{ticket.id})")
+    ids = ", ".join(f"#{t.id}" for t in similar)
+    return (f"[Desk notice: {len(similar)} other employees reported the same thing in the last 15 minutes ({ids}). "
+            f"This is being treated as a possible outage and the ticket is linked to problem #{head.id}. Tell the employee "
+            f"that others are affected and it is handled centrally; do only quick checks, no long troubleshooting; "
+            f"they will get updates. If no SOP covers it, escalate_to_human for the problem.]")
 
 
 @dataclass
@@ -71,9 +163,11 @@ class Agent:
             state += (f"\nThis ticket is already resolved (\"{ticket.resolution}\") and the employee was asked for "
                       f"a 1-5 rating. If their message is a number, record_rating and thank them in one line. "
                       f"If it is just thanks, reply in one line. Do not ask what they need help with.")
+        history = requester_history(db, ticket) if db is not None else ""
         return (f"You are the {self.tier} agent of an autonomous IT service desk. {self.role}\n\n{RULES}\n\n"
                 f"SOPs in your knowledge pool (search_knowledge to read one):\n{sops}\n\n"
-                f"Other agents you can hand off to:\n{peers}\n\n{state}")
+                f"Other agents you can hand off to:\n{peers}\n\n{state}"
+                + (f"\n\nEmployee history (other tickets of this requester, newest first):\n{history}" if history else ""))
 
     def tool_specs(self) -> list[dict]:
         specs = [t.spec() for t in tools_for(self.tier)]
@@ -315,13 +409,43 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         return handle_approval(db, approval.id, decision, requester)
     open_tickets = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
                     .order_by(Ticket.id.desc()).all())
-    # 2) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
+    # 2) Did we just ask "continue where we left off?" on a channel switch?
+    import time as _t
+    pend = _RESUME.get(requester)
+    if pinned is None and pend and pend["until"] > _t.time():
+        del _RESUME[requester]
+        held = db.get(Ticket, pend["ticket"])
+        if held is not None and held.status != "resolved" and YES_RE.match(text):
+            held.channel = channel
+            if pend["pending"]:
+                pinned, text = held, pend["pending"]            # the message that triggered the question, now on that ticket
+            else:
+                last = [e for e in held.events if e.kind == "message" and e.actor != "user"]
+                answer = tr_("resume_ok", detect(text, None) or ticket_lang(held), id=held.id, last=(last[-1].content if last else "")[:300])
+                log(db, held.id, "user", "message", text)
+                log(db, held.id, "L1", "message", answer)
+                db.refresh(held)
+                return held, answer
+        elif held is not None and NO_RE.match(text):
+            held.channel = channel
+            if pend["pending"]:
+                return handle_message(db, requester, pend["pending"], image, mime, extra_images, force_new=True, channel=channel)
+            return None, tr_("resume_new", detect(text, None) or "tr")
+        # anything else: the question is dropped and the message is handled normally
+    elif pinned is None and not is_ack(text) and not is_greeting(text):
+        offer = resume_offer(db, requester, channel, detect(text, None) or "tr", pending=text)
+        if offer is not None:
+            held, question = offer
+            log(db, held.id, "system", "note", f"employee switched to {channel}; asked whether to continue here")
+            return held, question
+    # 3) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
     if pinned is None and is_greeting(text):
         lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
         if open_tickets:
             return open_tickets[0], tr_("greeting_open", lang, id=open_tickets[0].id, title=open_tickets[0].title[:60])
         return None, tr_("greeting", lang)
     ticket = pinned if pinned is not None else (open_tickets[0] if open_tickets else None)
+    notice = ""
     short = is_ack(text)
     if pinned is not None:
         pass                                                   # the channel already knows which ticket this is
@@ -359,6 +483,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         ticket = Ticket(requester=requester, title=text[:255], channel=channel)
         db.add(ticket)
         db.flush()
+        notice = emerging_incident(db, ticket, text)         # others reporting the same thing right now?
     ticket.channel = channel          # replies and reminders follow the employee's latest channel
     history = []
     for e in ticket.events:
@@ -374,7 +499,8 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         log(db, ticket.id, "L1", "message", answer)
         db.refresh(ticket)
         return ticket, answer
-    content = image_message(text, image, mime) if image else text
+    agent_text = f"{text}\n\n{notice}" if notice else text
+    content = image_message(agent_text, image, mime) if image else agent_text
     for extra in extra_images or []:          # video frames: same message, more image parts
         content.append(image_message("", extra, mime)[1])
     answer = AGENTS["L1"].run(db, ticket, content, history=history)

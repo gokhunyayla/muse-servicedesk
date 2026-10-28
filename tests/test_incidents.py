@@ -131,3 +131,46 @@ def test_short_reply_with_two_open_tickets_asks_which_one_then_routes_by_number(
         t, _ = handle_message(db, "+905551110001", f"#{aid} çözüldü")
         assert t.id == aid and t.status == "resolved"
         assert db.get(Ticket, bid).status == "open"
+
+
+def test_burst_of_similar_reports_is_linked_at_intake_and_the_agent_is_briefed():
+    llm = ScriptedLLM([Reply(text="Bakıyorum.")] * 3)
+    set_llm(llm)
+    with session() as db:
+        a, _ = handle_message(db, "+905551110001", "Outlook e-posta açılmıyor, sunucuya bağlanamıyor")
+        b, _ = handle_message(db, "+905551110002", "Outlook e-posta sunucusu hata veriyor")
+        assert a.incident_id is None and b.incident_id is None                      # two is not a pattern yet
+        c, _ = handle_message(db, "+905551110003", "e-posta Outlook bağlanmıyor")
+        assert c.incident_id == a.id and db.get(Ticket, b.id).incident_id == a.id   # third report: linked under the first
+        notes = [e.content for e in db.get(Ticket, a.id).events if e.kind == "note"]
+        assert any("possible incident" in n for n in notes)
+        assert "Desk notice" not in [e.content for e in c.events if e.kind == "message"][0]   # the employee's own words stay clean
+    assert "Desk notice" in llm.requests[-1][-1]["content"] and "others are affected" in llm.requests[-1][-1]["content"]
+
+
+def test_channel_switch_offers_to_continue_and_resumes_on_yes():
+    from app import agents
+    agents._RESUME.clear()
+    set_llm(ScriptedLLM([Reply(text="VPN profilini yeniledim, dener misiniz?")]))
+    with session() as db:
+        t, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor", channel="whatsapp")
+        tid = t.id
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    with session() as db:                                                        # same person shows up on the web a minute later
+        held, answer = handle_message(db, "+905551110001", "hâlâ bağlanmıyor, ekran görüntüsünü ekledim", channel="web")
+        assert held.id == tid and "WhatsApp" in answer and "devam edelim mi" in answer
+        assert db.query(Ticket).count() == 1
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "evet", channel="web")     # the held message lands on the same ticket
+        assert t.id == tid and t.channel == "web" and "Bakıyorum" in answer
+        msgs = [e.content for e in t.events if e.kind == "message" and e.actor == "user"]
+        assert msgs[-1].startswith("hâlâ bağlanmıyor")
+    # the other answer: a new issue
+    agents._RESUME.clear()
+    set_llm(ScriptedLLM([Reply(text="Yazıcıya bakıyorum.")]))
+    with session() as db:
+        db.get(Ticket, tid).channel = "whatsapp"
+        held, answer = handle_message(db, "+905551110001", "yazıcı da bozuldu", channel="web")
+        assert held.id == tid and "devam edelim mi" in answer
+        t2, answer = handle_message(db, "+905551110001", "yeni konu", channel="web")
+        assert t2.id != tid and t2.title == "yazıcı da bozuldu" and "Yazıcıya" in answer

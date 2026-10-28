@@ -79,7 +79,12 @@ def numbers(kind: str) -> dict:
         stale = [t for t in open_now if t.events and (_now() - t.events[-1].at) > timedelta(hours=24)]
         sup = supervisor.stats(start)
         sup["last_run"] = sup["last_run"].isoformat() if sup["last_run"] else None
+        from app import usage
+        ai = usage.summary(start, db=db)
+        ai_block = {"calls": ai["calls"], "tokens": ai["total_tokens"], "cost": ai["cost"], "cost_label": ai["cost_label"],
+                    "cost_per_ticket": ai["cost_per_ticket"], "cost_per_ticket_label": ai["cost_per_ticket_label"], "priced": ai["priced"]}
         return {
+            "ai": ai_block,
             "kind": kind, "label": label, "start": start.isoformat(), "end": end.isoformat(),
             "created": len(created), "resolved": len(resolved), "open_now": len(open_now),
             "auto_resolved": sum(1 for t in resolved if t.owner != "desk" and t.owner != "human"),
@@ -137,6 +142,9 @@ def render_html(n: dict, text: str, lang: str) -> str:
             (L("Satisfaction", "Memnuniyet"), f'{n["avg_rating"]} / 5' if n["avg_rating"] else "—"),
             (L("Median first response", "Medyan ilk yanıt"), _dur(n["median_first_response_s"])),
             (L("Median handling", "Medyan çözüm süresi"), _dur(n["median_handling_s"]))]
+    ai = n.get("ai") or {}
+    if ai.get("priced"):
+        kpis += [(L("AI cost", "Yapay zekâ maliyeti"), ai["cost_label"]), (L("AI cost per ticket", "Ticket başına"), ai["cost_per_ticket_label"] or "—")]
     cells = "".join(f'<td style="padding:10px 14px;border:1px solid #e4e6eb;border-radius:8px"><div style="font-size:22px;font-weight:700">{html.escape(str(v))}</div><div style="font-size:12px;color:#65676b">{html.escape(k)}</div></td>' for k, v in kpis)
     rows = lambda items: "".join(f"<li>{html.escape(str(i))}</li>" for i in items) or "<li>—</li>"
     s = n["supervisor"]
@@ -187,7 +195,9 @@ def render_text(n: dict, text: str, lang: str, subject: str) -> str:
             f"{L('escalated', 'insana aktarılan')} {n['escalated_open']} · SLA {L('breaches', 'aşımı')} {n['sla_breaches']}\n"
             f"{L('Satisfaction', 'Memnuniyet')} {n['avg_rating'] or '—'}/5 · {L('first response', 'ilk yanıt')} {_dur(n['median_first_response_s'])} · "
             f"{L('handling', 'çözüm')} {_dur(n['median_handling_s'])}\n"
-            f"Supervisor: {s['runs']} {L('runs', 'tur')}, {s['problems']} {L('problems', 'problem')}, {s['sops_published']}/{s['sops_drafted']} SOP, {s['human_asks']} {L('human asks', 'insan talebi')}\n\n")
+            f"Supervisor: {s['runs']} {L('runs', 'tur')}, {s['problems']} {L('problems', 'problem')}, {s['sops_published']}/{s['sops_drafted']} SOP, {s['human_asks']} {L('human asks', 'insan talebi')}\n"
+            + (f"AI: {n['ai']['calls']} {L('calls', 'çağrı')} · {L('cost', 'maliyet')} {n['ai']['cost_label']} · {L('per ticket', 'ticket başına')} {n['ai']['cost_per_ticket_label'] or '—'}\n" if (n.get('ai') or {}).get('priced') else "")
+            + "\n")
     return (head + text)[:3900]
 
 
