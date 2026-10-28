@@ -62,13 +62,29 @@ def test_proactive_checks_find_disk_patch_and_open_tickets_once():
 
 
 def test_history_is_replayed_to_the_model_on_follow_up_messages():
-    llm = ScriptedLLM([Reply(text="İlk cevap"), Reply(text="İkinci cevap")])
+    llm = ScriptedLLM([Reply(text="İlk cevap"), Reply(text="SAME"), Reply(text="İkinci cevap")])   # 2nd reply: the router's verdict
     set_llm(llm)
     with session() as db:
         handle_message(db, "+905551110001", "ilk mesaj")
         handle_message(db, "+905551110001", "ikinci mesaj")
-    roles = [(m["role"], m["content"]) for m in llm.requests[1][1:]]
+    roles = [(m["role"], m["content"]) for m in llm.requests[2][1:]]
     assert roles == [("user", "ilk mesaj"), ("assistant", "İlk cevap"), ("user", "ikinci mesaj")]
+
+
+def test_vague_message_makes_the_desk_ask_instead_of_guessing():
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
+    with session() as db:
+        first, _ = handle_message(db, "+905551110001", "VPN bağlanmıyor, evden çalışamıyorum")
+        fid = first.id
+    set_llm(ScriptedLLM([Reply(text="UNCLEAR")]))
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "yine garip bir şey oldu")
+        assert t.id == fid and f"#{fid}" in answer and "yeni bir konu mu" in answer
+        assert db.query(Ticket).count() == 1
+    # a short acknowledgement after a close is the closing exchange; a 2-word problem is not
+    from app.agents import is_ack
+    assert is_ack("evet çözüldü teşekkürler") and is_ack("#2 close") and is_ack("5") and is_ack("yes solved")
+    assert not is_ack("yazıcım çalışmıyor") and not is_ack("garip bir hata")
 
 
 def test_unrelated_message_opens_a_separate_ticket_when_the_model_says_new():

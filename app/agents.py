@@ -159,11 +159,11 @@ AGENTS: dict[str, Agent] = {a.tier: a for a in [
 ]}
 
 
-def _belongs_to(db, ticket: Ticket, text: str) -> bool:
-    """Does this message continue the open ticket, or is it a new problem? The model decides;
-    very short messages (confirmations, ratings, approvals) always continue the ticket."""
-    if len(text.split()) <= 3 or text.startswith("["):
-        return True
+def _route(db, ticket: Ticket, text: str) -> str:
+    """Does this message continue the open ticket ("same"), start a new problem ("new"), or is it unclear ("ask")?
+    The model decides; acknowledgements always continue the ticket."""
+    if is_ack(text):
+        return "same"
     recent = [e.content for e in ticket.events if e.kind == "message"][-4:]
     prompt = (f"Open ticket #{ticket.id}: \"{ticket.title}\"\nRecent exchange:\n" +
               "\n".join(f"- {m[:200]}" for m in recent) +
@@ -172,18 +172,37 @@ def _belongs_to(db, ticket: Ticket, text: str) -> bool:
               "to our question), or a NEW problem? Rules: a message that states a problem of its own "
               "(another device, service, account or request) is NEW even if the open ticket is still unresolved; "
               "if the open ticket has no concrete problem yet (a greeting, a status question), a message that "
-              "states one is NEW. When in doubt, NEW. Answer with one word: SAME or NEW.")
+              "states one is NEW. If the message is too vague to tell what it is about (\"garip bir hata\", "
+              "\"yine olmadı\" with nothing to anchor it), answer UNCLEAR so the desk asks the employee. "
+              "Answer with one word: SAME, NEW or UNCLEAR.")
     from app import usage
     try:
         with usage.scope("ticket", ticket.id, "route", db=db):
             reply = get_llm().chat([{"role": "user", "content": prompt}], [])
     except ContentFiltered:
-        return True
-    return "NEW" not in reply.text.upper()
+        return "same"
+    up = reply.text.upper()
+    return "ask" if "UNCLEAR" in up else "new" if "NEW" in up else "same"
 
 
 RATING_WINDOW_HOURS = 24
 RATING_RE = re.compile(r"^\s*[1-5]\s*(?:/\s*5)?\s*(?:puan)?\s*$", re.I)
+# a bare acknowledgement / answer to our question: continues the conversation, never a request of its own
+ACK_WORDS = {"evet", "hayır", "hayir", "yok", "var", "tamam", "tamamdır", "ok", "okey", "oldu", "olmadı", "olmadi", "çalıştı", "calisti",
+             "çalışmıyor", "çalışmadı", "çözüldü", "cozuldu", "çözülmedi", "düzeldi", "duzeldi", "düzelmedi", "hâlâ", "hala", "aynı", "ayni",
+             "devam", "ediyor", "teşekkür", "teşekkürler", "tesekkurler", "sağol", "sağolun", "sagol", "eyvallah", "süper", "harika", "peki",
+             "iyi", "güzel", "yes", "no", "nope", "yep", "done", "works", "worked", "fixed", "still", "same", "thanks", "thank", "you",
+             "thx", "ty", "cheers", "solved", "resolved", "ok.", "puan", "kapat", "close", "kapatın", "iptal", "cancel", "yanlış", "talep"}
+
+
+def is_ack(text: str) -> bool:
+    """Short confirmations, ratings, thanks, yes/no, "#12 close" — the only short messages that never open a ticket."""
+    if text.startswith("["):
+        return True
+    words = [w for w in re.split(r"[\s,.!?]+", text.strip().lower()) if w]
+    if not words or len(words) > 5:
+        return False
+    return all(w in ACK_WORDS or re.fullmatch(r"#?\d+(?:/5)?", w) for w in words)
 # "kapat", "iptal", "yanlış talep, kapat", "bileti kapatın", "close", "cancel"
 CLOSE_RE = re.compile(r"^\s*(?:(?:yanlış|hatalı)\s+talep[\s,.]*)?(?:bileti\s+|talebi\s+)?"
                       r"(?:kapat(?:ın|ınız)?|iptal(?:\s+et(?:in)?)?|close|cancel)[\s.!]*$", re.I)
@@ -194,7 +213,7 @@ def _closing_exchange(db, requester: str, text: str) -> Ticket | None:
     closing exchange (rating / thanks), not to a new one. Anything longer is a new request."""
     from datetime import timedelta
     from app.db import _now
-    if len(text.split()) > 3:
+    if not is_ack(text):
         return None
     last = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status == "resolved",
                                     Ticket.rating.is_(None)).order_by(Ticket.id.desc()).first())
@@ -258,7 +277,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     open_tickets = (db.query(Ticket).filter(Ticket.requester == requester, Ticket.status != "resolved")
                     .order_by(Ticket.id.desc()).all())
     ticket = pinned if pinned is not None else (open_tickets[0] if open_tickets else None)
-    short = len(text.split()) <= 3 and not text.startswith("[")
+    short = is_ack(text)
     if pinned is not None:
         pass                                                   # the channel already knows which ticket this is
     elif short and RATING_RE.match(text) and _closing_exchange(db, requester, text) is not None:
@@ -276,9 +295,17 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
             log(db, open_tickets[0].id, "L1", "message", answer)
             db.refresh(open_tickets[0])
             return open_tickets[0], answer
-    elif ticket is not None and not _belongs_to(db, ticket, text):
-        log(db, ticket.id, "system", "note", f"new unrelated request from requester, opened a separate ticket: {text[:80]}")
-        ticket = None
+    elif ticket is not None:
+        where = _route(db, ticket, text)
+        if where == "ask":                                    # too vague to place: ask instead of guessing
+            answer = tr_("same_or_new", detect(text, None) or ticket_lang(ticket), id=ticket.id, title=ticket.title[:60])
+            log(db, ticket.id, "user", "message", text)
+            log(db, ticket.id, "L1", "message", answer)
+            db.refresh(ticket)
+            return ticket, answer
+        if where == "new":
+            log(db, ticket.id, "system", "note", f"new unrelated request from requester, opened a separate ticket: {text[:80]}")
+            ticket = None
     if ticket is None:
         ticket = _closing_exchange(db, requester, text)
     if ticket is None:
