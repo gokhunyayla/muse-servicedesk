@@ -92,9 +92,18 @@ def _strong_key(ticket_id: int) -> str:
     return f"verify:{ticket_id}"
 
 
+DEFAULT_VERIFICATION = {"voice_phrase": False}     # Settings → Channels: also demand a spoken phrase (liveness) for resets
+
+
+def verification_config() -> dict:
+    from app.sla import get_setting
+    return {**DEFAULT_VERIFICATION, **get_setting("verification", {})}
+
+
 @tool("Start strong verification before a credential change: sends a one-time code to the employee's OTHER channel "
-      "(e-mail when they write on WhatsApp, WhatsApp otherwise) and returns a random phrase they must say in a VOICE note. "
-      "Tell the employee both; then call check_verification with the code they type back.", ("L1", "L3"), employee_no=STR)
+      "(e-mail when they write on WhatsApp, WhatsApp otherwise). If the result carries phrase_to_say, the desk policy also "
+      "wants that phrase said in a VOICE note. Tell the employee what to do; then call check_verification with the code they type back.",
+      ("L1", "L3"), employee_no=STR)
 def send_verification(ctx: Ctx, employee_no: str) -> dict:
     import hashlib
     import secrets
@@ -113,7 +122,8 @@ def send_verification(ctx: Ctx, employee_no: str) -> dict:
     if not to:
         return {"ok": False, "error": "no second channel on file for this employee"}
     code = f"{secrets.randbelow(1_000_000):06d}"
-    phrase = " ".join(secrets.choice(PHRASE_WORDS) for _ in range(3)) + f" {secrets.randbelow(90) + 10}"
+    want_voice = bool(verification_config().get("voice_phrase"))
+    phrase = (" ".join(secrets.choice(PHRASE_WORDS) for _ in range(3)) + f" {secrets.randbelow(90) + 10}") if want_voice else ""
     row = ctx.db.get(Setting, _strong_key(ctx.ticket.id))
     value = {"code_hash": hashlib.sha256(f"{ctx.ticket.id}:{code}".encode()).hexdigest(), "phrase": phrase,
              "until": (_now() + timedelta(minutes=10)).isoformat(), "via": via, "to": to, "tries": 0}
@@ -130,12 +140,14 @@ def send_verification(ctx: Ctx, employee_no: str) -> dict:
         from app.whatsapp import try_send
         ok, err = try_send(to, text), ""
     masked = (to[:2] + "…" + to[to.index("@"):]) if "@" in to else (to[:4] + "…" + to[-2:])
-    return {"ok": bool(ok), "code_sent_via": via, "code_sent_to": masked, "phrase_to_say": phrase,
-            "error": "" if ok else f"could not send the code: {err}"}
+    out = {"ok": bool(ok), "code_sent_via": via, "code_sent_to": masked, "error": "" if ok else f"could not send the code: {err}"}
+    if phrase:
+        out["phrase_to_say"] = phrase
+    return out
 
 
-@tool("Finish strong verification: the code the employee typed back, checked together with the phrase they said in their "
-      "last voice note. Succeeds only when both match; then account changes are allowed.", ("L1", "L3"), code=STR)
+@tool("Finish strong verification with the code the employee typed back (and, when the policy asked for one, the phrase "
+      "from their last voice note). Succeeds only when everything matches; then account changes are allowed.", ("L1", "L3"), code=STR)
 def check_verification(ctx: Ctx, code: str) -> dict:
     import hashlib
     import re
@@ -153,18 +165,20 @@ def check_verification(ctx: Ctx, code: str) -> dict:
     row.value = dict(v)
     ctx.db.flush()
     code_ok = hashlib.sha256(f"{ctx.ticket.id}:{code.strip()}".encode()).hexdigest() == v["code_hash"]
-    voice = (ctx.db.query(Event).filter(Event.ticket_id == ctx.ticket.id, Event.actor == "user", Event.kind == "message")
-             .order_by(Event.id.desc()).all())
-    spoken = next((e.content for e in voice if (e.data or {}).get("voice")), "")
-    if not spoken:
-        return {"ok": False, "code_ok": code_ok, "voice_ok": False, "error": "no voice note yet: ask the employee to say the phrase in a voice note"}
-    norm = lambda t: set(w for w in re.findall(r"[a-zçğıöşü0-9]+", t.lower()) if w)      # noqa: E731
-    want, got = norm(v["phrase"]), norm(spoken)
-    voice_ok = len(want & got) >= max(1, len(want) - 1)
+    voice_ok = True
+    if v.get("phrase"):
+        voice = (ctx.db.query(Event).filter(Event.ticket_id == ctx.ticket.id, Event.actor == "user", Event.kind == "message")
+                 .order_by(Event.id.desc()).all())
+        spoken = next((e.content for e in voice if (e.data or {}).get("voice")), "")
+        if not spoken:
+            return {"ok": False, "code_ok": code_ok, "voice_ok": False, "error": "no voice note yet: ask the employee to say the phrase in a voice note"}
+        norm = lambda t: set(w for w in re.findall(r"[a-zçğıöşü0-9]+", t.lower()) if w)      # noqa: E731
+        want, got = norm(v["phrase"]), norm(spoken)
+        voice_ok = len(want & got) >= max(1, len(want) - 1)
     if code_ok and voice_ok:
         ctx.ticket.verified = True
         row.value = None
-        log(ctx.db, ctx.ticket.id, ctx.agent, "note", f"strong verification passed: code via {v['via']} + spoken phrase")
+        log(ctx.db, ctx.ticket.id, ctx.agent, "note", f"strong verification passed: code via {v['via']}" + (" + spoken phrase" if v.get("phrase") else ""))
         return {"ok": True, "code_ok": True, "voice_ok": True}
     return {"ok": False, "code_ok": code_ok, "voice_ok": voice_ok,
             "error": ("wrong code" if not code_ok else "") + ("; " if not code_ok and not voice_ok else "") + ("the voice note did not contain the phrase" if not voice_ok else "")}

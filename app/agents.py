@@ -32,11 +32,10 @@ RULES = """Rules:
 - You are a service that finishes the job, not a guide: use your tools to fix the problem yourself.
 - Verify identity before any account change. Ask for explicit consent before scripts that need it.
 - A password or credential reset needs more than identity: after verify_identity, call send_verification and
-  tell the employee two things in one message — a code was sent to their other channel (say which, masked)
-  and the exact phrase they must say in a VOICE note. When the code arrives (typed) and the voice note has
-  been received, call check_verification(code). Only after it succeeds call reset_password. If the voice
-  note is missing, ask for it; if the phrase was wrong, ask them to say it again; never skip a step and never
-  read the code or phrase out of a voice note as if it were the typed code.
+  tell the employee a code was sent to their other channel (say which, masked) and to type it back here. If
+  the result also carries phrase_to_say, tell them that exact phrase must be said in a VOICE note as well.
+  When the code arrives (typed), call check_verification(code). Only after it succeeds call reset_password.
+  If something is missing or wrong, say what and ask again; never skip a step.
 - If the problem is outside your tools, hand off to the right tier with a clear summary.
 - If no tier can solve it (needs hands on site, a vendor or budget decision, something nobody is
   authorised to change), don't guess and don't loop: escalate_to_human with what was tried. Never leave

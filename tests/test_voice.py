@@ -21,6 +21,8 @@ def test_voice_note_is_transcribed_then_handled_by_l1(monkeypatch):
     """Password reset over voice: identity, then a code on the OTHER channel (e-mail) and a phrase said in a voice
     note; the reset is refused until both match."""
     from app import channels
+    from app.sla import put_setting
+    put_setting("verification", {"voice_phrase": True})                          # this desk also wants the spoken phrase
     mails = []
     monkeypatch.setattr(channels, "send_email", lambda to, subject, text: (mails.append((to, text)) or (True, "")))
     set_transcriber(lambda wav: "şifremi unuttum, sicil numaram E1001, doğum yılım 1990")
@@ -107,3 +109,27 @@ def test_implausible_transcript_is_retried_on_enhanced_audio_then_given_up(monke
     with session() as db:
         from app.db import Ticket
         assert db.query(Ticket).count() == 0
+
+
+def test_default_reset_verification_is_identity_plus_code_on_the_other_channel(monkeypatch):
+    from app import channels
+    mails = []
+    monkeypatch.setattr(channels, "send_email", lambda to, subject, text: (mails.append((to, text)) or (True, "")))
+    set_llm(ScriptedLLM([
+        Reply(tool_calls=[call("verify_identity", employee_no="E1001", birth_year=1990)]),
+        Reply(tool_calls=[call("send_verification", employee_no="E1001")]),
+        Reply(text="Kodu e-postanıza gönderdim, buraya yazar mısınız?"),
+    ]))
+    from app.agents import handle_message
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", "şifremi unuttum, E1001 1990")
+        results = [e.data for e in t.events if e.kind == "tool_result"]
+        assert results[1]["ok"] and "phrase_to_say" not in results[1] and results[1]["code_sent_via"] == "email"
+        tid = t.id
+    code = mails[-1][1].split("code: ")[1][:6]
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("check_verification", code=code)]),
+                         Reply(tool_calls=[call("reset_password", employee_no="E1001")]), Reply(text="Geçici şifreniz: …")]))
+    with session() as db:
+        t, answer = handle_message(db, "+905551110001", code)                      # typed code alone is enough by default
+        results = [e.data for e in t.events if e.kind == "tool_result"][-2:]
+        assert results[0]["ok"] is True and results[1]["ok"] is True and t.id == tid

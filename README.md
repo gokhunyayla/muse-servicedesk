@@ -87,7 +87,7 @@ Camera watcher ──► compliance findings → tickets          Scheduler ─�
 ## Scenarios covered (all run against the real models)
 
 1. VPN not connecting — profile renewed via endpoint tools
-2. Password reset by voice note — transcription, identity check (employee no + birth year), then strong verification: a one-time code on the employee's other channel (e-mail) and a random phrase they must say in a voice note; both must match before the temporary password is issued
+2. Password reset by voice note — transcription, identity check (employee no + birth year), then a one-time code on the employee's other channel (e-mail); optionally (Settings → Channels) a random phrase said in a voice note; the temporary password is issued only after the code matches
 3. Blue-screen photo → L4: warranty, vendor case, loaner laptop, courier label
 4. Missing / paid license — standard ones assigned, paid ones through manager approval
 5. SAP authorization — L3, role granted after approval, temporary access expiry scheduled

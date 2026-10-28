@@ -748,11 +748,17 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
             from app.channels import email_config, portal_config
             from app.config import auth_settings
             pc, ec = portal_config(), email_config()
+            from app.tools import verification_config
+            vc = verification_config()
             link = f"{auth_settings.public_url.rstrip('/')}/support-agent"
             body = f"""<p class="muted">Employees can reach the desk over WhatsApp, the web chat and e-mail; every channel lands on the same tickets and agents.</p>
 <h3>WhatsApp &amp; integrations</h3>
 <form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
 <p class="muted" style="margin-top:14px">E-mail intake and sending live under Settings → E-mail.</p>
+<h3>Credential resets</h3><p class="muted">A reset always needs identity (employee no + birth year) and a one-time code on the employee's other channel. Optionally also a random phrase said in a voice note (liveness, not identity).</p>
+<form method="post" action="/settings/verification">
+<div class="srow"><div><b>Spoken phrase</b><small>Also require the phrase in a voice note</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="voice_phrase" value="1" {"checked" if vc["voice_phrase"] else ""} {dis}> on</label></div></div>
+{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
 <h3>Support page</h3><p class="muted">Outside the console, for employees the desk knows (directory or <a href="/clients">Clients</a>): a chat that opens tickets like WhatsApp, and a one-time-code sign-in to follow their own tickets: <a href="/support-agent" target="_blank">{_esc(link)}</a></p>
 <form method="post" action="/settings/portal">
 <div class="srow"><div><b>Enabled</b><small>Switch the page off to take the channel down</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if pc["enabled"] else ""} {dis}> on</label></div></div>
@@ -764,6 +770,18 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
     else:
         body = '<p class="muted">Muse ServiceDesk — autonomous multi-tier IT service desk on Meta Model API. Built for the Meta Global AI Developer Hackathon 2026.</p>'
     return _page("Settings", f'<div class="tabs">{nav}</div>{body}', wide=True, user=user, active="settings")
+
+
+@router.post("/settings/verification")
+async def settings_verification(request: Request, admin: User = Depends(admin_user)):
+    from app.sla import put_setting
+    check_origin(request)
+    form = await request.form()
+    value = {"voice_phrase": form.get("voice_phrase") == "1"}
+    put_setting("verification", value)
+    with session() as db:
+        audit(db, admin.email, "settings.verification", detail=str(value), ip=_ip(request))
+    return RedirectResponse("/settings?tab=channels&info=Verification+saved", 303)
 
 
 @router.post("/settings/portal")
