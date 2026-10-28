@@ -172,6 +172,36 @@ class Session(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class Client(Base):
+    """An employee who may use the support page: recognised from the directory or added by an admin.
+    Signs in with a one-time code sent to the phone (WhatsApp) or e-mail; no password to manage."""
+    __tablename__ = "clients"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_no: Mapped[str] = mapped_column(String(32), default="")
+    name: Mapped[str] = mapped_column(String(120))
+    phone: Mapped[str] = mapped_column(String(32), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    def addresses(self) -> list[str]:
+        return [a for a in (self.phone, self.email) if a]
+
+
+class ClientCode(Base):
+    """One-time sign-in code for the support page (hashed, 10 minutes, single use)."""
+    __tablename__ = "client_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contact: Mapped[str] = mapped_column(String(255))
+    code_hash: Mapped[str] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used: Mapped[bool] = mapped_column(default=False)
+    attempts: Mapped[int] = mapped_column(default=0)
+
+
 class Audit(Base):
     """What a signed-in desk user did in the console (sign-ins, assignments, merges, user admin)."""
     __tablename__ = "audit_log"

@@ -222,6 +222,27 @@ def user_by_phone(phone: str) -> tuple[str, dict] | None:
     return None
 
 
+def user_email(emp: str) -> str:
+    """Directory e-mail: explicit when present, otherwise name-derived (ayse.demir@example.com)."""
+    u = USERS.get(emp) or {}
+    if u.get("email"):
+        return u["email"]
+    import unicodedata
+    base = unicodedata.normalize("NFKD", u.get("name", "")).encode("ascii", "ignore").decode().lower().replace(" ", ".")
+    return f"{base}@example.com" if base else ""
+
+
+def user_by_contact(contact: str) -> tuple[str, dict] | None:
+    """Phone number or e-mail address → directory entry."""
+    contact = (contact or "").strip().lower()
+    if "@" in contact:
+        for emp, u in USERS.items():
+            if user_email(emp).lower() == contact:
+                return emp, u
+        return None
+    return user_by_phone(contact)
+
+
 def reset_password(employee_no: str) -> str:
     """Returns a one-time temporary password (must be changed at next sign-in)."""
     return "Tmp-" + secrets.token_urlsafe(6)

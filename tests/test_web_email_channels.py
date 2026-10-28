@@ -18,20 +18,23 @@ def fresh(tmp_path, monkeypatch):
     security._hits.clear()
 
 
+B = "/support-agent"
+
+
 def _employee() -> TestClient:
     from app.main import app
     c = TestClient(app)
-    assert "Start chat" in c.get("/portal").text
-    r = c.post("/portal/start", data={"name": "Ayşe Demir", "phone": "0555 111 00 01"}, follow_redirects=False)
-    assert r.status_code == 303 and "muse_portal" in c.cookies
+    assert "Start chat" in c.get(B).text and c.get("/portal", follow_redirects=False).headers["location"] == B
+    r = c.post(f"{B}/start", data={"name": "Ayşe Demir", "contact": "0555 111 00 01"}, follow_redirects=False)
+    assert r.status_code == 303 and "muse_support" in c.cookies
     return c
 
 
 def test_web_chat_opens_a_ticket_and_receives_desk_replies(desk):
     emp = _employee()
-    assert "Signed in as <b>Ayşe Demir</b>" in emp.get("/portal").text
+    assert "Signed in as <b>Ayşe Demir</b>" in emp.get(B).text
     set_llm(ScriptedLLM([Reply(text="VPN için önce ağınızı kontrol edelim.")]))
-    r = emp.post("/portal/say", data={"text": "vpn bağlanmıyor"}).json()
+    r = emp.post("/support-agent/say", data={"text": "vpn bağlanmıyor"}).json()
     assert r["text"].startswith("VPN") and r["ticket"] == 1
     with session() as db:
         t = db.get(Ticket, 1)
@@ -39,10 +42,10 @@ def test_web_chat_opens_a_ticket_and_receives_desk_replies(desk):
     # a person on the desk replies from the console: queued, then picked up by the web chat, never sent to WhatsApp
     desk.post("/tickets/1/reply", json={"text": "Merhaba, bakıyorum."})
     assert channels.drain() == 0
-    upd = emp.get("/portal/updates").json()
+    upd = emp.get("/support-agent/updates").json()
     assert [m["text"] for m in upd] == ["Merhaba, bakıyorum."] and upd[0]["who"] == "desk"
-    assert emp.get("/portal/updates").json() == []            # delivered once
-    hist = emp.get("/portal/history").json()
+    assert emp.get("/support-agent/updates").json() == []            # delivered once
+    hist = emp.get("/support-agent/history").json()
     assert [h["who"] for h in hist] == ["you", "desk", "desk"]
     # the same employee continues over WhatsApp: the ticket follows, replies switch channel
     set_llm(ScriptedLLM([Reply(text="Tamam.")]))
@@ -51,15 +54,59 @@ def test_web_chat_opens_a_ticket_and_receives_desk_replies(desk):
         assert db.get(Ticket, 1).channel == "whatsapp" and db.query(Ticket).count() == 1
 
 
-def test_web_chat_can_be_switched_off_and_needs_a_valid_phone(desk):
+def test_support_page_only_admits_people_the_desk_knows(desk):
     from app.main import app
     c = TestClient(app)
-    assert c.post("/portal/start", data={"name": "X", "phone": "abc"}, follow_redirects=False).headers["location"].endswith("error=phone")
+    r = c.post(f"{B}/start", data={"name": "X", "contact": "+905559999999"}, follow_redirects=False)    # unknown number: no chat, no ticket
+    assert "does+not+know" in r.headers["location"] and "muse_support" not in c.cookies
+    r = c.post(f"{B}/start", data={"name": "Ayşe", "contact": "ayse.demir@example.com"}, follow_redirects=False)   # directory e-mail works too
+    assert r.status_code == 303 and "muse_support" in c.cookies
     r = desk.post("/settings/portal", data={"title": "Help me", "note": "Internal use"}, follow_redirects=False)   # enabled unchecked
     assert r.status_code == 303
-    assert "switched off" in c.get("/portal").text
-    assert c.get("/portal/history").status_code == 401
-    assert "Web chat" in desk.get("/settings?tab=channels").text and "E-mail" in desk.get("/settings?tab=channels").text
+    assert "switched off" in c.get(B).text and c.get(f"{B}/history").status_code == 401
+    assert "Support page" in desk.get("/settings?tab=channels").text and "E-mail" in desk.get("/settings?tab=channels").text
+
+
+def test_one_time_code_sign_in_shows_only_own_tickets(desk, monkeypatch):
+    from app import support, whatsapp
+    from app.main import app
+    sent = []
+    monkeypatch.setattr(whatsapp, "try_send", lambda to, text: (sent.append((to, text)) or True))
+    set_llm(ScriptedLLM([Reply(text="Bakıyorum."), Reply(text="Bakıyorum."), Reply(text="Tamam, not aldım.")]))
+    desk.post("/messages", json={"requester": "+905551110001", "text": "VPN bağlanmıyor"})          # Ayşe's ticket (over WhatsApp)
+    desk.post("/messages", json={"requester": "+905551110002", "text": "yazıcı bozuk"})              # Mehmet's ticket
+    c = TestClient(app)
+    r = c.post(f"{B}/code", data={"contact": "0555 111 00 01"}, follow_redirects=False)
+    assert "code_for=" in r.headers["location"] and sent[-1][0] == "+905551110001" and "code" in sent[-1][1]
+    code = sent[-1][1].split("code: ")[1][:6]
+    assert "Wrong" in c.post(f"{B}/verify", data={"contact": "+905551110001", "code": "000000"}, follow_redirects=False).headers["location"]
+    r = c.post(f"{B}/verify", data={"contact": "+905551110001", "code": code}, follow_redirects=False)
+    assert r.status_code == 303 and "muse_support" in c.cookies
+    assert "My tickets" in c.get(B).text
+    mine = c.get(f"{B}/tickets").json()
+    assert [t["title"] for t in mine] == ["VPN bağlanmıyor"]                         # never Mehmet's
+    tid = mine[0]["id"]
+    assert c.get(f"{B}/tickets/{tid + 1}").status_code == 404
+    d = c.get(f"{B}/tickets/{tid}").json()
+    assert d["messages"][0]["who"] == "you" and d["channel"] == "whatsapp"
+    r = c.post(f"{B}/say", data={"text": "hâlâ bağlanmıyor, ekran görüntüsü de var", "ticket": tid}).json()
+    assert r["ticket"] == tid
+    assert c.post(f"{B}/tickets/{tid}/close", data={"note": "kendim çözdüm"}).json()["status"] == "resolved"
+    assert c.post(f"{B}/tickets/{tid}/rate", data={"rating": "5"}).json()["rating"] == 5
+    with session() as db:
+        from app.db import Client
+        cl = db.query(Client).one()
+        assert cl.employee_no == "E1001" and cl.last_login_at is not None
+    # the console lists the client and can disable them; a disabled client cannot start a chat
+    page = desk.get("/clients").text
+    assert "Ayşe Demir" in page and "E1001" in page
+    desk.post(f"/clients/{cl.id}/toggle", follow_redirects=False)
+    c2 = TestClient(app)
+    assert "does+not+know" in c2.post(f"{B}/start", data={"name": "A", "contact": "+905551110001"}, follow_redirects=False).headers["location"]
+    # an admin adds someone the directory lacks: they get in
+    desk.post("/clients", data={"name": "Yeni Kişi", "phone": "0555 777 00 00"}, follow_redirects=False)
+    assert c2.post(f"{B}/start", data={"name": "Yeni", "contact": "+905557770000"}, follow_redirects=False).status_code == 303
+    assert support.normalise("0555 111 00 01") == "+905551110001" and support.normalise("Ayse@Example.com") == "ayse@example.com"
 
 
 def _mail(frm="mehmet.kaya@example.com", subject="Yazıcı çalışmıyor", body="3. kat yazıcı kağıt sıkıştırıyor.\n\n> eski alıntı\nOn Mon, X wrote:\n> bla"):
@@ -144,7 +191,7 @@ def test_greetings_and_small_talk_open_no_ticket(desk):
         t, _ = handle_message(db, "+905551110001", "yazıcı bozuk")
         assert t is not None and t.title == "yazıcı bozuk"
     emp = _employee()                                                          # Ayşe has an open ticket: greeting points at it, opens nothing
-    r = emp.post("/portal/say", data={"text": "merhaba"}).json()
+    r = emp.post("/support-agent/say", data={"text": "merhaba"}).json()
     assert r["ticket"] == t.id and "hâlâ açık" in r["text"] and "clear chat" in emp.get("/portal").text
     with session() as db:
         assert db.query(Ticket).count() == 1

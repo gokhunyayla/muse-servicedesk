@@ -4,7 +4,8 @@ An autonomous, multi-tier IT service desk built on **Meta Model API** for the Me
 Hackathon 2026 — Indie Developer track, theme *Build for Your World*.
 
 Employees message the desk over WhatsApp — text, a voice note, a photo of a blue screen, a short clip — or over
-the web chat (`/portal`, no sign-in beyond name + phone) or by e-mail. All three land on the same tickets and agents.
+the support page (`/support-agent`: a chat for anyone the desk knows, and a one-time-code sign-in to follow their own
+tickets) or by e-mail. All three land on the same tickets and agents.
 Four agents (**L1–L4**) fix the problem end to end with real tool calls: reset the password, renew the VPN
 profile, open the vendor case and the courier pickup, patch the vulnerable server, quarantine the phishing
 mail — and close the ticket only after the employee confirms. A camera watcher adds visual compliance
@@ -120,8 +121,9 @@ Meta API key → Settings → Channels: WhatsApp phone number ID, token, verify 
 **Console sign-in:** on first run the console opens `/setup` to create the first admin; credentials live only in the
 `users` table (PBKDF2 hashes). Admins invite support agents or admins at `/users` (they set their own password via a link) and can change anyone's role; everyone
 can reset a password via `/forgot` (SMTP optional — without it the reset link is written to the server log).
-Employees never sign in to the console; they use WhatsApp, the web chat at `/portal` (name + phone number, so the
-same person's tickets are shared with WhatsApp) or e-mail (Settings → Channels: IMAP mailbox; replies go out over
+Employees never sign in to the console; they use WhatsApp, the support page at `/support-agent` (recognised by phone or
+e-mail from the directory or the admin's Clients list; a one-time code over WhatsApp/e-mail signs them in to their own
+tickets, no password) or e-mail (Settings → Channels: IMAP mailbox; replies go out over
 the SMTP settings under Reports, and `[#id]` in the subject keeps a thread on its ticket).
 
 **Secrets:** the Meta API key, WhatsApp token/phone ID/verify token, SMTP, the integration API key and the Tavily
@@ -135,7 +137,7 @@ table of every desk action (sign-ins, invitations, role changes, assignments, me
 
 **WhatsApp:** expose port 1002 (e.g. `cloudflared tunnel --url http://localhost:1002`), set the webhook to
 `https://<tunnel>/webhook` with `WA_VERIFY_TOKEN`, subscribe to `messages`. Not needed to try the desk: the web
-chat at `http://localhost:1002/portal` runs the same agents with no public address or Meta app.
+page at `http://localhost:1002/support-agent` runs the same agents with no public address or Meta app.
 
 ### Test users (simulated directory, `app/systems.py`)
 

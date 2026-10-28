@@ -298,6 +298,66 @@ def reinvite(request: Request, user_id: int, admin: User = Depends(admin_user)):
     return RedirectResponse("/users?info=Invitation+sent" + ("" if mailed else f"&link={link}"), 303)
 
 
+@router.get("/clients", response_class=HTMLResponse)
+def clients_page(admin: User = Depends(admin_user), info: str = "", error: str = "") -> str:
+    from app.db import Client
+    with session() as db:
+        rows = ""
+        for c in db.query(Client).order_by(Client.id.desc()):
+            contact = " · ".join(x for x in (c.phone, c.email) if x)
+            rows += (f"<tr><td><div class='who'><span class='avatar sm'>{_initials(c.name)}</span><div><b>{_esc(c.name)}</b>"
+                     f"<small>{_esc(contact)}</small></div></div></td><td class='mono muted'>{_esc(c.employee_no)}</td>"
+                     f"<td><span class='tag {'active' if c.enabled else 'disabled'}'>{'active' if c.enabled else 'disabled'}</span></td>"
+                     f"<td class='mono muted'>{c.last_login_at:%d %b %Y %H:%M}</td>" if c.last_login_at else f"<td class='muted'>never</td>")
+            rows += (f"<td class='act'><div class='menu'><button class='kebab' onclick='toggleRow(this)' aria-label='Actions'>⋯</button>"
+                     f"<div class='dropdown right'><form method='post' action='/clients/{c.id}/toggle'><button class=\"{'danger' if c.enabled else ''}\">{'Disable' if c.enabled else 'Enable'}</button></form></div></div></td></tr>")
+    body = f"""
+<div class="pagehead"><p class="muted">Employees who may use the support page (<a href="/support-agent" target="_blank">/support-agent</a>). Everyone in the directory is recognised automatically; add people the directory lacks here. They sign in with a one-time code over WhatsApp or e-mail, never a password, and see only their own tickets.</p>
+<button class="btn primary slim" onclick="openModal('clientModal')">+ Add client</button></div>
+{_alert(error, info)}
+<div class="scroll"><table><thead><tr><th>Client</th><th>Employee no</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead><tbody>{rows or '<tr><td colspan=5 class=muted>No clients yet; the first sign-in from the directory creates one.</td></tr>'}</tbody></table></div>
+<div class="modal {'on' if error else ''}" id="clientModal"><div class="box"><h3>Add a client</h3>
+<p class="muted">Phone (for WhatsApp codes) or work e-mail, at least one.</p>
+<form method="post" action="/clients">
+<label for="cname">Name</label><input id="cname" name="name" required>
+<label for="cemp">Employee no <small>(optional)</small></label><input id="cemp" name="employee_no">
+<label for="cphone">Mobile number</label><input id="cphone" name="phone" placeholder="+90 5xx xxx xx xx">
+<label for="cmail">Work e-mail</label><input id="cmail" name="email" type="email">
+<div class="row end"><button type="button" class="btn" onclick="closeModal('clientModal')">Cancel</button><button class="btn primary slim" type="submit">Add client</button></div></form></div></div>"""
+    return _page("Clients", body, wide=True, user=admin, active="clients")
+
+
+@router.post("/clients")
+async def client_add(request: Request, admin: User = Depends(admin_user)):
+    from app.db import Client
+    from app.support import normalise
+    check_origin(request)
+    form = await request.form()
+    name = str(form.get("name", "")).strip()[:120]
+    phone, email = normalise(str(form.get("phone", ""))), normalise(str(form.get("email", "")))
+    if not name or not (phone or email):
+        return RedirectResponse("/clients?error=Name+and+a+phone+or+e-mail+are+required", 303)
+    with session() as db:
+        if (phone and db.query(Client).filter(Client.phone == phone).first()) or (email and db.query(Client).filter(Client.email == email).first()):
+            return RedirectResponse("/clients?error=A+client+with+this+phone+or+e-mail+already+exists", 303)
+        db.add(Client(name=name, employee_no=str(form.get("employee_no", "")).strip()[:32], phone=phone, email=email if "@" in email else ""))
+        audit(db, admin.email, "client.added", target=phone or email, detail=name, ip=_ip(request))
+    return RedirectResponse("/clients?info=Client+added", 303)
+
+
+@router.post("/clients/{client_id}/toggle")
+def client_toggle(request: Request, client_id: int, admin: User = Depends(admin_user)):
+    from app.db import Client
+    check_origin(request)
+    with session() as db:
+        c = db.get(Client, client_id)
+        if c is None:
+            raise HTTPException(404)
+        c.enabled = not c.enabled
+        audit(db, admin.email, "client.enabled" if c.enabled else "client.disabled", target=c.phone or c.email, ip=_ip(request))
+    return RedirectResponse("/clients", 303)
+
+
 @router.post("/users")
 def add_user(request: Request, admin: User = Depends(admin_user), name: str = Form(...), email: str = Form(...),
              role: str = Form("agent")):
@@ -622,12 +682,12 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
             from app.channels import email_config, portal_config
             from app.config import auth_settings
             pc, ec = portal_config(), email_config()
-            link = f"{auth_settings.public_url.rstrip('/')}/portal"
+            link = f"{auth_settings.public_url.rstrip('/')}/support-agent"
             imap_row = secret_row("IMAP_PASSWORD", "Mailbox password or app password")
             body = f"""<p class="muted">Employees can reach the desk over WhatsApp, the web chat and e-mail; every channel lands on the same tickets and agents.</p>
 <h3>WhatsApp &amp; integrations</h3>
 <form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
-<h3>Web chat</h3><p class="muted">A public page outside the console where an employee writes as on WhatsApp: <a href="/portal" target="_blank">{_esc(link)}</a></p>
+<h3>Support page</h3><p class="muted">Outside the console, for employees the desk knows (directory or <a href="/clients">Clients</a>): a chat that opens tickets like WhatsApp, and a one-time-code sign-in to follow their own tickets: <a href="/support-agent" target="_blank">{_esc(link)}</a></p>
 <form method="post" action="/settings/portal">
 <div class="srow"><div><b>Enabled</b><small>Switch the page off to take the channel down</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if pc["enabled"] else ""} {dis}> on</label></div></div>
 <div class="srow"><div><b>Title</b><small>Shown on the page</small></div><div class="min"><input name="title" value="{_esc(pc["title"])}" style="width:260px" {dis}></div></div>
@@ -1043,6 +1103,7 @@ ICONS = {
     "dash": '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
     "tickets": '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg>',
     "users": '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>',
+    "clients": '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="8" cy="12" r="2.5"/><path d="M4.5 17a3.5 3.5 0 0 1 7 0M14 10h5M14 14h4"/></svg>',
     "audit": '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h8"/></svg>',
     "knowledge": '<svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
     "settings": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
@@ -1174,7 +1235,7 @@ def rail(user: User | None, active: str = "") -> str:
                 f'{ICONS[key]}<span>{label}</span></a>')
     nav = item("chat", "/chat", "Desk Chat") + item("dash", "/", "Dashboard") + item("tickets", "/tickets", "Tickets") + item("knowledge", "/knowledge", "Knowledge")
     if admin:
-        nav += item("users", "/users", "Desk users") + item("audit", "/audit", "Audit log")
+        nav += item("users", "/users", "Desk users") + item("clients", "/clients", "Clients") + item("audit", "/audit", "Audit log")
     return (f'<aside class="rail"><a class="logo" href="/" title="Muse ServiceDesk">{LOGO}</a><nav>{nav}</nav>'
             f'<div class="rail-bottom">{item("settings", "/settings", "Settings")}<button class="nav ibtn" id="theme" title="Theme" aria-label="Toggle theme"></button>'
             f'<div class="menu"><button class="avatar" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" '

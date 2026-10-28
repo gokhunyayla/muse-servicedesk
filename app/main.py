@@ -30,8 +30,8 @@ def _apply_console_secrets() -> None:
         pass
 app.include_router(dashboard_router)
 app.include_router(whatsapp_router)
-from app.portal import router as portal_router    # noqa: E402
-app.include_router(portal_router)
+from app.support import router as support_router    # noqa: E402
+app.include_router(support_router)
 
 
 @app.exception_handler(HTTPException)
