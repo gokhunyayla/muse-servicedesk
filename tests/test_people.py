@@ -159,3 +159,17 @@ def test_people_settings_page(desk):
     from app.people import config
     c = config()
     assert c["hr_group"] == "people-team" and [q["key"] for q in c["onboarding_questions"]] == ["groups", "parking"]
+
+
+def test_answers_find_their_process_from_the_ticket_whatever_number_the_model_passes(fresh):
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("start_onboarding", name="Ada Lovelace", start_date="2026-11-09", department="Sales",
+                                                  manager_employee_no="E1002", personal_email="ada@example.org")]),
+                         Reply(text="ok")]))
+    with session() as db:
+        handle_message(db, HR, "Ada başlıyor")
+    set_llm(ScriptedLLM([Reply(tool_calls=[call("record_people_answers", process_id=9999,     # a ticket number, say
+                                                  answers={"groups": "sales-tr"})]), Reply(text="ok")]))
+    with session() as db:
+        t, _ = handle_message(db, MANAGER, "sales-tr")
+        r = results(t, "record_people_answers")[-1]
+        assert r["ok"] and r["answers"] == {"groups": "sales-tr"}

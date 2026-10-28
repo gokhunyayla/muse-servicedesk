@@ -140,9 +140,10 @@ def _open_manager_ticket(ctx: Ctx, p: PeopleProcess) -> Ticket:
     ctx.db.flush()
     p.manager_ticket_id = mt.id
     log(ctx.db, mt.id, "system", "note",
-        f"[{kind_label} process #{p.id}] Started by HR ({p.hr_contact}) on ticket #{ctx.ticket.id}. The person writing on "
-        f"this ticket is the manager ({p.manager_no}). Record their answers with record_people_answers(process_id={p.id}, …); "
-        f"when every required answer is in, confirm with them and call complete_{p.kind}(process_id={p.id}).",
+        f"[{kind_label} process] Started by HR ({p.hr_contact}) on ticket #{ctx.ticket.id}. The person writing on this "
+        f"ticket is the manager ({p.manager_no}). Record whatever they answer with record_people_answers(answers={{…}}); "
+        f"the desk finds the process from this ticket, and the last required answer carries it out. Ask only what "
+        f"record_people_answers lists as missing; nothing else is needed (no surnames, addresses or device names).",
         data={"process_id": p.id, "kind": p.kind})
     text = _questionnaire(p, lang)
     log(ctx.db, mt.id, "L1", "message", text)
@@ -150,10 +151,22 @@ def _open_manager_ticket(ctx: Ctx, p: PeopleProcess) -> Ticket:
     return mt
 
 
-def _process(ctx: Ctx, process_id: int, kind: str | None = None) -> PeopleProcess | dict:
-    p = ctx.db.get(PeopleProcess, int(process_id))
-    if p is None or (kind and p.kind != kind):
-        return {"ok": False, "error": "no such process"}
+def _process(ctx: Ctx, process_id: int | None, kind: str | None = None) -> PeopleProcess | dict:
+    """The process this conversation is about. The ticket decides, not the number the model passes: a manager's
+    ticket belongs to exactly one process, and a model easily confuses the ticket number with the process number."""
+    q = ctx.db.query(PeopleProcess)
+    if kind:
+        q = q.filter(PeopleProcess.kind == kind)
+    p = q.filter(PeopleProcess.manager_ticket_id == ctx.ticket.id).order_by(PeopleProcess.id.desc()).first()
+    if p is None and process_id:
+        cand = ctx.db.get(PeopleProcess, int(process_id))
+        if cand is not None and (not kind or cand.kind == kind):
+            p = cand
+    if p is None:                                        # the manager wrote on a new ticket: their open process
+        p = (q.filter(PeopleProcess.manager_contact == ctx.ticket.requester,
+                      PeopleProcess.status == "waiting_manager").order_by(PeopleProcess.id.desc()).first())
+    if p is None:
+        return {"ok": False, "error": "no onboarding/offboarding is waiting for this person's answers"}
     return p
 
 
@@ -209,9 +222,9 @@ def start_onboarding(ctx: Ctx, name: str, start_date: str, department: str, mana
 @tool("Record the manager's answers for an onboarding or offboarding (one, several or all at once). Keys are the "
       "question keys (onboarding: groups, license, device, vpn, other; offboarding: handover, device_return). "
       "Returns what is still missing.",
-      ("L1",), process_id={"type": "integer"},
+      ("L1",), process_id={"type": "integer", "optional": True, "description": "optional; the desk finds it from this ticket"},
       answers={"type": "object", "description": "question key -> the manager's answer", "additionalProperties": {"type": "string"}})
-def record_people_answers(ctx: Ctx, process_id: int, answers: dict) -> dict:
+def record_people_answers(ctx: Ctx, answers: dict, process_id: int | None = None) -> dict:
     p = _process(ctx, process_id)
     if isinstance(p, dict):
         return p
@@ -257,8 +270,8 @@ def _yes(answer: str) -> bool:
       "connected), groups, licence and mailbox, network/VPN group, support-page client record; the username goes to "
       "their personal e-mail, the first password to the manager, a summary to HR. Call it on the manager's ticket "
       "after confirming the answers with them.",
-      ("L1",), process_id={"type": "integer"})
-def complete_onboarding(ctx: Ctx, process_id: int) -> dict:
+      ("L1",), process_id={"type": "integer", "optional": True, "description": "optional; the desk finds it from this ticket"})
+def complete_onboarding(ctx: Ctx, process_id: int | None = None) -> dict:
     p = _process(ctx, process_id, "onboarding")
     if isinstance(p, dict):
         return p
@@ -404,8 +417,9 @@ def _end_of_day_utc(day: str) -> datetime:
 
 
 @tool("Confirm an offboarding once the manager answered the required questions: it runs at the end of the last "
-      "day (now, if that has passed). Call it on the manager's ticket.", ("L1",), process_id={"type": "integer"})
-def complete_offboarding(ctx: Ctx, process_id: int) -> dict:
+      "day (now, if that has passed). Call it on the manager's ticket.", ("L1",),
+      process_id={"type": "integer", "optional": True, "description": "optional; the desk finds it from this ticket"})
+def complete_offboarding(ctx: Ctx, process_id: int | None = None) -> dict:
     p = _process(ctx, process_id, "offboarding")
     if isinstance(p, dict):
         return p
