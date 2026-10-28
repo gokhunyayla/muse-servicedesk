@@ -20,3 +20,23 @@ Afterwards:
 
 Operations: `sudo systemctl status muse`, `journalctl -u muse -f`, update with `cd /opt/muse && git pull && sudo systemctl restart muse`.
 Secrets never live in the repo or in `.env`; they are entered in the console and stored encrypted (`data/.secret_key` on the server).
+
+## CyberPanel / OpenLiteSpeed server (one site among many)
+
+`deploy/cyberpanel-install.sh` installs the desk inside one website's own root (`/home/DOMAIN/app`, the site
+user, an isolated Python 3.12 via uv, a systemd unit named after the domain, a proxy block in that site's
+vhost.conf). It never changes global server settings. See the header of the script for the one-liner.
+
+## Continuous deployment without giving GitHub access to the server
+
+`.github/workflows/ci.yml` runs the test suite on every push to `main`; when it passes, the workflow
+fast-forwards the `live` branch. The server pulls `live` itself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gokhunyayla/muse-servicedesk/main/deploy/cyberpanel-autoupdate.sh \
+  | sudo DOMAIN=cloudrium.com SITE_USER=cloud7006 bash
+```
+
+That installs `DOMAIN-update.timer` (every 2 minutes: fetch `live`; if it moved, pull, install requirements,
+restart the service). No deploy keys, no inbound SSH, nothing reaches `live` without green tests.
+Log: `journalctl -u cloudrium-update -n 20`.

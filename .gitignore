@@ -11,3 +11,5 @@ data/.secret_key
 data/references/
 data/server.log
 data/archive/
+# written on the server by deploy/cyberpanel-autoupdate.sh
+/update.sh
