@@ -12,23 +12,32 @@ from app.db import Ticket, session
 
 def findings() -> list[dict]:
     out = []
-    for host, d in systems.DEVICES.items():
+    for host, d in systems.all_devices().items():
         owner = systems.device_owner(host)
         if not owner:
             continue
         emp, u = owner
+        contact = u.get("phone") or systems.user_email(emp)
+        if not contact:
+            continue
+        def add(kind, text):
+            out.append({"hostname": host, "employee_no": emp, "phone": contact, "kind": kind, "text": text})
         if d.get("disk_used_pct", 0) >= 90:
-            out.append({"hostname": host, "employee_no": emp, "phone": u["phone"], "kind": "disk",
-                        "text": f"[Proactive] {host}: disk {d['disk_used_pct']}% full; will start failing updates."})
+            add("disk", f"[Proactive] {host}: disk {d['disk_used_pct']}% full; will start failing updates.")
         if d.get("os_patch_days", 0) >= 45:
-            out.append({"hostname": host, "employee_no": emp, "phone": u["phone"], "kind": "patch",
-                        "text": f"[Proactive] {host}: no OS updates for {d['os_patch_days']} days."})
+            add("patch", f"[Proactive] {host}: no OS updates for {d['os_patch_days']} days.")
+        if d.get("real"):                                    # alerts only a live endpoint agent can raise
+            m = d.get("metrics") or {}
+            if str(m.get("spooler", "")).lower() == "stopped":
+                add("service", f"[Proactive] {host}: the print spooler service has stopped.")
+            if int(m.get("critical_events_24h", 0) or 0) >= 5:
+                add("events", f"[Proactive] {host}: {m['critical_events_24h']} critical/error system events in 24 hours.")
     soon = (date.today() + timedelta(days=30)).isoformat()
     for host, w in systems.WARRANTY.items():
         owner = systems.device_owner(host)
         if owner and date.today().isoformat() <= w["valid_until"] <= soon:
             emp, u = owner
-            out.append({"hostname": host, "employee_no": emp, "phone": u["phone"], "kind": "warranty",
+            out.append({"hostname": host, "employee_no": emp, "phone": u.get("phone") or systems.user_email(emp), "kind": "warranty",
                         "text": f"[Proactive] {host}: {w['vendor']} warranty ends {w['valid_until']}."})
     return out
 

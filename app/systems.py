@@ -43,14 +43,22 @@ def _graph():
 
 
 def get_user(employee_no: str) -> dict | None:
-    """Directory record by employee number (Entra when connected, else the simulated table)."""
+    """Directory record by employee number (Entra when connected, else the simulated table). A machine running the
+    endpoint agent for this employee becomes their device."""
+    from app import endpoints
     g = _graph()
     if g:
         try:
-            return g.get_user(employee_no)
+            rec = g.get_user(employee_no)
         except Exception as e:  # noqa: BLE001
             raise RuntimeError(f"directory: {e}") from e
-    return USERS.get(employee_no)
+    else:
+        rec = USERS.get(employee_no)
+    if rec is not None:
+        real = endpoints.device_for_owner(employee_no)
+        if real:
+            rec = {**rec, "device": real}          # a copy: the simulated table is never rewritten in place
+    return rec
 
 
 def employees_by_phone(phone: str) -> list[str]:
@@ -103,7 +111,23 @@ DEVICES = {
 }
 
 
+def device(hostname: str) -> dict | None:
+    """A device by hostname: a machine running the endpoint agent if one is enrolled, else the simulated inventory."""
+    from app import endpoints
+    return endpoints.state(hostname) or DEVICES.get(hostname)
+
+
+def all_devices() -> dict[str, dict]:
+    from app import endpoints
+    return {**DEVICES, **endpoints.all_states()}
+
+
 def device_owner(hostname: str) -> tuple[str, dict] | None:
+    from app import endpoints
+    real = endpoints.owner_of(hostname)
+    if real:
+        u = get_user(real)
+        return (real, u) if u else None
     for emp, u in USERS.items():
         if u.get("device") == hostname:
             return emp, u
@@ -251,6 +275,7 @@ SCRIPTS = {
     "driver-rollback": {"desc": "roll back the last updated driver (reboots)", "needs_consent": True},
     "disk-cleanup":    {"desc": "remove temp files and old updates", "needs_consent": True},
     "lock-screen":     {"desc": "lock the workstation immediately", "needs_consent": False},
+    "patch-status":    {"desc": "last installed update, pending updates and reboot", "needs_consent": False},
 }
 
 

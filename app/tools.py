@@ -248,7 +248,7 @@ def reset_password(ctx: Ctx, employee_no: str) -> dict:
 
 @tool("Read the VPN profile state of a laptop.", ("L1", "L2"), hostname=STR)
 def vpn_status(ctx: Ctx, hostname: str) -> dict:
-    d = systems.DEVICES.get(hostname)
+    d = systems.device(hostname)
     if not d:
         return {"ok": False, "error": "unknown device"}
     return {"ok": True, "hostname": hostname, "vpn_profile": d["vpn_profile"], "online": d["online"]}
@@ -256,9 +256,11 @@ def vpn_status(ctx: Ctx, hostname: str) -> dict:
 
 @tool("Push a fresh VPN profile to a laptop.", ("L1", "L2"), hostname=STR)
 def renew_vpn_profile(ctx: Ctx, hostname: str) -> dict:
-    d = systems.DEVICES.get(hostname)
+    d = systems.device(hostname)
     if not d:
         return {"ok": False, "error": "unknown device"}
+    if d.get("real"):
+        return {"ok": False, "error": "this device has no managed VPN client; try run_endpoint_script vpn-reset or dns-reset"}
     if not d["online"]:
         return {"ok": False, "error": "device offline; cannot push profile"}
     d["vpn_profile"] = "valid"
@@ -267,10 +269,16 @@ def renew_vpn_profile(ctx: Ctx, hostname: str) -> dict:
 
 @tool("Run network diagnostics (reachability, DNS) on a laptop.", ("L2",), hostname=STR)
 def network_diagnostics(ctx: Ctx, hostname: str) -> dict:
-    d = systems.DEVICES.get(hostname)
+    d = systems.device(hostname)
     if not d:
         return {"ok": False, "error": "unknown device"}
-    return {"ok": True, "online": d["online"], "dns_ok": d["dns_ok"]}
+    out = {"ok": True, "online": d["online"], "dns_ok": d["dns_ok"]}
+    if d.get("real"):
+        m = d.get("metrics") or {}
+        out.update(real_device=True, last_seen=d.get("last_seen"), os=d.get("os"),
+                   **{k: m[k] for k in ("disk_used_pct", "cpu_pct", "mem_used_pct", "uptime_hours", "last_patch_days",
+                                        "pending_reboot", "spooler", "critical_events_24h", "ip") if k in m})
+    return out
 
 
 @tool("Check the vendor warranty of a laptop.", ("L1", "L4"), hostname=STR)
@@ -595,6 +603,9 @@ def write_sop(ctx: Ctx, title: str, content: str) -> dict:
 def run_endpoint_script(ctx: Ctx, hostname: str, script: str) -> dict:
     if script not in systems.SCRIPTS:
         return {"ok": False, "error": f"script not allow-listed; available: {list(systems.SCRIPTS)}"}
+    from app import endpoints
+    if endpoints.get(hostname) is not None:                 # a real machine with the endpoint agent
+        return endpoints.run(hostname, script, ctx.ticket.id, ctx.agent, db=ctx.db)
     return systems.run_script(hostname, script)
 
 

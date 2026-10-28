@@ -375,6 +375,41 @@ class Connector(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class Device(Base):
+    """A real machine running the Muse endpoint agent. It only ever calls out to the desk (heartbeat, job poll);
+    the desk never connects in. Authenticated by a per-device token, stored hashed."""
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(64), unique=True)
+    owner: Mapped[str] = mapped_column(String(255), default="")        # employee number (or UPN) of the user
+    token_hash: Mapped[str] = mapped_column(String(64), default="")
+    enabled: Mapped[bool] = mapped_column(default=True)
+    os: Mapped[str] = mapped_column(String(255), default="")
+    agent_version: Mapped[str] = mapped_column(String(32), default="")
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)            # last heartbeat: disk, cpu, patch age, services …
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class DeviceJob(Base):
+    """One allow-listed script the desk asked a device to run, and what came back."""
+    __tablename__ = "device_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"))
+    script: Mapped[str] = mapped_column(String(64))
+    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    requested_by: Mapped[str] = mapped_column(String(64), default="")    # agent tier or desk user
+    status: Mapped[str] = mapped_column(String(16), default="queued")    # queued | running | done | failed | expired
+    ok: Mapped[bool | None] = mapped_column(nullable=True)
+    output: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class LlmCall(Base):
     """One request to Meta Model API: what it cost in tokens and time, and on whose behalf."""
     __tablename__ = "llm_calls"

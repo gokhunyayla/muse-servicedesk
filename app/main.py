@@ -32,6 +32,8 @@ app.include_router(dashboard_router)
 app.include_router(whatsapp_router)
 from app.support import router as support_router    # noqa: E402
 app.include_router(support_router)
+from app.agent_api import router as agent_router    # noqa: E402
+app.include_router(agent_router)
 
 
 @app.exception_handler(HTTPException)

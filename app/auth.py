@@ -672,6 +672,18 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
         rows = connectors.listing()
         gc = graph.config()
         dis = "" if admin else "disabled"
+        from app import endpoints
+        def drow(d):
+            m = d["metrics"]
+            state = '<span class="tag active">online</span>' if d["online"] else '<span class="tag disabled">offline</span>'
+            facts = " · ".join(x for x in [d["os"], f"disk {m['disk_used_pct']}%" if "disk_used_pct" in m else "", f"cpu {m['cpu_pct']}%" if "cpu_pct" in m else "",
+                                           f"patched {m['last_patch_days']} d ago" if m.get("last_patch_days", -1) >= 0 else "", f"agent {d['agent_version']}" if d["agent_version"] else ""] if x)
+            seen = d["last_seen"][:16].replace("T", " ") if d["last_seen"] else "never"
+            btn = (f'<form method="post" action="/devices/{d["id"]}/toggle" style="display:inline"><button class="btn slim">{"Disable" if d["enabled"] else "Enable"}</button></form>' if admin else "")
+            return (f'<div class="srow"><div><b>{_esc(d["hostname"])}</b> {state}{"" if d["enabled"] else " <span class=\"tag disabled\">disabled</span>"}'
+                    f'<small>owner {_esc(d["owner"] or "—")} · last seen {seen} UTC{(" · " + _esc(facts)) if facts else ""}</small></div><div class="min">{btn}</div></div>')
+        devs = endpoints.listing()
+        devices_html = "".join(drow(d) for d in devs) or '<p class="muted">No devices enrolled yet.</p>'
         gst = vault.status("GRAPH_CLIENT_SECRET")
         gsec = ('<span class="tag active">configured</span> <small class="muted">…' + _esc(gst["hint"]) + '</small>') if gst["configured"] else '<span class="tag disabled">not set</span>'
         gshown = ("•" * 28 + gst["hint"]) if gst["configured"] else ""
@@ -688,6 +700,10 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <div class="srow"><div><b>Employee number attribute</b><small>Where your directory keeps the employee number</small></div><div class="min"><select name="employee_attr" style="width:220px" {dis}>{''.join(f'<option value="{a}" {"selected" if gc["employee_attr"] == a else ""}>{a}</option>' for a in ["employeeId"] + [f"extensionAttribute{i}" for i in range(1, 16)])}</select></div></div>
 <div class="srow"><div><b>Birth year attribute</b><small>Optional second identity factor; without it the sender's own number/address is the check</small></div><div class="min"><select name="birth_year_attr" style="width:220px" {dis}>{''.join(f'<option value="{a}" {"selected" if gc["birth_year_attr"] == a else ""}>{a or "none"}</option>' for a in [""] + [f"extensionAttribute{i}" for i in range(1, 16)])}</select></div></div>
 {_alert('', info)}{('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Save &amp; test</button> <button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
+<h3>Endpoint agents</h3>
+<p class="muted">Machines running the Muse endpoint agent. The agent only calls out to the desk (heartbeat, job poll); the agents' device tools run the allow-listed scripts on the real machine and the output lands on the ticket.</p>
+{devices_html}
+{('<form method="post" action="/devices" class="row" style="gap:8px;align-items:flex-end;margin-top:8px"><div><label>Hostname</label><input name="hostname" placeholder="LT-101" required style="width:160px"></div><div><label>Owner (employee no or UPN)</label><input name="owner" placeholder="E1001" style="width:220px"></div><button class="btn primary slim" type="submit">Enrol device</button></form>' if admin else '')}
 <h3>MCP connectors</h3>"""
         def ccard(c):
             st = ('<span class="tag active">connected</span>' if c["last_test_ok"] else ('<span class="tag disabled">failed</span>' if c["last_test_ok"] is False else '<span class="tag">untested</span>'))
