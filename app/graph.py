@@ -107,10 +107,15 @@ def _record(u: dict, groups: list[str] | None = None, licenses: list[str] | None
             "birth_year": int(by) if str(by).isdigit() else 0, "source": "entra"}
 
 
-def _find(filter_: str) -> dict | None:
-    d = _call("GET", "/users", params={"$filter": filter_, "$select": USER_FIELDS, "$top": 1},
+def _find_all(filter_: str, top: int = 5) -> list[dict]:
+    # phone filters are "advanced queries" in Graph: they need $count=true with ConsistencyLevel: eventual
+    d = _call("GET", "/users", params={"$filter": filter_, "$select": USER_FIELDS, "$top": top, "$count": "true"},
               headers={"ConsistencyLevel": "eventual"})
-    v = d.get("value") or []
+    return d.get("value") or []
+
+
+def _find(filter_: str) -> dict | None:
+    v = _find_all(filter_, 1)
     return v[0] if v else None
 
 
@@ -152,20 +157,24 @@ def get_user(employee_no: str, full: bool = True) -> dict | None:
     return rec
 
 
-def user_by_contact(contact: str) -> tuple[str, dict] | None:
-    """Phone number or e-mail → (employee_no, record)."""
+def users_by_contact(contact: str) -> list[tuple[str, dict]]:
+    """Phone number or e-mail → every (employee_no, record) it belongs to (a shared desk phone may map to several)."""
     c = (contact or "").strip()
     if not c:
-        return None
+        return []
     if "@" in c:
-        u = _find(f"mail eq '{_q(c.lower())}' or userPrincipalName eq '{_q(c.lower())}'")
+        found = _find_all(f"mail eq '{_q(c.lower())}' or userPrincipalName eq '{_q(c.lower())}'")
     else:
-        u = _find(f"mobilePhone eq '{_q(c)}'")
-        if u is None and c.startswith("+"):
-            u = _find(f"businessPhones/any(p:p eq '{_q(c)}')")
-    if u is None:
-        return None
-    return _emp_no(u), _record(u)
+        found = _find_all(f"mobilePhone eq '{_q(c)}'")
+        if not found and c.startswith("+"):
+            found = _find_all(f"businessPhones/any(p:p eq '{_q(c)}')")
+    return [(_emp_no(u), _record(u)) for u in found]
+
+
+def user_by_contact(contact: str) -> tuple[str, dict] | None:
+    """Phone number or e-mail → (employee_no, record) of the first match."""
+    hits = users_by_contact(contact)
+    return hits[0] if hits else None
 
 
 def search(query: str) -> list[dict]:
@@ -175,8 +184,7 @@ def search(query: str) -> list[dict]:
 
 
 def employees_by_phone(phone: str) -> list[str]:
-    hit = user_by_contact(phone)
-    return [hit[0]] if hit else []
+    return [e for e, _ in users_by_contact(phone)]
 
 
 def _uid(employee_no: str) -> str:

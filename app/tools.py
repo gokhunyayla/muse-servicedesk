@@ -111,12 +111,13 @@ def verify_identity(ctx: Ctx, employee_no: str, birth_year: int) -> dict:
     from datetime import timedelta
     from app.db import Setting, _now
     u = systems.get_user(employee_no)
-    own = _own_record(ctx.ticket.requester)
-    if own is not None and own[0] != employee_no:
-        return {"ok": False, "error": f"this number/address belongs to {own[1]['name']} ({own[0]}); requests are only for "
+    owners = systems.employees_by_contact(ctx.ticket.requester)
+    if owners and employee_no not in owners:
+        other = systems.get_user(owners[0]) or {}
+        return {"ok": False, "error": f"this number/address belongs to {other.get('name', owners[0])} ({owners[0]}); requests are only for "
                                       f"oneself — the other employee must write to the desk themselves, or the desk opens a ticket for them"}
-    # a real directory (Entra) may not hold a birth year: then the sender-binding above is the identity check
-    ok = bool(u) and (u["birth_year"] == int(birth_year) if u.get("birth_year") else own is not None and own[0] == employee_no)
+    # a real directory (Entra) may not hold a birth year: then the sender binding above is the identity check
+    ok = bool(u) and (u["birth_year"] == int(birth_year) if u.get("birth_year") else employee_no in owners)
     if ok:
         ctx.ticket.verified = True
         hours = int(verification_config().get("identity_hours") or 0)

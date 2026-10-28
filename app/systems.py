@@ -60,6 +60,17 @@ def employees_by_phone(phone: str) -> list[str]:
     return [e for e, u in USERS.items() if u.get("phone") == phone]
 
 
+def employees_by_contact(contact: str) -> list[str]:
+    """Every employee a phone number or e-mail address belongs to."""
+    g = _graph()
+    if g:
+        return g.employees_by_phone(contact)
+    contact = (contact or "").strip().lower()
+    if "@" in contact:
+        return [e for e in USERS if user_email(e).lower() == contact]
+    return [e for e, u in USERS.items() if u.get("phone") == contact]
+
+
 def license_catalog() -> dict:
     """Licence → needs manager approval. With Entra, the tenant's SKUs; approval policy from LICENSE_CATALOG by name."""
     g = _graph()
