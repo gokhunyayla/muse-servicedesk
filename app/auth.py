@@ -305,10 +305,11 @@ def clients_page(admin: User = Depends(admin_user), info: str = "", error: str =
         rows = ""
         for c in db.query(Client).order_by(Client.id.desc()):
             contact = " · ".join(x for x in (c.phone, c.email) if x)
+            last = f"{c.last_login_at:%d %b %Y %H:%M}" if c.last_login_at else "never"
             rows += (f"<tr><td><div class='who'><span class='avatar sm'>{_initials(c.name)}</span><div><b>{_esc(c.name)}</b>"
                      f"<small>{_esc(contact)}</small></div></div></td><td class='mono muted'>{_esc(c.employee_no)}</td>"
                      f"<td><span class='tag {'active' if c.enabled else 'disabled'}'>{'active' if c.enabled else 'disabled'}</span></td>"
-                     f"<td class='mono muted'>{c.last_login_at:%d %b %Y %H:%M}</td>" if c.last_login_at else f"<td class='muted'>never</td>")
+                     f"<td class='mono muted'>{last}</td>")
             rows += (f"<td class='act'><div class='menu'><button class='kebab' onclick='toggleRow(this)' aria-label='Actions'>⋯</button>"
                      f"<div class='dropdown right'><form method='post' action='/clients/{c.id}/toggle'><button class=\"{'danger' if c.enabled else ''}\">{'Disable' if c.enabled else 'Enable'}</button></form></div></div></td></tr>")
     body = f"""
