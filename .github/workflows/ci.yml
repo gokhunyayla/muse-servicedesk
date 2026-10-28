@@ -1,23 +1,12 @@
 # ============================================================
-# main'e her push'ta testler koşar; geçerse `live` dalı o commit'e ilerletilir.
-# Sunucu (cloudrium.com) `live` dalını kendi çeker (deploy/cyberpanel-autoupdate.sh);
-# GitHub'ın sunucuya erişimi yoktur, secret gerekmez.
-# PR'larda sadece testler koşar, `live` değişmez.
+# Pull request'lerde test. main'e push'ta testler deploy.yml içinde koşar
+# (geçmezse canlıya çıkmaz).
 # ============================================================
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: write   # `live` dalını ilerletmek için
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   test:
@@ -32,14 +21,3 @@ jobs:
       - run: python -m pytest -q
         env:
           DATABASE_URL: sqlite:///./ci.db
-
-  release:
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Advance `live` to this commit
-        run: git push origin HEAD:refs/heads/live

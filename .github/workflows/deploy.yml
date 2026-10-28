@@ -1,0 +1,92 @@
+name: Deploy to production
+
+# crossuse.com kalıbı: GitHub Actions sadece SSH ile girer; sunucu repoyu kendisi
+# çeker, bağımlılıkları kurar ve cloudrium servisini yeniden başlatır.
+# Önce testler koşar; geçmezse deploy adımı çalışmaz.
+#
+# Gerekli repo SECRET'ları: SSH_HOST, SSH_USER, SSH_PRIVATE_KEY
+# Gerekli repo VARIABLE'ı: DEPLOY_ENABLED = "true" (kapı; ayarlanana kadar deploy atlanır)
+# Bkz. deploy/README.md
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+        env:
+          DATABASE_URL: sqlite:///./ci.db
+
+  deploy:
+    name: Deploy to cloudrium.com
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
+          ssh-keyscan -t ed25519,rsa "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<EOF
+          Host deploy_target
+            HostName ${{ secrets.SSH_HOST }}
+            User ${{ secrets.SSH_USER }}
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            ServerAliveInterval 30
+          EOF
+          chmod 600 ~/.ssh/config
+          ssh -o BatchMode=yes deploy_target "echo 'SSH OK as '\$(whoami)' on '\$(hostname)"
+
+      - name: Deploy on server (pull, deps, restart, health)
+        run: |
+          ssh deploy_target bash -s <<'REMOTE'
+          set -euo pipefail
+          APP_DIR=/home/cloudrium.com/app
+          SVC=cloudrium
+          PORT=$(grep -E '^PORT=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2 || echo 9102)
+          SITE_USER=$(stat -c '%U' "$APP_DIR")
+          run() { sudo -u "$SITE_USER" -H bash -c "$1"; }
+
+          echo "▶ Pulling main (as $SITE_USER)..."
+          BEFORE=$(run "cd $APP_DIR && git rev-parse HEAD")
+          run "cd $APP_DIR && git pull -q --ff-only origin main"
+          AFTER=$(run "cd $APP_DIR && git rev-parse HEAD")
+          echo "  $BEFORE -> $AFTER"
+
+          if [ "$BEFORE" != "$AFTER" ] && run "cd $APP_DIR && git diff --name-only $BEFORE $AFTER" | grep -q '^requirements.txt$'; then
+            echo "▶ requirements.txt changed: installing..."
+            run "cd $APP_DIR && \$HOME/.local/bin/uv pip install -q -r requirements.txt --python .venv/bin/python"
+          fi
+
+          echo "▶ Restarting $SVC..."
+          sudo systemctl restart "$SVC"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 2
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT:-9102}/login" || true)
+            [ "$code" = "200" ] || [ "$code" = "303" ] && { echo "  ✓ $SVC up ($code) at $(sudo -u "$SITE_USER" git -C "$APP_DIR" rev-parse --short HEAD)"; exit 0; }
+          done
+          echo "✗ $SVC not healthy"; sudo journalctl -u "$SVC" -n 30 --no-pager; exit 1
+          REMOTE

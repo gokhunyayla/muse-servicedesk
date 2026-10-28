@@ -27,16 +27,17 @@ Secrets never live in the repo or in `.env`; they are entered in the console and
 user, an isolated Python 3.12 via uv, a systemd unit named after the domain, a proxy block in that site's
 vhost.conf). It never changes global server settings. See the header of the script for the one-liner.
 
-## Continuous deployment without giving GitHub access to the server
+## Continuous deployment (crossuse.com pattern)
 
-`.github/workflows/ci.yml` runs the test suite on every push to `main`; when it passes, the workflow
-fast-forwards the `live` branch. The server pulls `live` itself:
+`.github/workflows/deploy.yml` on every push to `main`: run the test suite, then **SSH into the server and let
+the server pull and restart itself** (`git pull --ff-only`, `uv pip install`, `systemctl restart cloudrium`,
+health check on the local port). Nothing is built on GitHub; nothing is copied over.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/gokhunyayla/muse-servicedesk/main/deploy/cyberpanel-autoupdate.sh \
-  | sudo DOMAIN=cloudrium.com SITE_USER=cloud7006 bash
-```
+GitHub → Settings → Secrets and variables → Actions:
+- Secrets: `SSH_HOST` (server IP, not the Cloudflare-proxied domain), `SSH_USER` (the SSH deploy user with
+  passwordless sudo, same as the other sites on the server), `SSH_PRIVATE_KEY` (its public half is in that
+  user's `authorized_keys`).
+- Variable: `DEPLOY_ENABLED = true` — the deploy job stays skipped until this is set.
 
-That installs `DOMAIN-update.timer` (every 2 minutes: fetch `live`; if it moved, pull, install requirements,
-restart the service). No deploy keys, no inbound SSH, nothing reaches `live` without green tests.
-Log: `journalctl -u cloudrium-update -n 20`.
+Pushes that only touch `.github/**`, `docs/**` or Markdown files do not restart production; use
+Actions → Deploy → Run workflow for those.
