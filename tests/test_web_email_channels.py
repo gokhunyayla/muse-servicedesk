@@ -100,3 +100,14 @@ def test_email_settings_saved_and_password_in_vault(desk):
     desk.post("/settings/secrets?tab=channels", data={"IMAP_PASSWORD": "app-pass"}, follow_redirects=False)
     assert vault.get("IMAP_PASSWORD") == "app-pass" and "app-pass" not in desk.get("/settings?tab=channels").text
     assert channels.poll_email(force=True) == 0        # unreachable host: logged, never raises
+
+
+def test_sender_allow_list_and_folded_subjects():
+    cfg = {"allowed": "company.com, partner@other.com"}
+    assert channels.sender_allowed("ali@company.com", cfg) and channels.sender_allowed("x@mail.company.com", cfg)
+    assert channels.sender_allowed("partner@other.com", cfg) and not channels.sender_allowed("someone@other.com", cfg)
+    assert channels.sender_allowed("anyone@anywhere.com", {"allowed": ""})
+    m = _mail(subject="Re: Aktif Olmayan Make Flow'ları ve Aktif'lerin Sırayla n8n'e Taşınması, uzun bir konu satırı daha")
+    assert "\n" not in channels.parse_email(m.as_bytes())["subject"]      # folded header lines are joined again
+    from app.db import Ticket
+    assert channels._subject(Ticket(id=3, title="a\nb   c")) == "[#3] a b c"

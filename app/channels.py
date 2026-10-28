@@ -21,7 +21,9 @@ from app.sla import get_setting
 
 logger = logging.getLogger("channels")
 
-DEFAULT_EMAIL = {"enabled": False, "imap_host": "", "imap_port": 993, "user": "", "folder": "INBOX", "poll_minutes": 2}
+DEFAULT_EMAIL = {"enabled": False, "imap_host": "", "imap_port": 993, "user": "", "folder": "INBOX", "poll_minutes": 2,
+                 "allowed": "",      # optional: comma-separated sender domains/addresses; empty = anyone
+                 "last_uid": 0}      # mailbox position: only mail that arrives after the channel is enabled is read
 DEFAULT_PORTAL = {"enabled": True, "title": "IT Service Desk", "note": "", "country": "+90"}
 _last_poll = 0.0
 
@@ -79,7 +81,7 @@ def send_email(to: str, subject: str, text: str) -> tuple[bool, str]:
 
 
 def _subject(ticket: Ticket) -> str:
-    return f"[#{ticket.id}] {ticket.title[:70]}"
+    return f"[#{ticket.id}] " + re.sub(r"\s+", " ", ticket.title)[:70]
 
 
 _AUTO = re.compile(r"auto-?reply|automatic reply|out of office|mailer-daemon|noreply|no-reply", re.I)
@@ -92,7 +94,7 @@ def parse_email(raw: bytes) -> dict | None:
     addr = addr.lower().strip()
     if not addr or _AUTO.search(addr) or _AUTO.search(msg.get("Subject", "")) or msg.get("Auto-Submitted", "no") != "no":
         return None
-    subject = str(email.header.make_header(email.header.decode_header(msg.get("Subject", "")))).strip()
+    subject = re.sub(r"\s+", " ", str(email.header.make_header(email.header.decode_header(msg.get("Subject", ""))))).strip()[:200]
     text, image, mime = "", None, "image/jpeg"
     for part in msg.walk():
         ctype = part.get_content_type()
@@ -116,6 +118,14 @@ def parse_email(raw: bytes) -> dict | None:
             "ticket_id": int(m.group(1)) if m else None, "message_id": msg.get("Message-ID", "")}
 
 
+def sender_allowed(addr: str, cfg: dict | None = None) -> bool:
+    allowed = [a.strip().lower().lstrip("@") for a in str((cfg or email_config()).get("allowed", "")).split(",") if a.strip()]
+    if not allowed:
+        return True
+    addr = addr.lower()
+    return any(addr == a or addr.endswith("@" + a) or addr.endswith("." + a) for a in allowed)
+
+
 def ingest_email(parsed: dict) -> tuple[Ticket, str] | None:
     """Run one parsed mail through the desk and answer by mail."""
     from app.agents import handle_message
@@ -131,29 +141,67 @@ def ingest_email(parsed: dict) -> tuple[Ticket, str] | None:
     return ticket, answer
 
 
+def _box(c: dict):
+    from app import vault
+    box = imaplib.IMAP4_SSL(c["imap_host"], int(c["imap_port"]), timeout=30)
+    box.login(c["user"], vault.get("IMAP_PASSWORD") or "")
+    return box
+
+
+def _max_uid(box) -> int:
+    _, d = box.uid("search", None, "ALL")
+    ids = d[0].split() if d and d[0] else []
+    return int(ids[-1]) if ids else 0
+
+
+def mark_baseline() -> int:
+    """Remember the newest mail now in the box, so enabling the channel never replays old mail."""
+    from app.sla import put_setting
+    c = email_config()
+    if not c["imap_host"]:
+        return 0
+    try:
+        box = _box(c)
+        box.select(c["folder"] or "INBOX", readonly=True)
+        uid = _max_uid(box)
+        box.logout()
+    except Exception as e:  # noqa: BLE001   (unreachable now: the first poll sets the baseline instead)
+        logger.warning("e-mail baseline failed: %s", e)
+        return 0
+    put_setting("email", {**get_setting("email", {}), "last_uid": uid})
+    return uid
+
+
 def poll_email(force: bool = False) -> int:
-    """Fetch unseen mail from the configured mailbox and feed each one to the desk."""
+    """Read mail that arrived after the channel was enabled (by IMAP UID) and feed each one to the desk."""
     global _last_poll
+    from app.sla import put_setting
     c = email_config()
     if not c["enabled"] or not c["imap_host"]:
         return 0
     if not force and time.time() - _last_poll < int(c["poll_minutes"]) * 60:
         return 0
     _last_poll = time.time()
-    from app import vault
     handled = 0
     try:
-        box = imaplib.IMAP4_SSL(c["imap_host"], int(c["imap_port"]), timeout=30)
-        box.login(c["user"], vault.get("IMAP_PASSWORD") or "")
+        box = _box(c)
         box.select(c["folder"] or "INBOX")
-        _, data = box.search(None, "UNSEEN")
-        for num in (data[0].split() if data and data[0] else []):
-            _, msg_data = box.fetch(num, "(RFC822)")
+        last = int(c.get("last_uid") or 0)
+        if not last:                                   # never enabled properly: start from now, read nothing old
+            last = _max_uid(box)
+            put_setting("email", {**get_setting("email", {}), "last_uid": last})
+        _, data = box.uid("search", None, f"UID {last + 1}:*")
+        uids = [int(u) for u in (data[0].split() if data and data[0] else []) if int(u) > last]
+        for uid in uids[:20]:                          # a burst never floods the desk; the rest comes next tick
+            _, msg_data = box.uid("fetch", str(uid), "(RFC822)")
             raw = msg_data[0][1] if msg_data and isinstance(msg_data[0], tuple) else b""
-            box.store(num, "+FLAGS", "\\Seen")
+            last = uid
+            put_setting("email", {**get_setting("email", {}), "last_uid": last})
             parsed = parse_email(raw) if raw else None
-            if parsed is None or parsed["from"] == (c["user"] or "").lower():
+            if parsed is None or parsed["from"] == (c["user"] or "").lower() or not sender_allowed(parsed["from"], c):
                 continue
+            if not email_config()["enabled"]:          # switched off meanwhile: stop at once
+                break
             try:
                 ingest_email(parsed)
                 handled += 1
@@ -169,10 +217,8 @@ def test_email() -> tuple[bool, str]:
     c = email_config()
     if not c["imap_host"]:
         return False, "IMAP host missing"
-    from app import vault
     try:
-        box = imaplib.IMAP4_SSL(c["imap_host"], int(c["imap_port"]), timeout=20)
-        box.login(c["user"], vault.get("IMAP_PASSWORD") or "")
+        box = _box(c)
         status, data = box.select(c["folder"] or "INBOX", readonly=True)
         box.logout()
         return True, f"connected; {data[0].decode() if data and data[0] else '?'} messages in {c['folder'] or 'INBOX'}"

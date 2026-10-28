@@ -642,6 +642,7 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <div class="srow"><div><b>Mailbox user</b><small>the desk's address</small></div><div class="min"><input name="user" value="{_esc(ec["user"])}" style="width:260px" {dis}></div></div>
 <div class="srow"><div><b>Folder</b></div><div class="min"><input name="folder" value="{_esc(ec["folder"])}" style="width:160px" {dis}></div></div>
 <div class="srow"><div><b>Poll every</b></div><div class="min"><input name="poll_minutes" type="number" min="1" value="{ec["poll_minutes"]}" style="width:100px" {dis}> <span>minutes</span></div></div>
+<div class="srow"><div><b>Accept mail from</b><small>Comma-separated domains or addresses; empty = anyone. Only mail that arrives after enabling is read, never the backlog.</small></div><div class="min"><input name="allowed" value="{_esc(ec.get("allowed", ""))}" placeholder="company.com, partner.com" style="width:260px" {dis}></div></div>
 {('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Test connection</button> <button class="btn primary slim" type="submit">Save e-mail</button></div>' if admin else '')}</form>
 <form method="post" action="/settings/secrets?tab=channels">{imap_row}{('<div class="row end"><button class="btn primary slim" type="submit">Save password</button></div>' if admin else '')}</form>"""
     else:
@@ -670,19 +671,24 @@ async def settings_portal(request: Request, admin: User = Depends(admin_user)):
 @router.post("/settings/email")
 async def settings_email(request: Request, admin: User = Depends(admin_user)):
     from app.channels import DEFAULT_EMAIL, test_email
-    from app.sla import put_setting
+    from app.sla import get_setting, put_setting
     check_origin(request)
     form = await request.form()
     value = dict(DEFAULT_EMAIL)
     value["enabled"] = form.get("enabled") == "1"
-    for k in ("imap_host", "user", "folder"):
+    for k in ("imap_host", "user", "folder", "allowed"):
         value[k] = str(form.get(k, "")).strip()
+    value["last_uid"] = int(get_setting("email", {}).get("last_uid") or 0)
     for k in ("imap_port", "poll_minutes"):
         try:
             value[k] = max(1, int(form.get(k, DEFAULT_EMAIL[k])))
         except (TypeError, ValueError):
             value[k] = DEFAULT_EMAIL[k]
+    was_on = bool(get_setting("email", {}).get("enabled"))
     put_setting("email", value)
+    if value["enabled"] and not was_on:
+        from app.channels import mark_baseline
+        mark_baseline()                      # start reading from now on
     with session() as db:
         audit(db, admin.email, "settings.email", detail=f"enabled={value['enabled']} host={value['imap_host']}", ip=_ip(request))
     if form.get("action") == "test":
