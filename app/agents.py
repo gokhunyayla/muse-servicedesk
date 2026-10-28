@@ -68,7 +68,43 @@ def requester_history(db, ticket: Ticket, days: int = 60, limit: int = 6) -> str
 
 
 RESUME_MINUTES = 60
-_RESUME: dict = {}          # requester -> {"ticket": id, "pending": first message on the new channel, "until": epoch}
+
+
+class _ResumeStore:
+    """Pending "continue where we left off?" questions, kept in the settings table (inside the caller's
+    session) so a restart does not lose them and SQLite never waits on a second connection."""
+    @staticmethod
+    def _key(requester: str) -> str:
+        return f"resume:{requester}"
+
+    def get(self, db, requester: str):
+        from app.db import Setting
+        row = db.get(Setting, self._key(requester))
+        return row.value if row and row.value else None
+
+    def set(self, db, requester: str, value: dict) -> None:
+        from app.db import Setting
+        row = db.get(Setting, self._key(requester))
+        if row is None:
+            db.add(Setting(key=self._key(requester), value=value))
+        else:
+            row.value = value
+        db.flush()
+
+    def drop(self, db, requester: str) -> None:
+        from app.db import Setting
+        row = db.get(Setting, self._key(requester))
+        if row is not None:
+            row.value = None
+            db.flush()
+
+    def clear(self) -> None:
+        from app.db import Setting, session
+        with session() as db:
+            db.query(Setting).filter(Setting.key.like("resume:%")).delete(synchronize_session=False)
+
+
+_RESUME = _ResumeStore()     # requester -> {"ticket": id, "pending": first message on the new channel, "until": epoch}
 YES_RE = re.compile(r"^\s*(evet|devam|oradan|aynen|tabii|tamam|ok(?:ey)?|yes|continue|sure|yep|same)\b", re.I)
 NO_RE = re.compile(r"^\s*(hay[ıi]r|yeni|ba[şs]ka|farkl[ıi]|no|new|different|other)\b", re.I)
 CHANNEL_NAMES = {"tr": {"whatsapp": "WhatsApp", "web": "destek sayfası", "email": "e-posta", "api": "API"},
@@ -96,7 +132,7 @@ def resume_offer(db, requester: str, channel: str, lang: str, pending: str = "",
     t = recent_switch(db, requester, channel)
     if t is None:
         return None
-    _RESUME[requester] = {"ticket": t.id, "pending": pending, "until": _t.time() + 15 * 60}
+    _RESUME.set(db, requester, {"ticket": t.id, "pending": pending, "until": _t.time() + 15 * 60})
     names = CHANNEL_NAMES["tr" if lang == "tr" else "en"]
     return t, tr_("resume_offer_hi" if greeting else "resume_offer", lang, chan=names.get(t.channel, t.channel), id=t.id,
                   title=t.title.split(chr(10))[0][:50])
@@ -413,9 +449,9 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
                     .order_by(Ticket.id.desc()).all())
     # 2) Did we just ask "continue where we left off?" on a channel switch?
     import time as _t
-    pend = _RESUME.get(requester)
+    pend = _RESUME.get(db, requester)
     if pinned is None and pend and pend["until"] > _t.time():
-        del _RESUME[requester]
+        _RESUME.drop(db, requester)
         held = db.get(Ticket, pend["ticket"])
         if held is not None and held.status != "resolved" and YES_RE.match(text):
             held.channel = channel
