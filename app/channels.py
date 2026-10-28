@@ -80,8 +80,13 @@ def send_email(to: str, subject: str, text: str) -> tuple[bool, str]:
         return False, str(e)[:255]
 
 
-def _subject(ticket: Ticket) -> str:
-    return f"[#{ticket.id}] " + re.sub(r"\s+", " ", ticket.title)[:70]
+def _subject(ticket: Ticket, incoming: str = "") -> str:
+    """Reply subject: the employee's own subject when we have it (so their mail client threads it), tagged with the ticket."""
+    base = re.sub(r"\s+", " ", incoming or ticket.title).strip()
+    base = re.sub(r"\[#\d+\]\s*", "", base)
+    if not re.match(r"(?i)^re:", base):
+        base = "Re: " + base
+    return f"[#{ticket.id}] {base[:70]}"
 
 
 _AUTO = re.compile(r"auto-?reply|automatic reply|out of office|mailer-daemon|noreply|no-reply", re.I)
@@ -134,7 +139,7 @@ def ingest_email(parsed: dict) -> tuple[Ticket, str] | None:
         text = f"{parsed['subject']}\n{text}".strip()
     with session() as db:
         ticket, answer = handle_message(db, parsed["from"], text, parsed["image"], parsed["mime"], channel="email")
-        subject, to = _subject(ticket), parsed["from"]
+        subject, to = _subject(ticket, parsed["subject"]), parsed["from"]
     ok, err = send_email(to, subject, answer)
     if not ok:
         logger.warning("e-mail reply to %s failed: %s", to, err)

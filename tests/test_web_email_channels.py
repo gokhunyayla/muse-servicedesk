@@ -110,4 +110,5 @@ def test_sender_allow_list_and_folded_subjects():
     m = _mail(subject="Re: Aktif Olmayan Make Flow'ları ve Aktif'lerin Sırayla n8n'e Taşınması, uzun bir konu satırı daha")
     assert "\n" not in channels.parse_email(m.as_bytes())["subject"]      # folded header lines are joined again
     from app.db import Ticket
-    assert channels._subject(Ticket(id=3, title="a\nb   c")) == "[#3] a b c"
+    assert channels._subject(Ticket(id=3, title="a\nb   c")) == "[#3] Re: a b c"
+    assert channels._subject(Ticket(id=3, title="x"), "Re: [#3] Yazıcı") == "[#3] Re: Yazıcı"
