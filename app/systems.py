@@ -275,7 +275,8 @@ SCRIPTS = {
     "driver-rollback": {"desc": "roll back the last updated driver (reboots)", "needs_consent": True},
     "disk-cleanup":    {"desc": "remove temp files and old updates", "needs_consent": True},
     "lock-screen":     {"desc": "lock the workstation immediately", "needs_consent": False},
-    "patch-status":    {"desc": "last installed update, pending updates and reboot", "needs_consent": False},
+    "patch-status":    {"desc": "last installed update, pending updates, reboot, last install run", "needs_consent": False},
+    "install-updates": {"desc": "download and install pending OS updates in the background (10-30 min; may need a restart)", "needs_consent": True},
 }
 
 

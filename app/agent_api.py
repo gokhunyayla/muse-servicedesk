@@ -27,6 +27,13 @@ def _device(request: Request, db) -> Device:
     return d
 
 
+def agent_version() -> str:
+    """The version of the agent this desk ships; agents that report another one update themselves."""
+    import re
+    m = re.search(r'\$Version = "([^"]+)"', AGENT_FILE.read_text(encoding="utf-8"))
+    return m.group(1) if m else ""
+
+
 @router.get("/agent/muse-agent.ps1", response_class=PlainTextResponse)
 def agent_script() -> str:
     """The agent itself (no secrets in it): installers download the version that matches this desk."""
@@ -39,7 +46,7 @@ async def agent_heartbeat(request: Request) -> dict:
     with session() as db:
         d = _device(request, db)
         endpoints.heartbeat(db, d, payload if isinstance(payload, dict) else {})
-        return {"ok": True, "hostname": d.hostname}
+        return {"ok": True, "hostname": d.hostname, "agent_version": agent_version()}
 
 
 @router.get("/agent/jobs")

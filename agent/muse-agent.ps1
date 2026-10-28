@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.0.0"
+$Version = "1.1.0"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -169,7 +169,39 @@ function Invoke-Allowed($script) {
         $pending = $searcher.Search("IsInstalled=0 and IsHidden=0").Updates.Count
       } catch {}
       $last = ($hf | ForEach-Object { "{0} ({1:yyyy-MM-dd})" -f $_.HotFixID, $_.InstalledOn }) -join ", "
-      return "Last updates: $last. Pending updates: $pending. Reboot pending: $([bool](Get-PendingReboot))."
+      $run = Join-Path $Home_ "updates-result.txt"
+      $lastRun = if (Test-Path $run) { " Last install run: " + ((Get-Content $run -Raw) -replace "`r?`n", " | ") } else { "" }
+      return "Last updates: $last. Pending updates: $pending. Reboot pending: $([bool](Get-PendingReboot)).$lastRun"
+    }
+    "install-updates" {
+      # Windows Update can take many minutes: hand it to a one-off SYSTEM task so this agent keeps answering,
+      # and let patch-status report the outcome afterwards.
+      $searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
+      $todo = $searcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software'").Updates
+      if ($todo.Count -eq 0) { return "No pending updates; the device is up to date." }
+      $titles = @(); foreach ($u in $todo) { $titles += $u.Title }
+      $worker = Join-Path $Home_ "install-updates.ps1"
+      @'
+$ErrorActionPreference = "Continue"
+$out = Join-Path $env:ProgramData "MuseAgent\updates-result.txt"
+"started $((Get-Date).ToUniversalTime().ToString('u'))" | Set-Content $out
+try {
+  $s = New-Object -ComObject Microsoft.Update.Session
+  $found = $s.CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'").Updates
+  $coll = New-Object -ComObject Microsoft.Update.UpdateColl
+  foreach ($u in $found) { if (-not $u.EulaAccepted) { $u.AcceptEula() }; [void]$coll.Add($u) }
+  $d = $s.CreateUpdateDownloader(); $d.Updates = $coll; [void]$d.Download()
+  $i = $s.CreateUpdateInstaller(); $i.Updates = $coll; $r = $i.Install()
+  $lines = for ($k = 0; $k -lt $coll.Count; $k++) { "{0}: {1}" -f $coll.Item($k).Title, @('not started','in progress','succeeded','succeeded with errors','failed','aborted')[$r.GetUpdateResult($k).ResultCode] }
+  "finished $((Get-Date).ToUniversalTime().ToString('u')); reboot required: $($r.RebootRequired)`n$($lines -join "`n")" | Set-Content $out
+} catch { "failed $((Get-Date).ToUniversalTime().ToString('u')): $($_.Exception.Message)" | Set-Content $out }
+'@ | Set-Content -Path $worker -Encoding UTF8
+      $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$worker`""
+      $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+      Unregister-ScheduledTask -TaskName "MuseAgentInstallUpdates" -Confirm:$false -ErrorAction SilentlyContinue
+      Register-ScheduledTask -TaskName "MuseAgentInstallUpdates" -Action $action -Principal $principal | Out-Null
+      Start-ScheduledTask -TaskName "MuseAgentInstallUpdates"
+      return "Started installing $($todo.Count) update(s) in the background: $($titles -join '; '). This usually takes 10-30 minutes; patch-status shows the outcome and whether a restart is needed."
     }
     "driver-rollback" {
       throw "driver rollback is not enabled on this device (servers keep their certified drivers); hand off to L2/L4"
@@ -187,8 +219,20 @@ if ($Run) {
     try {
       if (((Get-Date) - $lastBeat).TotalSeconds -ge 60) {
         $os = (Get-CimInstance Win32_OperatingSystem).Caption
-        Call "POST" "/agent/heartbeat" @{ version = $Version; os = $os; metrics = (Get-Metrics) } | Out-Null
+        $hb = Call "POST" "/agent/heartbeat" @{ version = $Version; os = $os; metrics = (Get-Metrics) }
         $lastBeat = Get-Date
+        if ($hb.agent_version -and $hb.agent_version -ne $Version) {
+          # the desk ships a newer agent: fetch it, check it is ours, swap, and restart into it
+          $new = Join-Path $Home_ "muse-agent.new.ps1"
+          Invoke-WebRequest -UseBasicParsing -Uri "$($Cfg.desk)/agent/muse-agent.ps1" -OutFile $new
+          if ((Get-Content $new -Raw) -match 'function Invoke-Allowed' -and (Get-Content $new -Raw) -match [regex]::Escape("`$Version = `"$($hb.agent_version)`"")) {
+            Move-Item $new (Join-Path $Home_ "muse-agent.ps1") -Force
+            Log "updating $Version -> $($hb.agent_version)"
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Home_ 'muse-agent.ps1')`" -Run" -WindowStyle Hidden
+            exit 0
+          }
+          Remove-Item $new -Force -ErrorAction SilentlyContinue
+        }
       }
       $r = Call "GET" "/agent/jobs?wait=20" $null 35
       foreach ($job in @($r.jobs)) {
