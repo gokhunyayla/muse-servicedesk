@@ -263,6 +263,16 @@ class Agent:
             if ticket.verified:
                 state += ("\nIdentity is verified" + (f" (verified earlier today as {rem['employee_no']}, valid until {rem['until'][11:16]} UTC)" if rem else "")
                           + "; do not ask for employee number or birth year again.")
+        try:                                         # who is writing, per the directory: never guess from older messages
+            from app import systems
+            owners = systems.employees_by_contact(ticket.requester)
+        except Exception:  # noqa: BLE001   (directory unreachable: the agent asks as before)
+            owners = []
+        if len(owners) == 1:
+            rec = systems.get_user(owners[0]) or {}
+            state += (f"\nThe directory says this phone/address belongs to {rec.get('name', '?')} ({owners[0]}). The employee "
+                      f"is writing about themselves: use {owners[0]} for every action and never another employee number "
+                      f"mentioned earlier in the conversation.")
         said_no_sop = any(e.kind == "message" and e.actor != "user" and re.search(r"prosedür|procedure|hazır bir işlem|genel (IT )?bilgi", e.content or "", re.I)
                          for e in ticket.events)
         if said_no_sop:
