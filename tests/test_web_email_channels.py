@@ -82,7 +82,7 @@ def test_one_time_code_sign_in_shows_only_own_tickets(desk, monkeypatch):
     assert "Wrong" in c.post(f"{B}/verify", data={"contact": "+905551110001", "code": "000000"}, follow_redirects=False).headers["location"]
     r = c.post(f"{B}/verify", data={"contact": "+905551110001", "code": code}, follow_redirects=False)
     assert r.status_code == 303 and "muse_support" in c.cookies
-    assert "My tickets" in c.get(B).text
+    assert "My requests" in c.get(B).text
     mine = c.get(f"{B}/tickets").json()
     assert [t["title"] for t in mine] == ["VPN bağlanmıyor"]                         # never Mehmet's
     tid = mine[0]["id"]
@@ -192,7 +192,7 @@ def test_greetings_and_small_talk_open_no_ticket(desk):
         assert t is not None and t.title == "yazıcı bozuk"
     emp = _employee()                                                          # Ayşe has an open ticket: greeting points at it, opens nothing
     r = emp.post("/support-agent/say", data={"text": "merhaba"}).json()
-    assert r["ticket"] == t.id and "hâlâ açık" in r["text"] and "clear chat" in emp.get("/portal").text
+    assert r["ticket"] == t.id and "hâlâ açık" in r["text"]
     with session() as db:
         assert db.query(Ticket).count() == 1
     assert desk.post("/messages", json={"requester": "+905551110002", "text": "günaydın"}).json()["ticket_id"] is None

@@ -365,82 +365,77 @@ def _shell(cfg: dict, body: str, app: bool = False, wide: bool = False) -> str:
 SUPPORT_CSS = """
 .auth.wide .card{width:min(760px,100%)}.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:640px){.two{grid-template-columns:1fr}}
 .pane{border:1px solid var(--line);border-radius:12px;padding:14px 16px}.pane h3{margin:0 0 4px}
-body.chat{align-items:stretch}.chat .card{width:min(760px,100%);display:flex;flex-direction:column;height:min(880px,calc(100vh - 48px))}
+body.chat{align-items:stretch}.chat .card{width:min(1040px,100%);display:flex;flex-direction:column;height:min(900px,calc(100vh - 48px));padding:18px 20px 16px}
 .chat .brand{flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:8px}.chat .brand h2{font-size:18px}
 .who{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}.who form{display:inline}.who button{border:0;background:none;color:var(--accent);cursor:pointer;font:inherit;font-size:12px;padding:0}
-.tabs{display:flex;gap:4px;margin:8px 0}.tabs button{font:inherit;font-size:13px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}.tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.view{flex:1;display:none;flex-direction:column;min-height:0}.view.on{display:flex}
+.tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}.tag.open,.tag.waiting_user,.tag.waiting_approval,.tag.escalated{color:var(--accent);border-color:var(--accent)}.tag.resolved{color:var(--ok);border-color:var(--ok)}.tag.risk{color:var(--bad);border-color:var(--bad)}
+.layout{display:grid;grid-template-columns:270px 1fr;gap:14px;flex:1;min-height:0;margin-top:8px}.layout.guest{grid-template-columns:1fr}
+.side{border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}.side .btn{margin:10px;width:auto;padding:8px 10px;font-size:13px}
+.side h4{margin:4px 12px 4px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.side .list{overflow:auto;flex:1}
+.side .it{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:none;color:var(--fg);padding:9px 12px;cursor:pointer;font:inherit}.side .it:hover,.side .it.on{background:var(--bg)}
+.side .it b{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.side .it small{color:var(--muted);font-size:11px;display:flex;gap:6px;align-items:center;margin-top:2px}
+.main{display:flex;flex-direction:column;min-height:0;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;min-height:28px}.head b{font-size:14px}.head .btn{margin:0;width:auto;padding:5px 10px;font-size:12px}.head .meta{font-size:12px;color:var(--muted)}
 .log{flex:1;overflow:auto;padding:6px 2px;display:flex;flex-direction:column;gap:8px}
 .m{max-width:85%;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.4}
 .m.you{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}.m.desk{align-self:flex-start;background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
 .m small{display:block;font-size:10px;opacity:.7;margin-top:4px}.m img{max-width:100%;border-radius:8px;display:block;margin-bottom:6px}
-.sys{align-self:center;font-size:11px;color:var(--muted)}
+.sys{align-self:center;font-size:11px;color:var(--muted);text-align:center;padding:20px 10px}
 .composer{display:flex;gap:8px;align-items:flex-end;margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
 .composer textarea{flex:1;font:inherit;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);resize:none;min-height:40px;max-height:140px}
 .composer .btn{margin:0;padding:9px 14px;width:auto}.composer label.att{margin:0;cursor:pointer;color:var(--muted);display:grid;place-items:center;width:38px;height:38px;border-radius:10px;border:1px solid var(--line)}
 .composer label.att svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.composer input[type=file]{display:none}
 .typing{font-size:12px;color:var(--muted);height:16px}
-.tl{overflow:auto;flex:1}.tl table{font-size:13px}.tl tr{cursor:pointer}.tl tr:hover td{background:var(--bg)}
-.tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}.tag.open,.tag.waiting_user,.tag.waiting_approval,.tag.escalated{color:var(--accent);border-color:var(--accent)}.tag.resolved{color:var(--ok);border-color:var(--ok)}.tag.risk{color:var(--bad);border-color:var(--bad)}
-.detail{display:none;flex-direction:column;min-height:0;flex:1}.detail.on{display:flex}.detail .head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}.detail .head .btn{margin:0;width:auto;padding:6px 10px;font-size:12px}
-.stars button{font-size:20px;background:none;border:0;cursor:pointer;color:var(--muted)}.stars button.on{color:#f5a623}
+.stars button{font-size:20px;background:none;border:0;cursor:pointer;color:var(--muted);padding:0 2px}.stars button.on{color:#f5a623}
+@media(max-width:720px){.layout{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{max-height:34vh}.chat .card{padding:12px}}
 """
 
 APP = """
 <div class="who"><span>Signed in as <b>{NAME}</b> <span class="tag">{MODE}</span></span>
-<form method="post" action="/support-agent/leave"><button type="submit">not you?</button></form> · <button type="button" onclick="clearChat()">clear chat</button></div>
-<div class="tabs" id="tabs"><button class="on" onclick="show('chat')">Chat</button><button id="tabTickets" onclick="show('tickets')" style="display:none">My tickets</button></div>
-<div class="view on" id="chat">
-<div class="log" id="log"><div class="sys">Write your request below. Photos of error screens help.</div></div>
+<form method="post" action="/support-agent/leave"><button type="submit">not you?</button></form></div>
+<div class="layout {MODE}" id="layout">
+<aside class="side" id="side"><button class="btn primary" onclick="newConv()">＋ New conversation</button><h4>My requests</h4><div class="list" id="tlist"><div class="sys">Loading…</div></div></aside>
+<section class="main">
+<div class="head"><div><b id="hTitle">New conversation</b> <span class="tag" id="hStatus" style="display:none"></span><div class="meta" id="hMeta"></div></div>
+<div id="hActions"><span class="stars" id="stars" style="display:none"></span> <button class="btn" id="btnClose" style="display:none" onclick="closeTicket()">Close request</button></div></div>
+<div class="log" id="log"><div class="sys">Describe your problem or request. Photos of error screens help.<br>Each new topic becomes its own request; you will see it on the left.</div></div>
 <div class="typing" id="typing"></div>
 <form class="composer" id="f" onsubmit="return send(event)">
 <label class="att" title="Attach a photo"><input type="file" id="img" accept="image/*" onchange="preview()"><svg viewBox="0 0 24 24"><path d="M21.4 11.1 12.3 20.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label>
 <textarea id="t" rows="1" placeholder="Describe the problem…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send(event)}"></textarea>
-<button class="btn primary" type="submit">Send</button></form></div>
-<div class="view" id="tickets">
-<div class="tl" id="tlist"></div>
-<div class="detail" id="detail"><div class="head"><div><b id="dTitle"></b> <span class="tag" id="dStatus"></span><div class="muted" id="dMeta" style="font-size:12px"></div></div>
-<div><button class="btn" onclick="backToList()">Back</button> <button class="btn" id="dClose" onclick="closeTicket()">Close ticket</button></div></div>
-<div class="stars" id="stars" style="display:none"></div>
-<div class="log" id="dlog"></div>
-<form class="composer" onsubmit="return reply(event)"><textarea id="dt" rows="1" placeholder="Reply on this ticket…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();reply(event)}"></textarea><button class="btn primary" type="submit">Send</button></form>
-</div></div>
+<button class="btn primary" type="submit">Send</button></form></section></div>
 <script>
 const B='/support-agent',MODE='{MODE}';
 const log=document.getElementById('log'),T=document.getElementById('t'),TY=document.getElementById('typing'),IMG=document.getElementById('img');
-let pendingImg=null,cur=null;
+const LAB={open:'Open',waiting_user:'Waiting for you',waiting_approval:'Waiting for approval',escalated:'With an engineer',resolved:'Resolved'};
+let pendingImg=null,cur=null,tickets=[];
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function fmt(at){return at?at.replace('T',' '):new Date().toISOString().slice(0,16).replace('T',' ')}
-function add(who,text,at,img,target){const L=target||log;const d=document.createElement('div');d.className='m '+who;if(img){const i=document.createElement('img');i.src=img;d.appendChild(i);}
- d.appendChild(document.createTextNode(text||''));const s=document.createElement('small');s.textContent=fmt(at);d.appendChild(s);L.appendChild(d);L.scrollTop=L.scrollHeight;}
+function add(who,text,at,img,ticket){const d=document.createElement('div');d.className='m '+who;if(img){const i=document.createElement('img');i.src=img;d.appendChild(i);}
+ d.appendChild(document.createTextNode(text||''));const s=document.createElement('small');s.textContent=fmt(at)+(ticket&&cur===null?' · #'+ticket:'');d.appendChild(s);log.appendChild(d);log.scrollTop=log.scrollHeight;}
 function preview(){const f=IMG.files[0];if(!f)return;pendingImg=URL.createObjectURL(f);TY.textContent='Photo attached: '+f.name;}
+function setHead(t){const st=document.getElementById('hStatus'),S=document.getElementById('stars');
+ if(!t){document.getElementById('hTitle').textContent='New conversation';st.style.display='none';document.getElementById('hMeta').textContent='';document.getElementById('btnClose').style.display='none';S.style.display='none';return;}
+ document.getElementById('hTitle').textContent='#'+t.id+' · '+(t.title||'').split('\n')[0].slice(0,70);st.style.display='';st.textContent=LAB[t.status]||t.status;st.className='tag '+t.status;
+ document.getElementById('hMeta').textContent='opened '+fmt(t.created_at)+' · via '+t.channel+(t.resolution?' · '+t.resolution:'');
+ document.getElementById('btnClose').style.display=t.status==='resolved'?'none':'';
+ if(t.status==='resolved'){S.style.display='';S.innerHTML='<span class="muted" style="font-size:12px">How did we do?</span> '+[1,2,3,4,5].map(n=>`<button class="${t.rating&&n<=t.rating?'on':''}" onclick="rate(${n})">★</button>`).join('');}else{S.style.display='none';}}
+function newConv(){cur=null;setHead(null);log.innerHTML='<div class="sys">Describe your problem or request. Photos of error screens help.<br>Each new topic becomes its own request; you will see it on the left.</div>';markList();T.focus();}
+function markList(){document.querySelectorAll('.side .it').forEach(b=>b.classList.toggle('on',Number(b.dataset.id)===cur));}
+async function loadTickets(){if(MODE!=='client')return;const r=await fetch(B+'/tickets');if(!r.ok)return;tickets=await r.json();
+ const L=document.getElementById('tlist');L.innerHTML=tickets.length?tickets.map(t=>`<button class="it" data-id="${t.id}" onclick="openTicket(${t.id})"><b>#${t.id} ${esc(t.title)}</b><small><span class="tag ${t.status}">${LAB[t.status]||t.status}</span>${t.risk&&t.risk.pct>=100?'<span class="tag risk">SLA</span>':''}<span>${fmt(t.last_at||t.created_at)}</span></small></button>`).join(''):'<div class="sys">No requests yet.</div>';markList();}
+async function openTicket(id){const r=await fetch(B+'/tickets/'+id);if(!r.ok)return;const t=await r.json();cur=id;setHead(t);log.innerHTML='';t.messages.forEach(m=>add(m.who,m.text,m.at));markList();}
 async function send(e){e.preventDefault();const text=T.value.trim();const f=IMG.files[0];if(!text&&!f)return;
- add('you',text||'(photo)',null,pendingImg);T.value='';const fd=new FormData();fd.append('text',text);if(f)fd.append('image',f);IMG.value='';pendingImg=null;
+ add('you',text||'(photo)',null,pendingImg);T.value='';const fd=new FormData();fd.append('text',text);if(f)fd.append('image',f);if(cur)fd.append('ticket',cur);IMG.value='';pendingImg=null;
  TY.textContent='Service desk is typing…';
  try{const r=await fetch(B+'/say',{method:'POST',body:fd});const j=await r.json();TY.textContent='';
-  if(!r.ok){add('desk',j.error||'Something went wrong. Please try again.');return;}add('desk',j.text);if(MODE==='client')loadTickets();}
+  if(!r.ok){add('desk',j.error||'Something went wrong. Please try again.');return;}add('desk',j.text,null,null,j.ticket);
+  if(cur&&j.status){const t=tickets.find(x=>x.id===cur);setHead({...(t||{}),id:cur,title:(t||{}).title,status:j.status,channel:'web'});}
+  loadTickets();}
  catch(err){TY.textContent='';add('desk','Could not reach the desk. Please try again.');}}
-function since(){try{return localStorage.getItem('support_clear')||''}catch(e){return ''}}
-function clearChat(){try{localStorage.setItem('support_clear',new Date().toISOString().slice(0,16))}catch(e){}log.innerHTML='<div class="sys">Chat cleared. Your tickets are still on the desk.</div>';}
-async function load(){try{const r=await fetch(B+'/history');if(r.status===401){location.reload();return;}const rows=await r.json();const s=since();rows.filter(m=>!s||m.at>s).forEach(m=>add(m.who,m.text,m.at));}catch(e){}}
-async function poll(){try{const r=await fetch(B+'/updates');if(r.ok){(await r.json()).forEach(m=>{add(m.who,m.text,m.at);if(cur&&m.ticket===cur)add(m.who,m.text,m.at,null,document.getElementById('dlog'));});}}catch(e){}}
-function show(v){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('on',x.id===v));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.textContent.toLowerCase().startsWith(v==='chat'?'chat':'my')));if(v==='tickets')loadTickets();}
-const LAB={open:'Open',waiting_user:'Waiting for you',waiting_approval:'Waiting for approval',escalated:'With an engineer',resolved:'Resolved'};
-async function loadTickets(){const r=await fetch(B+'/tickets');if(!r.ok)return;const rows=await r.json();
- document.getElementById('tlist').innerHTML='<table><thead><tr><th>#</th><th>Request</th><th>Status</th><th>Last update</th></tr></thead><tbody>'+rows.map(t=>`<tr onclick="openTicket(${t.id})"><td class="mono">${t.id}</td><td>${esc(t.title)}</td><td><span class="tag ${t.status}">${LAB[t.status]||t.status}</span>${t.risk&&t.risk.pct>=100?' <span class="tag risk">SLA</span>':''}</td><td class="muted">${(t.last_at||t.created_at).replace('T',' ')}</td></tr>`).join('')+'</tbody></table>'+(rows.length?'':'<p class="muted">No requests yet.</p>');}
-function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-async function openTicket(id){const r=await fetch(B+'/tickets/'+id);if(!r.ok)return;const t=await r.json();cur=id;
- document.getElementById('dTitle').textContent='#'+t.id+' · '+t.title.split('\\n')[0].slice(0,80);const st=document.getElementById('dStatus');st.textContent=LAB[t.status]||t.status;st.className='tag '+t.status;
- document.getElementById('dMeta').textContent='opened '+t.created_at.replace('T',' ')+' · via '+t.channel+(t.resolution?' · '+t.resolution:'');
- document.getElementById('dClose').style.display=t.status==='resolved'?'none':'';
- const dl=document.getElementById('dlog');dl.innerHTML='';t.messages.forEach(m=>add(m.who,m.text,m.at,null,dl));
- const S=document.getElementById('stars');if(t.status==='resolved'){S.style.display='';S.innerHTML='<span class="muted" style="font-size:12px">How did we do?</span> '+[1,2,3,4,5].map(n=>`<button class="${t.rating&&n<=t.rating?'on':''}" onclick="rate(${n})">★</button>`).join('');}else{S.style.display='none';}
- document.getElementById('tlist').style.display='none';document.getElementById('detail').classList.add('on');}
-function backToList(){cur=null;document.getElementById('detail').classList.remove('on');document.getElementById('tlist').style.display='';loadTickets();}
-async function reply(e){e.preventDefault();const ta=document.getElementById('dt');const text=ta.value.trim();if(!text||!cur)return;const dl=document.getElementById('dlog');add('you',text,null,null,dl);ta.value='';
- const fd=new FormData();fd.append('text',text);fd.append('ticket',cur);const r=await fetch(B+'/say',{method:'POST',body:fd});const j=await r.json();add('desk',j.text||j.error,null,null,dl);if(j.status){const st=document.getElementById('dStatus');st.textContent=LAB[j.status]||j.status;st.className='tag '+j.status;}}
-async function closeTicket(){if(!cur||!confirm('Close this request?'))return;const fd=new FormData();fd.append('note','');await fetch(B+'/tickets/'+cur+'/close',{method:'POST',body:fd});openTicket(cur);}
+async function poll(){try{const r=await fetch(B+'/updates');if(r.ok){const rows=await r.json();rows.forEach(m=>{if(cur===null||m.ticket===cur)add(m.who,m.text,m.at,null,m.ticket);});if(rows.length)loadTickets();}}catch(e){}}
+async function closeTicket(){if(!cur||!confirm('Close this request?'))return;const fd=new FormData();fd.append('note','');await fetch(B+'/tickets/'+cur+'/close',{method:'POST',body:fd});openTicket(cur);loadTickets();}
 async function rate(n){if(!cur)return;const fd=new FormData();fd.append('rating',n);await fetch(B+'/tickets/'+cur+'/rate',{method:'POST',body:fd});openTicket(cur);}
-if(MODE==='client')document.getElementById('tabTickets').style.display='';
-load();setInterval(poll,5000);
+loadTickets();setInterval(poll,5000);
 </script>
 """
