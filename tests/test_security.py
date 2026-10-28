@@ -72,3 +72,17 @@ def test_only_l3_can_touch_servers():
     for name in ("find_vulnerable_servers", "apply_patch", "verify_patch", "rollback_patch"):
         for tier in ("L1", "L2", "L4"):
             assert name not in {s["function"]["name"] for s in AGENTS[tier].tool_specs()}
+
+
+def test_integration_api_is_closed_on_a_public_desk_without_a_key(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import security
+    from app.main import app
+    monkeypatch.setattr(security, "API_KEY", "")
+    monkeypatch.setattr(security, "_local_install", lambda: False)        # as on https://desk.example.com
+    c = TestClient(app)
+    assert c.post("/messages", json={"requester": "+15551110001", "text": "hi"}).status_code == 403
+    assert c.post("/proactive/run").status_code == 403
+    monkeypatch.setattr(security, "API_KEY", "k-123")
+    assert c.post("/proactive/run").status_code == 401
+    assert c.post("/proactive/run", headers={"X-API-Key": "k-123"}).status_code == 200

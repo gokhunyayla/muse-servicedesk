@@ -49,13 +49,23 @@ def cookie_secure() -> bool:
 API_KEY = ""     # tests may monkeypatch this; otherwise the console/.env value is used
 
 
+def _local_install() -> bool:
+    from urllib.parse import urlparse
+    from app.config import auth_settings
+    host = (urlparse(auth_settings.public_url).hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith((".localhost", ".test"))
+
+
 def api_key(request: Request) -> None:
-    """When an integration API key is set (Settings → Channels or .env), machine endpoints require
-    `X-API-Key`; unset means open (local dev)."""
+    """Machine endpoints (/messages, /voice, /image, /camera, /proactive/run …) require `X-API-Key` once a key is
+    set (Settings → Channels or .env). Without a key they stay open only on a local install; a public desk
+    refuses them, so an unset key never leaves a door open on the internet."""
     from app import vault
     key = API_KEY or vault.get("API_KEY")
     if not key:
-        return
+        if _local_install():
+            return
+        raise HTTPException(403, "integration API is closed: set an API key in Settings → Channels")
     given = request.headers.get("x-api-key", "")
     if not hmac.compare_digest(given, key):
         raise HTTPException(401, "invalid API key")
