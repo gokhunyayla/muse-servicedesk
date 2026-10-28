@@ -278,7 +278,7 @@ def users_page(admin: User = Depends(admin_user), info: str = "", error: str = "
 <label for="irole">Role</label><select id="irole" name="role"><option value="agent">Support agent</option><option value="admin">Admin</option></select>
 <div class="row end"><button type="button" class="btn" onclick="closeModal('inviteModal')">Cancel</button><button class="btn primary slim" type="submit">Send invitation</button></div></form></div></div>
 <div class="modal {'on' if link else ''}" id="linkModal"><div class="box"><h3>Invitation link</h3>
-<p class="muted">SMTP is not configured, so the e-mail was not sent. Share this link with them yourself; it is valid 24 hours.</p>
+<p class="muted">The same link went by e-mail when SMTP is configured. If their mailbox does not exist yet or the mail bounces, share it yourself; it is valid 24 hours.</p>
 <input value="{_esc(link)}" readonly onclick="this.select()">
 <div class="row end"><button type="button" class="btn" onclick="navigator.clipboard&&navigator.clipboard.writeText('{_esc(link)}');this.textContent='Copied'">Copy</button><button type="button" class="btn primary slim" onclick="closeModal('linkModal')">Done</button></div></div></div>"""
     return _page("Desk users", body, wide=True, user=admin, active="users")
@@ -296,7 +296,7 @@ def reinvite(request: Request, user_id: int, admin: User = Depends(admin_user)):
         mailed = send_mail(u.email, "Muse ServiceDesk: set your password",
                            f"Hello {u.name},\n\nSet your password here (valid 24 hours):\n{link}\n")
         audit(db, admin.email, "user.reinvited", target=u.email, ip=_ip(request))
-    return RedirectResponse("/users?info=Invitation+sent" + ("" if mailed else f"&link={link}"), 303)
+    return RedirectResponse(f"/users?info={'Invitation+sent' if mailed else 'E-mail+not+sent'}&link={link}", 303)
 
 
 @router.get("/clients", response_class=HTMLResponse)
@@ -407,7 +407,7 @@ def add_user(request: Request, admin: User = Depends(admin_user), name: str = Fo
                            f"Hello {u.name},\n\n{admin.name} invited you to the service desk console as {role}. "
                            f"Set your password here (valid 24 hours):\n{link}\n")
     q = f"info={role.title()}+{name.strip().replace(' ', '+')}+invited"
-    return RedirectResponse(f"/users?{q}" + ("" if mailed else f"&link={link}"), 303)
+    return RedirectResponse(f"/users?{q}&link={link}", 303)      # the admin always gets the link too (mail may bounce)
 
 
 @router.post("/users/{user_id}/role")
