@@ -107,7 +107,7 @@ def verification_config() -> dict:
 def send_verification(ctx: Ctx, employee_no: str) -> dict:
     import hashlib
     import secrets
-    from datetime import timedelta
+    from datetime import datetime, timedelta
     from app.db import Setting, _now
     u = systems.USERS.get(employee_no)
     if not u:
@@ -121,10 +121,13 @@ def send_verification(ctx: Ctx, employee_no: str) -> dict:
     via, to = ("email", email) if (requester.startswith("+") or not phone) and email else ("whatsapp", phone)
     if not to:
         return {"ok": False, "error": "no second channel on file for this employee"}
+    row = ctx.db.get(Setting, _strong_key(ctx.ticket.id))
+    if row is not None and row.value and datetime.fromisoformat(row.value["until"]) > _now() + timedelta(minutes=8):
+        return {"ok": False, "error": "a code was sent less than 2 minutes ago and is still valid; do not send another — "
+                                      "call check_verification with the code the employee typed"}
     code = f"{secrets.randbelow(1_000_000):06d}"
     want_voice = bool(verification_config().get("voice_phrase"))
     phrase = (" ".join(secrets.choice(PHRASE_WORDS) for _ in range(3)) + f" {secrets.randbelow(90) + 10}") if want_voice else ""
-    row = ctx.db.get(Setting, _strong_key(ctx.ticket.id))
     value = {"code_hash": hashlib.sha256(f"{ctx.ticket.id}:{code}".encode()).hexdigest(), "phrase": phrase,
              "until": (_now() + timedelta(minutes=10)).isoformat(), "via": via, "to": to, "tries": 0}
     if row is None:

@@ -127,6 +127,12 @@ def test_default_reset_verification_is_identity_plus_code_on_the_other_channel(m
         assert results[1]["ok"] and "phrase_to_say" not in results[1] and results[1]["code_sent_via"] == "email"
         tid = t.id
     code = mails[-1][1].split("code: ")[1][:6]
+    from app.tools import Ctx, run_tool
+    with session() as db:                                                           # a second send right away is refused
+        from app.db import Ticket
+        out = run_tool(Ctx(db=db, ticket=db.get(Ticket, tid), agent="L1"), "send_verification", {"employee_no": "E1001"})
+        assert out["ok"] is False and "already" in out["error"] or "do not send another" in out["error"]
+    assert len(mails) == 1
     set_llm(ScriptedLLM([Reply(tool_calls=[call("check_verification", code=code)]),
                          Reply(tool_calls=[call("reset_password", employee_no="E1001")]), Reply(text="Geçici şifreniz: …")]))
     with session() as db:
