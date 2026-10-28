@@ -150,13 +150,13 @@ page at `http://localhost:1002/support-agent` runs the same agents with no publi
 With Entra connected, employees are the tenant's users: the employee number is Entra's `employeeId`, the phone
 is `mobilePhone`; a birth year is read from `extensionAttribute1` when present, otherwise identity is the
 sender binding (the number or address the employee writes from must be theirs) plus the one-time code.
-Without Entra, identity checks ask for employee no + birth year. Say e.g. *"Ayşe Demir, E1001, 1990, TR-LT-101"*.
+Without Entra, identity checks ask for employee no + birth year. Say e.g. *"Emma Johnson, E1001, 1990, LT-101"*.
 
 | Employee no | Name | Birth year | Device | Dept | Manager | Seeded state |
 |---|---|---|---|---|---|---|
-| E1001 | Ayşe Demir | 1990 | TR-LT-101 | Sales | E1002 | VPN profile expired |
-| E1002 | Mehmet Kaya | 1985 | TR-LT-102 | Sales | E1003 | disk 97% full, SAP `SD_DISPLAY` |
-| E1003 | Zeynep Arslan | 1994 | TR-LT-103 | Finance | — | SAP `FI_DISPLAY`, `FI_POST` |
+| E1001 | Emma Johnson | 1990 | LT-101 | Sales | E1002 | VPN profile expired |
+| E1002 | Liam Carter | 1985 | LT-102 | Sales | E1003 | disk 97% full, SAP `SD_DISPLAY` |
+| E1003 | Olivia Bennett | 1994 | LT-103 | Finance | — | SAP `FI_DISPLAY`, `FI_POST` |
 
 Useful seeds: licenses `M365-E3`, `Teams-Phone`, `Visio` are self-service; `Project`, `Adobe-CC`, `AutoCAD` need manager
 approval (`ONAY <id>` over chat). SAP roles: `SD_CREATE`, `MM_PURCHASE` go through L3 + approval. Advisory

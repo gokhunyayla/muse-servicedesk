@@ -73,7 +73,7 @@ def test_agent_run_uses_connector_tool_and_logs_it(desk, tmp_path):
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "mcp.fw.unblock", {"ip": "10.9.9.9", "reason": "false positive"})]),
                          Reply(text="IP serbest bırakıldı.")]))
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", "10.9.9.9 adresi firewall'da engelli, açar mısınız")
+        t, answer = handle_message(db, "+15551110001", "10.9.9.9 adresi firewall'da engelli, açar mısınız")
         res = [e for e in t.events if e.kind == "tool_result" and e.content == "mcp.fw.unblock"][0]
     assert res.data["ok"] and res.data["data"]["unblocked"] is True and "serbest" in answer
 

@@ -1,6 +1,6 @@
 """Employee channels besides WhatsApp: the web chat (portal) and e-mail.
 
-A requester address tells the channel apart: ``+90…`` is a WhatsApp number, ``name@…`` an e-mail address,
+A requester address tells the channel apart: ``+<country>…`` is a WhatsApp number, ``name@…`` an e-mail address,
 anything else an employee number from the integration API. Tickets remember where the employee last wrote
 from (``Ticket.channel``), so replies and reminders go back the same way: WhatsApp sends, e-mail sends,
 and the web chat picks its messages up by polling.
@@ -25,7 +25,7 @@ DEFAULT_EMAIL = {"enabled": False, "provider": "imap",   # "imap" = own mailbox 
                  "imap_host": "", "imap_port": 993, "user": "", "folder": "INBOX", "poll_minutes": 2,
                  "allowed": "",      # optional: comma-separated sender domains/addresses; empty = anyone
                  "last_uid": 0}      # mailbox position: only mail that arrives after the channel is enabled is read
-DEFAULT_PORTAL = {"enabled": True, "title": "IT Service Desk", "note": "", "country": "+90"}
+DEFAULT_PORTAL = {"enabled": True, "title": "IT Service Desk", "note": "", "country": ""}   # e.g. +44: added to local numbers; empty = numbers must include the country code
 _last_poll = 0.0
 
 

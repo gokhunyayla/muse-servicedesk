@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 
 from app.db import Ticket, log
-from app.i18n import detect, t as tr_, ticket_lang
+from app.i18n import DEFAULT_LANG, detect, t as tr_, ticket_lang
 from app.llm import ContentFiltered, get_llm
 from app.tools import Ctx, run_tool, tools_for
 
@@ -563,7 +563,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
             held.channel = channel
             if pend["pending"]:
                 return handle_message(db, requester, pend["pending"], image, mime, extra_images, force_new=True, channel=channel)
-            return None, tr_("resume_new", detect(text, None) or "tr")
+            return None, tr_("resume_new", detect(text, None) or DEFAULT_LANG)
         elif pend.get("pending"):
             text = f"{pend['pending']}\n{text}"             # their answer to our clarifying question, with what they said first
     elif pinned is None and not is_ack(text) and not is_greeting(text):
@@ -649,7 +649,7 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
         ticket = _closing_exchange(db, requester, text)
     if ticket is None:
         if not _is_request(db, text):                       # small talk: answer, open nothing
-            return None, tr_("greeting", detect(text, None) or "tr")
+            return None, tr_("greeting", detect(text, None) or DEFAULT_LANG)
         ticket = _reopen_if_same(db, requester, text, channel)   # the same problem back within 48 h: reopen, don't duplicate
     if ticket is None:
         ticket = Ticket(requester=requester, title=text[:255], channel=channel)

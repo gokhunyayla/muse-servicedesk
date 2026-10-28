@@ -37,7 +37,7 @@ def test_phishing_triage_quarantines_tenant_wide_and_blocks_sender():
         Reply(text="Oltalama. Tüm kutulardan kaldırdım, göndereni engelledim. Tıkladıysanız söyleyin."),
     ]))
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", "bu mail gerçek mi?")
+        t, answer = handle_message(db, "+15551110001", "bu mail gerçek mi?")
         res = dict((e.content, e.data) for e in t.events if e.kind == "tool_result")
     assert res["analyze_email"]["verdict"] == "phishing"
     assert res["quarantine_email"]["mailboxes_affected"] == 17 and res["quarantine_email"]["tenant_wide"]
@@ -46,16 +46,16 @@ def test_phishing_triage_quarantines_tenant_wide_and_blocks_sender():
 
 def test_malware_response_isolates_first_then_scans_and_releases():
     set_llm(ScriptedLLM([
-        Reply(tool_calls=[call("handoff_L2", summary="TR-LT-101 fidye notu görüyor")]),
-        Reply(tool_calls=[call("isolate_device", hostname="TR-LT-101")]),                 # L2
-        Reply(tool_calls=[call("collect_evidence", hostname="TR-LT-101")]),
-        Reply(tool_calls=[call("run_malware_scan", hostname="TR-LT-101")]),
-        Reply(tool_calls=[call("release_device", hostname="TR-LT-101")]),
+        Reply(tool_calls=[call("handoff_L2", summary="LT-101 fidye notu görüyor")]),
+        Reply(tool_calls=[call("isolate_device", hostname="LT-101")]),                 # L2
+        Reply(tool_calls=[call("collect_evidence", hostname="LT-101")]),
+        Reply(tool_calls=[call("run_malware_scan", hostname="LT-101")]),
+        Reply(tool_calls=[call("release_device", hostname="LT-101")]),
         Reply(text="Temizlendi, serbest bırakıldı."),
         Reply(text="Cihazınız temizlendi ve ağa geri alındı."),
     ]))
     with session() as db:
-        t, _ = handle_message(db, "+905551110001", "ekranda dosyalarınız şifrelendi yazıyor!")
+        t, _ = handle_message(db, "+15551110001", "ekranda dosyalarınız şifrelendi yazıyor!")
         l2 = [(e.content, e.data) for e in t.events if e.kind == "tool_result" and e.actor == "L2"]
     order = [c for c, _ in l2]
     assert order.index("isolate_device") < order.index("run_malware_scan") < order.index("release_device")
@@ -63,7 +63,7 @@ def test_malware_response_isolates_first_then_scans_and_releases():
     assert d["isolate_device"]["isolated"] is True
     assert d["collect_evidence"]["suspicious_processes"][0]["name"] == "svch0st.exe"
     assert d["run_malware_scan"]["findings"][0]["action"] == "quarantined"
-    assert "TR-LT-101" not in systems._isolated
+    assert "LT-101" not in systems._isolated
 
 
 def test_l1_cannot_isolate_devices():

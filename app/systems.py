@@ -7,13 +7,13 @@ import os
 import secrets
 
 USERS = {
-    "E1001": {"name": "Ayşe Demir", "phone": "+905551110001", "birth_year": 1990, "device": "TR-LT-101",
+    "E1001": {"name": "Emma Johnson", "phone": "+15551110001", "birth_year": 1990, "device": "LT-101",
               "department": "Sales", "manager": "E1002", "licenses": ["M365-E3"], "groups": ["sales-tr"],
               "sap_roles": [], "enabled": True},
-    "E1002": {"name": "Mehmet Kaya", "phone": "+905551110002", "birth_year": 1985, "device": "TR-LT-102",
+    "E1002": {"name": "Liam Carter", "phone": "+15551110002", "birth_year": 1985, "device": "LT-102",
               "department": "Sales", "manager": "E1003", "licenses": ["M365-E3", "Visio"], "groups": ["sales-tr", "managers"],
               "sap_roles": ["SD_DISPLAY"], "enabled": True},
-    "E1003": {"name": "Zeynep Arslan", "phone": "+905551110003", "birth_year": 1994, "device": "TR-LT-103",
+    "E1003": {"name": "Olivia Bennett", "phone": "+15551110003", "birth_year": 1994, "device": "LT-103",
               "department": "Finance", "manager": None, "licenses": ["M365-E3"], "groups": ["finance", "managers"],
               "sap_roles": ["FI_DISPLAY", "FI_POST"], "enabled": True},
 }
@@ -97,9 +97,9 @@ def create_user(name: str, department: str, manager: str, phone: str) -> str:
     return emp
 
 DEVICES = {
-    "TR-LT-101": {"vpn_profile": "expired", "online": True, "dns_ok": True, "disk_used_pct": 61, "os_patch_days": 12},
-    "TR-LT-102": {"vpn_profile": "valid", "online": True, "dns_ok": False, "disk_used_pct": 97, "os_patch_days": 5},
-    "TR-LT-103": {"vpn_profile": "valid", "online": False, "dns_ok": True, "disk_used_pct": 40, "os_patch_days": 48},
+    "LT-101": {"vpn_profile": "expired", "online": True, "dns_ok": True, "disk_used_pct": 61, "os_patch_days": 12},
+    "LT-102": {"vpn_profile": "valid", "online": True, "dns_ok": False, "disk_used_pct": 97, "os_patch_days": 5},
+    "LT-103": {"vpn_profile": "valid", "online": False, "dns_ok": True, "disk_used_pct": 40, "os_patch_days": 48},
 }
 
 
@@ -111,12 +111,12 @@ def device_owner(hostname: str) -> tuple[str, dict] | None:
 
 
 WARRANTY = {   # hostname -> vendor warranty record
-    "TR-LT-101": {"vendor": "Dell", "service_tag": "7KX2Q93", "valid_until": "2027-03-15"},
-    "TR-LT-102": {"vendor": "Lenovo", "service_tag": "PF3M8K1", "valid_until": "2025-11-30"},
-    "TR-LT-103": {"vendor": "Dell", "service_tag": "9HT4R21", "valid_until": "2027-08-01"},
+    "LT-101": {"vendor": "Dell", "service_tag": "7KX2Q93", "valid_until": "2027-03-15"},
+    "LT-102": {"vendor": "Lenovo", "service_tag": "PF3M8K1", "valid_until": "2025-11-30"},
+    "LT-103": {"vendor": "Dell", "service_tag": "9HT4R21", "valid_until": "2027-08-01"},
 }
 
-LOANERS = {"TR-LN-01": "available", "TR-LN-02": "available", "TR-LN-03": "assigned"}
+LOANERS = {"LN-01": "available", "LN-02": "available", "LN-03": "assigned"}
 
 _cases: list[dict] = []
 _shipments: list[dict] = []
@@ -280,7 +280,7 @@ def user_by_phone(phone: str) -> tuple[str, dict] | None:
 
 
 def user_email(emp: str) -> str:
-    """Directory e-mail: explicit when present, otherwise name-derived (ayse.demir@example.com)."""
+    """Directory e-mail: explicit when present, otherwise name-derived (emma.johnson@example.com)."""
     u = (get_user(emp) if _graph() else USERS.get(emp)) or {}
     if u.get("email"):
         return u["email"]

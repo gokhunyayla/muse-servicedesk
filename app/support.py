@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app import systems
+from app.i18n import DEFAULT_LANG
 from app.agents import handle_message
 from app.channels import portal_config
 from app.db import Client, ClientCode, Event, Outbound, Ticket, _now, log, session
@@ -34,7 +35,7 @@ CODE_MINUTES = 10
 # ---- identity ------------------------------------------------------------------------------------
 
 def normalise(contact: str) -> str:
-    """'0555 111 00 01' → '+905551110001'; e-mail lower-cased."""
+    """'+1 555 111 0001' → '+15551110001'; local numbers get the configured country code; e-mail lower-cased."""
     c = (contact or "").strip()
     if "@" in c:
         return c.lower()
@@ -42,8 +43,13 @@ def normalise(contact: str) -> str:
     if not digits:
         return ""
     if not digits.startswith("+"):
-        cc = str(portal_config().get("country", "+90"))
-        digits = cc + digits[1:] if digits.startswith("0") and len(digits) == 11 else cc + digits if len(digits) == 10 else "+" + digits
+        cc = str(portal_config().get("country") or "")
+        if cc:
+            digits = cc + digits.lstrip("0")
+        elif digits.startswith("00"):
+            digits = "+" + digits[2:]
+        else:
+            return ""                        # a local number with no country configured: ask for the full number
     return digits if re.fullmatch(r"\+[0-9]{8,15}", digits) else ""
 
 
@@ -241,8 +247,8 @@ CODE_RE = re.compile(r"\b(\d{6})\b")
 def identify(who: dict, text: str) -> tuple[str, dict]:
     """The assistant's own small talk before the desk: ask for a contact, send a code, check it; fall back to
     employee number + birth year against the directory. Returns (reply, updated session)."""
-    from app.i18n import detect
-    lang = detect(text, None) or who.get("lang") or "tr"
+    from app.i18n import DEFAULT_LANG, detect
+    lang = detect(text, None) or who.get("lang") or DEFAULT_LANG
     who = {**who, "lang": lang}
     stage = who.get("stage", "ask_contact")
     tr = lang == "tr"
@@ -278,8 +284,8 @@ def identify(who: dict, text: str) -> tuple[str, dict]:
     # ask_contact
     m = CONTACT_RE.search(text)
     if not m:
-        return ("Sizi tanıyabilmem için telefon numaranızı ya da iş e-postanızı yazar mısınız? Örn. +90 5xx xxx xx xx" if tr else
-                "To recognise you I need your mobile number or work e-mail, e.g. +90 5xx xxx xx xx"), who
+        return ("Sizi tanıyabilmem için telefon numaranızı ya da iş e-postanızı yazar mısınız? Örn. +44 7700 900123" if tr else
+                "To recognise you I need your mobile number or work e-mail, e.g. +44 7700 900123"), who
     contact = normalise(m.group(0))
     with session() as db:
         known = recognise(db, contact) if contact else None
@@ -312,14 +318,14 @@ def _check_code(contact: str, code: str) -> bool:
 
 def _welcome(who: dict) -> tuple[str, dict]:
     """Identity confirmed: create/refresh the client record, greet with what the desk knows."""
-    tr = who.get("lang", "tr") == "tr"
+    tr = who.get("lang", DEFAULT_LANG) == "tr"
     with session() as db:
         client = _ensure_client(db, who)
         client.last_login_at = _now()
         addrs = [a for a in (client.phone, client.email) if a]
         open_t = db.query(Ticket).filter(Ticket.requester.in_(addrs), Ticket.status != "resolved").order_by(Ticket.id.desc()).all() if addrs else []
         new = {"mode": "client", "client_id": client.id, "name": client.name, "phone": client.phone, "email": client.email,
-               "employee_no": client.employee_no, "lang": who.get("lang", "tr")}
+               "employee_no": client.employee_no, "lang": who.get("lang", DEFAULT_LANG)}
         u = (systems.get_user(client.employee_no) if client.employee_no else None) or {}
         device = u.get("device")
         from app.agents import resume_offer

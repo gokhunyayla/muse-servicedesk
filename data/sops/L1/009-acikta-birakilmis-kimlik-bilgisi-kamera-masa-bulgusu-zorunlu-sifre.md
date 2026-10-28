@@ -3,7 +3,7 @@
 # Açıkta bırakılmış kimlik bilgisi (kamera/masa bulgusu)
 
 ## Symptom
-Camera/compliance finding shows a password, sticky note, unlocked screen showing mail, or credential in photo/message. Example: CAM-SALES-01, credential_note for ayse.demir, plus unlocked_screen with Outlook open. Treat any readable password as COMPROMISED - notification alone is NOT closure.
+Camera/compliance finding shows a password, sticky note, unlocked screen showing mail, or credential in photo/message. Example: CAM-SALES-01, credential_note for emma.johnson, plus unlocked_screen with Outlook open. Treat any readable password as COMPROMISED - notification alone is NOT closure.
 
 ## Checks (L1, immediate, do not wait for user reply to start containment)
 1. collect_evidence / add_note: record camera, location, time, username seen; NEVER repeat the full password in messages to user or broadcast.

@@ -8,11 +8,11 @@ from app.db import Event, Ticket, init_db, session
 from app.sla import put_setting
 from app.tools import Ctx, run_tool
 
-ME = {"id": "u-1", "displayName": "Ayşe Demir", "userPrincipalName": "ayse.demir@cloudrium.com", "mail": "ayse.demir@cloudrium.com",
-      "mobilePhone": "+905551110001", "businessPhones": [], "employeeId": "E1001", "department": "Sales", "jobTitle": "Rep",
+ME = {"id": "u-1", "displayName": "Emma Johnson", "userPrincipalName": "emma.johnson@cloudrium.com", "mail": "emma.johnson@cloudrium.com",
+      "mobilePhone": "+15551110001", "businessPhones": [], "employeeId": "E1001", "department": "Sales", "jobTitle": "Rep",
       "accountEnabled": True, "onPremisesExtensionAttributes": {}}
-BOSS = {**ME, "id": "u-2", "displayName": "Mehmet Kaya", "userPrincipalName": "mehmet.kaya@cloudrium.com", "mail": "mehmet.kaya@cloudrium.com",
-        "mobilePhone": "+905551110002", "employeeId": "E1002"}
+BOSS = {**ME, "id": "u-2", "displayName": "Liam Carter", "userPrincipalName": "liam.carter@cloudrium.com", "mail": "liam.carter@cloudrium.com",
+        "mobilePhone": "+15551110002", "employeeId": "E1002"}
 
 
 class FakeGraph:
@@ -86,7 +86,7 @@ def fake(tmp_path, monkeypatch):
     return fg
 
 
-def _ctx(db, requester="+905551110001", verified=False):
+def _ctx(db, requester="+15551110001", verified=False):
     t = Ticket(requester=requester, title="x", verified=verified)
     db.add(t)
     db.flush()
@@ -94,12 +94,12 @@ def _ctx(db, requester="+905551110001", verified=False):
 
 
 def test_directory_reads_come_from_the_tenant(fake):
-    assert systems.user_by_contact("+905551110001")[0] == "E1001"
+    assert systems.user_by_contact("+15551110001")[0] == "E1001"
     rec = systems.get_user("E1001")
-    assert rec["name"] == "Ayşe Demir" and rec["manager"] == "E1002" and rec["groups"] == ["sales-tr"] and rec["source"] == "entra"
-    assert systems.user_email("E1001") == "ayse.demir@cloudrium.com" and systems.get_user("E9999") is None
+    assert rec["name"] == "Emma Johnson" and rec["manager"] == "E1002" and rec["groups"] == ["sales-tr"] and rec["source"] == "entra"
+    assert systems.user_email("E1001") == "emma.johnson@cloudrium.com" and systems.get_user("E9999") is None
     with session() as db:
-        r = run_tool(_ctx(db), "find_user", {"phone": "+905551110001"})
+        r = run_tool(_ctx(db), "find_user", {"phone": "+15551110001"})
         assert r["ok"] and r["employee_no"] == "E1001"
         r = run_tool(_ctx(db), "get_employee", {"employee_no": "E1001"})
         assert r["ok"] and r["department"] == "Sales" and r["licenses"] == ["O365_BUSINESS_ESSENTIALS"]
@@ -109,8 +109,8 @@ def test_identity_is_the_sender_binding_when_the_tenant_has_no_birth_year(fake):
     with session() as db:
         # the real directory has no birth year: the number the employee writes from must be theirs
         assert run_tool(_ctx(db), "verify_identity", {"employee_no": "E1001", "birth_year": 1990})["ok"] is True
-        r = run_tool(_ctx(db, requester="+905551110002"), "verify_identity", {"employee_no": "E1001", "birth_year": 1990})
-        assert r["ok"] is False and "Mehmet Kaya" in r["error"]
+        r = run_tool(_ctx(db, requester="+15551110002"), "verify_identity", {"employee_no": "E1001", "birth_year": 1990})
+        assert r["ok"] is False and "Liam Carter" in r["error"]
 
 
 def test_password_reset_and_sessions_hit_graph_only_after_strong_verification(fake):
@@ -146,7 +146,7 @@ def test_licences_and_groups_change_in_the_tenant(fake):
 def test_email_channel_through_the_microsoft_365_mailbox(fake, desk, monkeypatch):
     from app.llm import Reply, ScriptedLLM, set_llm
     put_setting("email", {**channels.DEFAULT_EMAIL, "enabled": True, "provider": "graph", "poll_minutes": 1})
-    fake.inbox = [{"id": "m1", "subject": "VPN bağlanmıyor", "from": {"emailAddress": {"address": "ayse.demir@cloudrium.com", "name": "Ayşe"}},
+    fake.inbox = [{"id": "m1", "subject": "VPN bağlanmıyor", "from": {"emailAddress": {"address": "emma.johnson@cloudrium.com", "name": "Emma"}},
                    "receivedDateTime": "2026-10-28T12:00:05Z", "body": {"contentType": "html", "content": "<p>VPN açılmıyor</p><br><div>> eski alıntı</div>"},
                    "hasAttachments": False, "internetMessageId": "<m1@x>"}]
     assert channels.poll_email(force=True) == 0                    # first run only records the position, never the backlog
@@ -156,13 +156,13 @@ def test_email_channel_through_the_microsoft_365_mailbox(fake, desk, monkeypatch
     assert channels.poll_email(force=True) == 1
     with session() as db:
         t = db.query(Ticket).one()
-        assert t.requester == "ayse.demir@cloudrium.com" and t.channel == "email"
+        assert t.requester == "emma.johnson@cloudrium.com" and t.channel == "email"
         first = db.query(Event).filter(Event.ticket_id == t.id).order_by(Event.id).first()
         assert "eski alıntı" not in (first.content or "")
-    assert fake.mail and fake.mail[-1]["subject"].startswith("[#1] Re: VPN") and fake.mail[-1]["toRecipients"][0]["emailAddress"]["address"] == "ayse.demir@cloudrium.com"
+    assert fake.mail and fake.mail[-1]["subject"].startswith("[#1] Re: VPN") and fake.mail[-1]["toRecipients"][0]["emailAddress"]["address"] == "emma.johnson@cloudrium.com"
     assert graph.config()["last_received"] == "2026-10-28T12:00:05Z"
     # outbound desk messages to that employee go the same way
-    ok, err = channels.send_email("ayse.demir@cloudrium.com", "[#1] Re: VPN", "Merhaba")
+    ok, err = channels.send_email("emma.johnson@cloudrium.com", "[#1] Re: VPN", "Merhaba")
     assert ok and len(fake.mail) == 2
 
 
@@ -181,4 +181,27 @@ def test_simulated_directory_stays_when_graph_is_off(tmp_path, monkeypatch):
     init_db(f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setattr(vault, "KEY_FILE", tmp_path / "k")
     assert not graph.enabled()
-    assert systems.get_user("E1001")["name"] == "Ayşe Demir" and systems.license_catalog() is systems.LICENSE_CATALOG
+    assert systems.get_user("E1001")["name"] == "Emma Johnson" and systems.license_catalog() is systems.LICENSE_CATALOG
+
+
+def test_attribute_mapping_and_tenant_country_for_new_accounts(fake, desk):
+    # the admin maps the employee number and birth year to extension attributes; nothing assumes a country
+    desk.post("/settings/graph", data={"enabled": "1", "tenant": "t", "client_id": "c", "mailbox": "support@cloudrium.com",
+                                       "domain": "cloudrium.com", "usage_location": "", "employee_attr": "extensionAttribute2",
+                                       "birth_year_attr": "extensionAttribute3"}, follow_redirects=False)
+    assert graph.config()["employee_attr"] == "extensionAttribute2" and graph.config()["usage_location"] == ""
+    u = {**ME, "employeeId": None, "onPremisesExtensionAttributes": {"extensionAttribute2": "HR-77", "extensionAttribute3": "1990"}}
+    assert graph._emp_no(u) == "HR-77" and graph._record(u)["birth_year"] == 1990
+    created = {}
+
+    def fake_call(method, path, json=None, params=None, headers=None):
+        if path == "/organization":
+            return {"value": [{"countryLetterCode": "GB"}]}
+        if method == "POST" and path == "/users":
+            created.update(json)
+            return {"id": "u-new"}
+        return fake(method, path, json, params, headers)
+    graph._call = fake_call
+    emp, upn, pw = graph.create_user("Noah Smith", "Sales", "", "")
+    assert upn == "noah.smith@cloudrium.com" and emp == upn and "employeeId" not in created
+    assert created["usageLocation"] == "GB"                       # the tenant's own country, not a fixed one

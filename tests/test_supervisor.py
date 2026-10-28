@@ -38,8 +38,8 @@ def seed(texts_by_phone):
 
 
 def test_pre_analysis_finds_clusters_and_failures():
-    seed([("+905551110001", "Outlook e-posta açılmıyor"), ("+905551110002", "Outlook e-posta sunucusu hata veriyor"),
-          ("+905551110003", "e-posta Outlook bağlanmıyor"), ("+905551110009", "yazıcı kağıt sıkıştırdı")])
+    seed([("+15551110001", "Outlook e-posta açılmıyor"), ("+15551110002", "Outlook e-posta sunucusu hata veriyor"),
+          ("+15551110003", "e-posta Outlook bağlanmıyor"), ("+15551110009", "yazıcı kağıt sıkıştırdı")])
     with session() as db:
         t = db.get(Ticket, 4)
         t.status, t.owner, t.resolution = "escalated", "human", "escalated: needs on-site"
@@ -50,8 +50,8 @@ def test_pre_analysis_finds_clusters_and_failures():
 
 
 def test_supervisor_merges_a_problem_drafts_a_sop_and_asks_a_human(monkeypatch):
-    seed([("+905551110001", "Outlook e-posta açılmıyor"), ("+905551110002", "Outlook e-posta sunucusu hata veriyor"),
-          ("+905551110003", "e-posta Outlook bağlanmıyor"), ("+905551110009", "projektör lambası yanmıyor")])
+    seed([("+15551110001", "Outlook e-posta açılmıyor"), ("+15551110002", "Outlook e-posta sunucusu hata veriyor"),
+          ("+15551110003", "e-posta Outlook bağlanmıyor"), ("+15551110009", "projektör lambası yanmıyor")])
     monkeypatch.setattr(supervisor, "search_web", lambda q, limit=6: [{"title": "Fix Outlook", "url": "https://vendor.example/kb", "snippet": "…"}])
     monkeypatch.setattr(supervisor.httpx, "get", lambda *a, **k: type("R", (), {"text": "<html><body>Repair the OST file via Control Panel.</body></html>"})())
     llm = ScriptedLLM([
@@ -114,7 +114,7 @@ def test_sla_at_risk_detection_and_supervisor_actions():
     from app.sla import at_risk
     from app.tools import Ctx
     # ticket 1: L1 holding it for 25 of 30 minutes → at risk (default 80%); ticket 2: waiting for approval
-    seed([("+905551110001", "VPN bağlanmıyor"), ("+905551110002", "Project lisansı lazım")])
+    seed([("+15551110001", "VPN bağlanmıyor"), ("+15551110002", "Project lisansı lazım")])
     with session() as db:
         from app.db import _now
         t1 = db.get(Ticket, 1)
@@ -139,11 +139,11 @@ def test_sla_at_risk_detection_and_supervisor_actions():
     set_llm(ScriptedLLM([Reply(text="L2 devraldım, teşhis başlıyor.")]))
     with session() as db:
         ctx = Ctx(db=db, ticket=None, agent="SUP")
-        assert supervisor.reassign_ticket(ctx, 1, "L2", "Run network_diagnostics on TR-LT-101")["owner"] == "L2"
+        assert supervisor.reassign_ticket(ctx, 1, "L2", "Run network_diagnostics on LT-101")["owner"] == "L2"
         assert db.get(Ticket, 1).owner == "L2"
         assert supervisor.remind_approver(ctx, 2)["approver"] == "E1002"
         assert supervisor.nudge_employee(ctx, 1, "Bağlantıyı tekrar dener misiniz?")["ok"]
         assert supervisor.bump_to_human(ctx, 1, "needs on-site")["status"] == "escalated"
         assert db.get(Ticket, 1).owner == "human"
         outs = [o.to for o in db.query(Outbound)]
-        assert "+905551110002" in outs and "+905551110001" in outs
+        assert "+15551110002" in outs and "+15551110001" in outs

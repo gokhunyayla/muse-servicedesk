@@ -324,7 +324,7 @@ def clients_page(admin: User = Depends(admin_user), info: str = "", error: str =
 <form method="post" action="/clients" id="clientForm">
 <label for="cname">Name</label><input id="cname" name="name" required>
 <label for="cemp">Employee no <small>(optional)</small></label><input id="cemp" name="employee_no">
-<label for="cphone">Mobile number</label><input id="cphone" name="phone" placeholder="+90 5xx xxx xx xx">
+<label for="cphone">Mobile number</label><input id="cphone" name="phone" placeholder="+44 7700 900123">
 <label for="cmail">Work e-mail</label><input id="cmail" name="email" type="email">
 <div class="row end"><button type="button" class="btn" onclick="closeModal('clientModal')">Cancel</button><button class="btn primary slim" type="submit" id="cmSave">Add client</button></div></form></div></div>
 <script>
@@ -615,7 +615,7 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <label class="check"><input type="radio" name="channel" value="whatsapp" {"checked" if c.get("channel")=="whatsapp" else ""} {dis}> WhatsApp</label>
 <label class="check"><input type="radio" name="channel" value="both" {"checked" if c.get("channel")=="both" else ""} {dis}> Both</label></div></div>
 <div class="srow"><div><b>E-mail recipients</b><small>Comma-separated addresses</small></div><input name="recipients" style="width:360px" value="{_esc(c.get('recipients',''))}" placeholder="it-manager@company.com, ciso@company.com" {dis}></div>
-<div class="srow"><div><b>WhatsApp recipients</b><small>Comma-separated numbers with country code. Free-form messages reach a number only within 24 h of its last message to the desk; outside that window Meta requires an approved template.</small></div><input name="whatsapp_recipients" style="width:360px" value="{_esc(c.get('whatsapp_recipients',''))}" placeholder="+905551234567" {dis}></div>
+<div class="srow"><div><b>WhatsApp recipients</b><small>Comma-separated numbers with country code. Free-form messages reach a number only within 24 h of its last message to the desk; outside that window Meta requires an approved template.</small></div><input name="whatsapp_recipients" style="width:360px" value="{_esc(c.get('whatsapp_recipients',''))}" placeholder="+447700900123" {dis}></div>
 <div class="srow"><div><b>Language</b></div><select name="language" style="width:140px" {dis}><option value="en" {"selected" if c.get("language")=="en" else ""}>English</option><option value="tr" {"selected" if c.get("language")=="tr" else ""}>Türkçe</option></select></div>
 <div class="srow"><div><b>Daily</b><small>End-of-day report</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="daily" value="1" {"checked" if c.get("daily") else ""} {dis}></label> <input name="daily_at" type="time" value="{_esc(c.get('daily_at','18:00'))}" style="width:120px" {dis}></div></div>
 <div class="srow"><div><b>Weekly</b><small>Last 7 days</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="weekly" value="1" {"checked" if c.get("weekly") else ""} {dis}></label> <select name="weekly_day" style="width:90px" {dis}>{days}</select> <input name="weekly_at" type="time" value="{_esc(c.get('weekly_at','09:00'))}" style="width:120px" {dis}></div></div>
@@ -684,6 +684,9 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <div class="srow"><div><b>Client secret</b><small>Certificates &amp; secrets; stored encrypted</small><div style="margin-top:4px">{gsec}</div></div><div class="min"><input name="GRAPH_CLIENT_SECRET" type="text" autocomplete="off" spellcheck="false" value="{_esc(gshown)}" data-shown="{_esc(gshown)}" onfocus="if(this.value===this.dataset.shown)this.value=''" onblur="if(!this.value)this.value=this.dataset.shown" placeholder="paste a new secret to replace" style="width:300px;font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}></div></div>
 <div class="srow"><div><b>Desk mailbox</b><small>Optional: a Microsoft 365 mailbox the desk reads and sends from</small></div><div class="min"><input name="mailbox" value="{_esc(gc["mailbox"])}" placeholder="support@company.com" style="width:300px" {dis}></div></div>
 <div class="srow"><div><b>Account domain</b><small>UPN domain for accounts the desk creates (empty = tenant default)</small></div><div class="min"><input name="domain" value="{_esc(gc["domain"])}" placeholder="company.com" style="width:300px" {dis}></div></div>
+<div class="srow"><div><b>Usage location</b><small>Two-letter country for new accounts (needed for licences); empty = the tenant's own country</small></div><div class="min"><input name="usage_location" value="{_esc(gc["usage_location"])}" placeholder="GB" maxlength="2" style="width:80px" {dis}></div></div>
+<div class="srow"><div><b>Employee number attribute</b><small>Where your directory keeps the employee number</small></div><div class="min"><select name="employee_attr" style="width:220px" {dis}>{''.join(f'<option value="{a}" {"selected" if gc["employee_attr"] == a else ""}>{a}</option>' for a in ["employeeId"] + [f"extensionAttribute{i}" for i in range(1, 16)])}</select></div></div>
+<div class="srow"><div><b>Birth year attribute</b><small>Optional second identity factor; without it the sender's own number/address is the check</small></div><div class="min"><select name="birth_year_attr" style="width:220px" {dis}>{''.join(f'<option value="{a}" {"selected" if gc["birth_year_attr"] == a else ""}>{a or "none"}</option>' for a in [""] + [f"extensionAttribute{i}" for i in range(1, 16)])}</select></div></div>
 {_alert('', info)}{('<div class="row end"><button class="btn slim" type="submit" name="action" value="test">Save &amp; test</button> <button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
 <h3>MCP connectors</h3>"""
         def ccard(c):
@@ -782,7 +785,7 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <div class="srow"><div><b>Enabled</b><small>Switch the page off to take the channel down</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if pc["enabled"] else ""} {dis}> on</label></div></div>
 <div class="srow"><div><b>Title</b><small>Shown on the page</small></div><div class="min"><input name="title" value="{_esc(pc["title"])}" style="width:260px" {dis}></div></div>
 <div class="srow"><div><b>Note</b><small>Optional line under the sign-in form</small></div><div class="min"><input name="note" value="{_esc(pc.get("note", ""))}" style="width:260px" {dis}></div></div>
-<div class="srow"><div><b>Country code</b><small>Added to local numbers (05xx…)</small></div><div class="min"><input name="country" value="{_esc(pc.get("country", "+90"))}" style="width:100px" {dis}></div></div>
+<div class="srow"><div><b>Country code</b><small>Added to numbers typed without one, e.g. +44 (empty = full number required)</small></div><div class="min"><input name="country" value="{_esc(pc.get("country", ""))}" style="width:100px" {dis}></div></div>
 {('<div class="row end"><button class="btn primary slim" type="submit">Save web chat</button></div>' if admin else '')}</form>
 """
     else:
@@ -816,8 +819,8 @@ async def settings_portal(request: Request, admin: User = Depends(admin_user)):
     value["enabled"] = form.get("enabled") == "1"
     value["title"] = str(form.get("title", "")).strip()[:80] or DEFAULT_PORTAL["title"]
     value["note"] = str(form.get("note", "")).strip()[:200]
-    cc = str(form.get("country", "+90")).strip()
-    value["country"] = cc if cc.startswith("+") and cc[1:].isdigit() and len(cc) <= 5 else "+90"
+    cc = str(form.get("country", "")).strip()
+    value["country"] = cc if cc.startswith("+") and cc[1:].isdigit() and len(cc) <= 5 else ""
     put_setting("portal", value)
     with session() as db:
         audit(db, admin.email, "settings.portal", detail=f"enabled={value['enabled']}", ip=_ip(request))
@@ -865,6 +868,11 @@ async def settings_graph(request: Request, admin: User = Depends(admin_user)):
     value["enabled"] = form.get("enabled") == "1"
     for k in ("tenant", "client_id", "mailbox", "domain"):
         value[k] = str(form.get(k, "")).strip()
+    loc = str(form.get("usage_location", "")).strip().upper()
+    value["usage_location"] = loc if len(loc) == 2 and loc.isalpha() else ""
+    allowed = {"employeeId", *(f"extensionAttribute{i}" for i in range(1, 16))}
+    value["employee_attr"] = str(form.get("employee_attr", "employeeId")) if form.get("employee_attr") in allowed else "employeeId"
+    value["birth_year_attr"] = str(form.get("birth_year_attr", "")) if form.get("birth_year_attr") in allowed - {"employeeId"} else ""
     put_setting("graph", value)
     sec = str(form.get("GRAPH_CLIENT_SECRET", "")).strip()
     if sec and not sec.startswith("•") and sec != vault.get("GRAPH_CLIENT_SECRET"):

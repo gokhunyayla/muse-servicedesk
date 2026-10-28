@@ -16,13 +16,13 @@ router = APIRouter()
 
 def period_start(period: str | None):
     """Start of today / this week / month / quarter / year in the desk's time zone (DESK_TZ, default
-    Europe/Istanbul), returned as naive UTC to compare with stored timestamps; None = all time."""
+    UTC unless set), returned as naive UTC to compare with stored timestamps; None = all time."""
     import os
     from datetime import UTC, datetime
     from zoneinfo import ZoneInfo
     if period in (None, "", "all"):
         return None
-    tz = ZoneInfo(os.getenv("DESK_TZ", "Europe/Istanbul"))
+    tz = ZoneInfo(os.getenv("DESK_TZ", "UTC"))
     local = datetime.now(tz)
     day = local.replace(hour=0, minute=0, second=0, microsecond=0)
     if period == "today":
@@ -245,7 +245,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 </main></div>
 <div class="modal" id="newModal"><div class="box"><h3>Open a ticket for an employee</h3>
 <small class="muted">Employees can only raise requests for themselves; this is how the desk opens one on their behalf. The agents handle it and reply to the employee on their channel.</small>
-<label>Employee (phone, e-mail or employee no)</label><input id="nWho" placeholder="+90 5xx xxx xx xx · ayse.demir@… · E1001">
+<label>Employee (phone, e-mail or employee no)</label><input id="nWho" placeholder="+44 7700 900123 · emma.johnson@… · E1001">
 <label>Request, in the employee's words</label><textarea id="nText" rows="3" placeholder="e.g. Laptop screen flickers since this morning"></textarea>
 <label>Desk note (optional, internal)</label><input id="nNote" placeholder="e.g. called in by phone">
 <div class="row"><button class="btn" onclick="closeModal('newModal')">Cancel</button><button class="btn primary" id="nGo" onclick="doNew()">Open ticket</button></div></div></div>

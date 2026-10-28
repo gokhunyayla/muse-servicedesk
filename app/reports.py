@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_REPORTS = {
     "channel": "email",          # email | whatsapp | both
     "recipients": "",            # comma-separated e-mails
-    "whatsapp_recipients": "",   # comma-separated phone numbers (+90...)
+    "whatsapp_recipients": "",   # comma-separated phone numbers with country code
     "daily": False, "daily_at": "18:00",
     "weekly": False, "weekly_day": 1, "weekly_at": "09:00",     # 1 = Monday
     "monthly": False, "monthly_day": 1, "monthly_at": "09:00",
@@ -256,7 +256,7 @@ def due_kinds(now_local: datetime | None = None) -> list[str]:
     de-duplicates with the reports table (one per kind per day)."""
     import os
     cfg = config()
-    tz = ZoneInfo(os.getenv("DESK_TZ", "Europe/Istanbul"))
+    tz = ZoneInfo(os.getenv("DESK_TZ", "UTC"))
     now = now_local or datetime.now(tz)
     hm = now.strftime("%H:%M")
     out = []

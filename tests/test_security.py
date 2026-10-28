@@ -42,7 +42,7 @@ def test_l3_patches_with_snapshot_verifies_and_uses_heavy_model():
     ])
     set_llm(llm)
     with session() as db:
-        ticket, answer = handle_message(db, "+905551110002", "php2shell açığından etkileniyor muyuz?")
+        ticket, answer = handle_message(db, "+15551110002", "php2shell açığından etkileniyor muyuz?")
         l3 = [(e.content, e.data) for e in ticket.events if e.kind == "tool_result" and e.actor == "L3"]
     scan = dict(l3)["find_vulnerable_servers"]
     assert scan["count"] == 2
@@ -64,7 +64,7 @@ def test_rollback_restores_the_snapshot():
         Reply(text="geri alındı"),
     ]))
     with session() as db:
-        handle_message(db, "+905551110002", "yama")
+        handle_message(db, "+15551110002", "yama")
     assert systems.SERVERS["TR-WEB-01"]["packages"]["php"] == "8.1.2"
 
 

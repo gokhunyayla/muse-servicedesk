@@ -33,7 +33,7 @@ def test_voice_note_is_transcribed_then_handled_by_l1(monkeypatch):
         Reply(text="Kodu e-postanıza gönderdim; şu cümleyi sesli not ile söyleyin."),
     ]))
     client = TestClient(app)
-    r = client.post("/voice", data={"requester": "+905551110001"}, files={"audio": ("note.wav", b"RIFF....", "audio/wav")})
+    r = client.post("/voice", data={"requester": "+15551110001"}, files={"audio": ("note.wav", b"RIFF....", "audio/wav")})
     assert r.status_code == 200, r.text
     body = r.json()
     assert "E1001" in body["transcript"] and "sesli not" in body["reply"]
@@ -45,19 +45,19 @@ def test_voice_note_is_transcribed_then_handled_by_l1(monkeypatch):
         assert results[1]["ok"] is False and "strong verification" in results[1]["error"]
         assert results[2]["ok"] is True and results[2]["code_sent_via"] == "email" and results[2]["code_sent_to"].endswith("@example.com")
         phrase = results[2]["phrase_to_say"]
-    assert mails[-1][0] == "ayse.demir@example.com"
+    assert mails[-1][0] == "emma.johnson@example.com"
     code = mails[-1][1].split("code: ")[1][:6]
     # the phrase arrives as a voice note, the code is typed; a typed code alone is not enough
     set_transcriber(lambda wav: phrase.replace(" ", ", "))
     set_llm(ScriptedLLM([Reply(text="Aldım, şimdi kodu yazın.")]))
-    client.post("/voice", data={"requester": "+905551110001"}, files={"audio": ("note.wav", b"RIFF....", "audio/wav")})
+    client.post("/voice", data={"requester": "+15551110001"}, files={"audio": ("note.wav", b"RIFF....", "audio/wav")})
     set_llm(ScriptedLLM([
         Reply(tool_calls=[call("check_verification", code="000000")]),                   # wrong code
         Reply(tool_calls=[call("check_verification", code=code)]),
         Reply(tool_calls=[call("reset_password", employee_no="E1001")]),
         Reply(text="Doğrulandı, geçici şifreniz gönderildi."),
     ]))
-    r = client.post("/messages", json={"requester": "+905551110001", "text": code}).json()
+    r = client.post("/messages", json={"requester": "+15551110001", "text": code}).json()
     assert "geçici" in r["reply"]
     with session() as db:
         t = db.get(Ticket, body["ticket_id"])
@@ -82,7 +82,7 @@ def test_identity_check_wrong_birth_year_blocks_reset():
         Reply(text="Bilgiler eşleşmedi."),
     ]))
     with session() as db:
-        ticket, _ = handle_message(db, "+905551110001", "şifremi unuttum")
+        ticket, _ = handle_message(db, "+15551110001", "şifremi unuttum")
         results = [e.data for e in ticket.events if e.kind == "tool_result"]
     assert results[0]["ok"] is False and results[1]["ok"] is False
 
@@ -103,7 +103,7 @@ def test_implausible_transcript_is_retried_on_enhanced_audio_then_given_up(monke
     monkeypatch.setattr(whatsapp, "download_media", lambda mid: (b"OggS", "audio/ogg"))
     set_llm(ScriptedLLM([]))
     client = TestClient(app)
-    payload = {"entry": [{"changes": [{"value": {"messages": [{"id": "wamid.v1", "from": "905551110001", "timestamp": "0", "type": "audio", "audio": {"id": "m1"}}]}}]}]}
+    payload = {"entry": [{"changes": [{"value": {"messages": [{"id": "wamid.v1", "from": "15551110001", "timestamp": "0", "type": "audio", "audio": {"id": "m1"}}]}}]}]}
     assert client.post("/webhook", json=payload).json()["handled"] == 0
     assert sent and "yazar mısınız" in sent[-1][1]
     with session() as db:
@@ -122,7 +122,7 @@ def test_default_reset_verification_is_identity_plus_code_on_the_other_channel(m
     ]))
     from app.agents import handle_message
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", "şifremi unuttum, E1001 1990")
+        t, answer = handle_message(db, "+15551110001", "şifremi unuttum, E1001 1990")
         results = [e.data for e in t.events if e.kind == "tool_result"]
         assert results[1]["ok"] and "phrase_to_say" not in results[1] and results[1]["code_sent_via"] == "email"
         tid = t.id
@@ -136,6 +136,6 @@ def test_default_reset_verification_is_identity_plus_code_on_the_other_channel(m
     set_llm(ScriptedLLM([Reply(tool_calls=[call("check_verification", code=code)]),
                          Reply(tool_calls=[call("reset_password", employee_no="E1001")]), Reply(text="Geçici şifreniz: …")]))
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", code)                      # typed code alone is enough by default
+        t, answer = handle_message(db, "+15551110001", code)                      # typed code alone is enough by default
         results = [e.data for e in t.events if e.kind == "tool_result"][-2:]
         assert results[0]["ok"] is True and results[1]["ok"] is True and t.id == tid

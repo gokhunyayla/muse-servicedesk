@@ -19,8 +19,8 @@ def test_numbers_narrative_and_send(monkeypatch):
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c", "close_ticket", {"resolution": "ok"})]), Reply(text="kapandı"),
                          Reply(text="Bakıyorum.")]))
     with session() as db:
-        handle_message(db, "+905551110001", "vpn bağlanmıyor")
-        handle_message(db, "+905551110002", "yazıcı çalışmıyor")
+        handle_message(db, "+15551110001", "vpn bağlanmıyor")
+        handle_message(db, "+15551110002", "yazıcı çalışmıyor")
     n = reports.numbers("daily")
     assert n["created"] == 2 and n["resolved"] == 1 and n["open_now"] == 1 and n["top_issues"][0][0] in ("vpn / network", "printer")
     llm = ScriptedLLM([Reply(text="Two tickets today. One VPN fix. Keep an eye on the printer.")])
@@ -74,9 +74,9 @@ def test_whatsapp_delivery_channel(monkeypatch):
     set_llm(ScriptedLLM([Reply(text="Short narrative.")]))
     sent = []
     monkeypatch.setattr(whatsapp, "send", lambda to, text: sent.append((to, text)) or True)
-    put_setting("reports", {**reports.DEFAULT_REPORTS, "channel": "whatsapp", "whatsapp_recipients": "+905551110001, +905551110002"})
+    put_setting("reports", {**reports.DEFAULT_REPORTS, "channel": "whatsapp", "whatsapp_recipients": "+15551110001, +15551110002"})
     r = reports.build_and_send("daily", "manual")
-    assert r.sent and [s[0] for s in sent] == ["+905551110001", "+905551110002"]
+    assert r.sent and [s[0] for s in sent] == ["+15551110001", "+15551110002"]
     assert sent[0][1].startswith("*Daily desk report") and "Short narrative." in sent[0][1]
     # a permanent WhatsApp error is reported, not raised
     def boom(to, text):

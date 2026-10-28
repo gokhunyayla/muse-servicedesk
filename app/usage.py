@@ -160,7 +160,7 @@ def daily(since=None) -> list[dict]:
     """Per day (desk time zone): calls, tokens, average latency, errors."""
     import os
     from zoneinfo import ZoneInfo
-    tz = ZoneInfo(os.getenv("DESK_TZ", "Europe/Istanbul"))
+    tz = ZoneInfo(os.getenv("DESK_TZ", "UTC"))
     from datetime import UTC
     with session() as db:
         q = db.query(LlmCall)

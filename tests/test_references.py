@@ -105,7 +105,7 @@ def test_kind_and_enforcement_travel_with_passages_and_supervisor_can_check(desk
     hits = references.search("L1", "loaner laptop 14 days")
     assert {h["enforcement"] for h in hits} == {"strict", "flexible"} and hits[0]["kind"] in ("policy", "guideline")
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "assign_loaner", {"employee_no": "E1001"})]), Reply(text="verildi")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "yedek laptop lazım"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "yedek laptop lazım"})
     with session() as db:
         out = run_tool(Ctx(db=db, ticket=None, agent="SUP"), "check_compliance", {"ticket_id": 1})
     assert out["ok"] and out["actions"] and out["references"][0]["enforcement"] == "strict"

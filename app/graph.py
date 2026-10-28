@@ -8,7 +8,8 @@ application permissions; the client secret lives in the vault.
 
 Records are returned in the same shape as the simulated directory so nothing else in the desk changes:
 ``{"name", "phone", "email", "department", "manager", "licenses", "groups", "enabled", "device", "birth_year"}``.
-The employee number is Entra's ``employeeId`` when set, otherwise the user-principal name.
+The employee number is read from the attribute chosen in Settings (``employeeId`` by default), otherwise the
+user-principal name. Nothing here assumes a country or a language: new accounts take the tenant's own country.
 """
 from __future__ import annotations
 
@@ -24,7 +25,10 @@ from app.sla import get_setting
 logger = logging.getLogger("graph")
 BASE = "https://graph.microsoft.com/v1.0"
 DEFAULT_GRAPH = {"enabled": False, "tenant": "", "client_id": "", "mailbox": "", "domain": "",
-                 "last_received": ""}      # mailbox position for the e-mail channel (ISO time)
+                 "usage_location": "",          # ISO country for new accounts; empty = the tenant's own country
+                 "employee_attr": "employeeId", # where the employee number lives (employeeId or extensionAttribute1..15)
+                 "birth_year_attr": "",         # optional extensionAttribute holding a birth year; empty = none
+                 "last_received": ""}           # mailbox position for the e-mail channel (ISO time)
 TIMEOUT = 25
 USER_FIELDS = ("id,displayName,userPrincipalName,mail,mobilePhone,businessPhones,employeeId,department,jobTitle,"
                "accountEnabled,onPremisesExtensionAttributes")
@@ -91,13 +95,24 @@ def _q(s: str) -> str:
 
 # ---- directory --------------------------------------------------------------------------------------
 
+def _attr(u: dict, name: str) -> str:
+    if not name:
+        return ""
+    if name.startswith("extensionAttribute"):
+        return str((u.get("onPremisesExtensionAttributes") or {}).get(name) or "")
+    return str(u.get(name) or "")
+
+
+def _attr_path(name: str) -> str:
+    return f"onPremisesExtensionAttributes/{name}" if name.startswith("extensionAttribute") else name
+
+
 def _emp_no(u: dict) -> str:
-    return (u.get("employeeId") or u.get("userPrincipalName") or "").strip()
+    return (_attr(u, config()["employee_attr"] or "employeeId") or u.get("userPrincipalName") or "").strip()
 
 
 def _record(u: dict, groups: list[str] | None = None, licenses: list[str] | None = None) -> dict:
-    ext = u.get("onPremisesExtensionAttributes") or {}
-    by = ext.get("extensionAttribute1") or ""
+    by = _attr(u, config()["birth_year_attr"]).strip()
     return {"id": u.get("id"), "name": u.get("displayName", ""), "upn": u.get("userPrincipalName", ""),
             "email": (u.get("mail") or u.get("userPrincipalName") or "").lower(),
             "phone": (u.get("mobilePhone") or (u.get("businessPhones") or [""])[0] or "").replace(" ", ""),
@@ -126,7 +141,8 @@ def raw_user(employee_no: str) -> dict | None:
         return None
     if "@" in e:
         return _find(f"userPrincipalName eq '{_q(e)}' or mail eq '{_q(e)}'")
-    return _find(f"employeeId eq '{_q(e)}'")
+    hit = _find(f"{_attr_path(config()['employee_attr'] or 'employeeId')} eq '{_q(e)}'")
+    return hit or _find(f"userPrincipalName eq '{_q(e)}'")
 
 
 def _manager_no(uid: str) -> str | None:
@@ -219,12 +235,13 @@ def create_user(name: str, department: str, manager_no: str, phone: str) -> tupl
     nick = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower().strip().replace(" ", ".")
     nick = "".join(ch for ch in nick if ch.isalnum() or ch in "._-") or "user"
     upn = f"{nick}@{domain}"
-    count = _call("GET", "/users/$count", headers={"ConsistencyLevel": "eventual"}, params={"$filter": "employeeId ge 'E'"})
-    emp = f"E{1000 + int(count if isinstance(count, int) else 0) + 1}"
     pw = "Tmp-" + _s.token_urlsafe(9)
-    body = {"accountEnabled": True, "displayName": name, "mailNickname": nick, "userPrincipalName": upn, "employeeId": emp,
-            "department": department, "mobilePhone": phone or None, "usageLocation": "TR",
+    body = {"accountEnabled": True, "displayName": name, "mailNickname": nick, "userPrincipalName": upn,
+            "department": department, "mobilePhone": phone or None,
             "passwordProfile": {"forceChangePasswordNextSignIn": True, "password": pw}}
+    where = c["usage_location"].strip().upper() or _tenant_country()
+    if where:
+        body["usageLocation"] = where        # needed before a licence can be assigned
     u = _call("POST", "/users", json=body)
     if manager_no:
         try:
@@ -232,7 +249,15 @@ def create_user(name: str, department: str, manager_no: str, phone: str) -> tupl
             _call("PUT", f"/users/{u['id']}/manager/$ref", json={"@odata.id": f"{BASE}/users/{mid}"})
         except GraphError as e:
             logger.warning("manager not set for %s: %s", upn, e)
-    return emp, upn, pw
+    return upn, upn, pw          # the employee number comes from HR later; until then the UPN identifies them
+
+
+def _tenant_country() -> str:
+    try:
+        o = _call("GET", "/organization", params={"$select": "countryLetterCode"})
+        return ((o.get("value") or [{}])[0].get("countryLetterCode") or "").upper()
+    except GraphError:
+        return ""
 
 
 def _default_domain() -> str:

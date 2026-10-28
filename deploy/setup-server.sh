@@ -44,7 +44,7 @@ cat > .env <<EOF
 DATABASE_URL=mysql+pymysql://$DB_USER:$DB_PASS@127.0.0.1:3306/$DB_NAME
 PORT=1002
 PUBLIC_URL=https://$DOMAIN
-DESK_TZ=Europe/Istanbul
+DESK_TZ=${DESK_TZ:-UTC}
 META_BASE_URL=https://api.meta.ai/v1
 META_MODEL=muse-spark-1.3
 META_MODEL_HEAVY=muse-wonder-1.0

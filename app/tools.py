@@ -61,6 +61,8 @@ def run_tool(ctx: Ctx, name: str, args: dict) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+from app.i18n import t as _t, ticket_lang  # noqa: E402
+
 STR = {"type": "string"}
 INT = {"type": "integer"}
 ALL = ("L1", "L2", "L3", "L4")
@@ -132,7 +134,8 @@ def verify_identity(ctx: Ctx, employee_no: str, birth_year: int) -> dict:
     return {"ok": ok}
 
 
-PHRASE_WORDS = ["mavi", "kırmızı", "yeşil", "sarı", "kedi", "köpek", "pencere", "bahçe", "deniz", "dağ", "elma", "kalem", "masa", "bulut", "yıldız"]
+PHRASE_WORDS = {"tr": ["mavi", "kırmızı", "yeşil", "sarı", "kedi", "köpek", "pencere", "bahçe", "deniz", "dağ", "elma", "kalem", "masa", "bulut", "yıldız"],
+                "en": ["blue", "red", "green", "yellow", "cat", "dog", "window", "garden", "river", "mountain", "apple", "pencil", "table", "cloud", "star"]}
 
 
 def _strong_key(ticket_id: int) -> str:
@@ -169,7 +172,8 @@ def send_verification(ctx: Ctx, employee_no: str) -> dict:
                                       "call check_verification with the code the employee typed"}
     code = f"{secrets.randbelow(1_000_000):06d}"
     want_voice = bool(verification_config().get("voice_phrase"))
-    phrase = (" ".join(secrets.choice(PHRASE_WORDS) for _ in range(3)) + f" {secrets.randbelow(90) + 10}") if want_voice else ""
+    words = PHRASE_WORDS.get(ticket_lang(ctx.ticket), PHRASE_WORDS["en"])
+    phrase = (" ".join(secrets.choice(words) for _ in range(3)) + f" {secrets.randbelow(90) + 10}") if want_voice else ""
     value = {"code_hash": hashlib.sha256(f"{ctx.ticket.id}:{code}".encode()).hexdigest(), "phrase": phrase,
              "until": (_now() + timedelta(minutes=10)).isoformat(), "via": via, "to": to, "tries": 0}
     if row is None:
@@ -540,8 +544,7 @@ def request_manager_approval(ctx: Ctx, employee_no: str, request: str) -> dict:
     ctx.db.flush()
     mgr_rec = systems.get_user(mgr) or {}
     ctx.db.add(Outbound(to=mgr_rec.get("phone") or systems.user_email(mgr), ticket_id=ctx.ticket.id,
-                        text=f"Onay talebi #{a.id}: {u['name']} için \"{request}\". "
-                             f"Cevap: ONAY {a.id} veya RET {a.id}"))
+                        text=_t("approval_request", ticket_lang(ctx.ticket), id=a.id, name=u["name"], request=request)))
     ctx.ticket.status = "waiting_approval"
     return {"ok": True, "approval_id": a.id, "approver": mgr_rec.get("name", mgr), "status": "waiting_approval"}
 

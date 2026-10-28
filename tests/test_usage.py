@@ -14,7 +14,7 @@ def fresh(tmp_path):
 def test_every_model_call_is_accounted_to_its_ticket():
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "search_knowledge", {"query": "vpn"})]), Reply(text="ok")]))
     with session() as db:
-        t, _ = handle_message(db, "+905551110001", "vpn bağlanmıyor")
+        t, _ = handle_message(db, "+15551110001", "vpn bağlanmıyor")
     with session() as db:
         rows = db.query(LlmCall).all()
     assert len(rows) == 2 and all(r.scope == "ticket" and r.scope_id == t.id and r.actor == "L1" for r in rows)
@@ -36,7 +36,7 @@ def test_chat_turns_carry_usage_and_context_share(desk):
 
 def test_dashboard_usage_endpoint_and_context_setting(desk):
     set_llm(ScriptedLLM([Reply(text="ok")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "yazıcı"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "yazıcı"})
     ai = desk.get("/ai/usage?period=today").json()
     assert ai["calls"] == 1 and "muse-spark-1.3" in ai["by_model"] and ai["by_scope"] == {"ticket": ai["total_tokens"]}
     assert desk.get("/tickets/1").json()["ai"]["calls"] == 1
@@ -46,9 +46,9 @@ def test_dashboard_usage_endpoint_and_context_setting(desk):
 
 
 def test_ai_activity_endpoints_and_page(desk):
-    set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "run_endpoint_script", {"hostname": "TR-LT-101", "script": "rm-rf"})]),
+    set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "run_endpoint_script", {"hostname": "LT-101", "script": "rm-rf"})]),
                          Reply(tool_calls=[ToolCall("c2", "search_knowledge", {"query": "vpn"})]), Reply(text="ok")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "vpn"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "vpn"})
     calls = desk.get("/ai/calls?period=today").json()
     assert len(calls) == 3 and calls[0]["scope"] == "ticket" and calls[0]["at"] and calls[-1]["tool_calls"] == 1
     assert desk.get("/ai/calls?period=today&scope=chat").json() == []
@@ -64,7 +64,7 @@ def test_ai_activity_endpoints_and_page(desk):
 
 def test_pricing_turns_tokens_into_money_everywhere(desk):
     set_llm(ScriptedLLM([Reply(text="ok")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "yazıcı"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "yazıcı"})
     assert usage.summary()["priced"] is False and usage.summary()["cost_label"] == ""          # unpriced: no money shown
     r = desk.post("/settings/pricing", data={"currency": "$", "muse-spark-1.3__prompt": "0.5", "muse-spark-1.3__completion": "2",
                                              "muse-wonder-1.0__prompt": "3", "muse-wonder-1.0__completion": "15"}, follow_redirects=False)

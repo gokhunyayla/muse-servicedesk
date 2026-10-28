@@ -78,7 +78,7 @@ async def post_image(requester: str = Form(...), text: str = Form(""), image: Up
     """A photo or screenshot with an optional caption."""
     data = await image.read()
     with session() as db:
-        ticket, answer = handle_message(db, requester, text or "(fotoğraf gönderdi)", data,
+        ticket, answer = handle_message(db, requester, text or "(sent a photo)", data,
                                         image.content_type or "image/jpeg")
         return {"ticket_id": ticket.id if ticket else None, "reply": answer}
 
@@ -702,7 +702,7 @@ async def post_video(requester: str = Form(...), text: str = Form(""), video: Up
         raise HTTPException(422, "could not read video")
     with session() as db:
         # first frame rides through the normal image path; the rest are appended as extra parts
-        caption = (text or "(video gönderdi)") + f" [video: {len(frames)} frames sampled, 2s apart]"
+        caption = (text or "(sent a video)") + f" [video: {len(frames)} frames sampled, 2s apart]"
         from app.agents import AGENTS, handle_message
         ticket, answer = handle_message(db, requester, caption, frames[0], "image/jpeg",
                                         extra_images=frames[1:])

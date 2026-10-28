@@ -42,7 +42,7 @@ def test_camera_finding_opens_ticket_for_desk_owner_with_location():
     assert results[0]["boxes"][0]["x1"] == 1000
     with session() as db:
         t = db.get(Ticket, results[0]["ticket_id"])
-        assert t.requester == "+905551110001" and t.title.startswith("[Compliance:credential_note]")
+        assert t.requester == "+15551110001" and t.title.startswith("[Compliance:credential_note]")
         first = [e for e in t.events if e.kind == "message"][0]
         assert "x=1000-1200" in first.content and "ISO 27001" in first.content
         tools = [e.content for e in t.events if e.kind == "tool_call"]
@@ -59,7 +59,7 @@ def test_video_frames_are_sent_as_extra_image_parts(monkeypatch):
     monkeypatch.setattr(vision, "sample_frames", lambda v: [b"f1", b"f2", b"f3"])
     llm = ScriptedLLM([Reply(text="Videoda Wi-Fi simgesi kırmızı, bağlantı düşüyor.")])
     set_llm(llm)
-    r = TestClient(app).post("/video", data={"requester": "+905551110002", "text": "sürekli kopuyor"},
+    r = TestClient(app).post("/video", data={"requester": "+15551110002", "text": "sürekli kopuyor"},
                              files={"video": ("clip.mp4", b"mp4", "video/mp4")})
     assert r.status_code == 200 and r.json()["frames"] == 3
     parts = llm.requests[0][-1]["content"]

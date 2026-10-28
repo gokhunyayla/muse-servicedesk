@@ -18,8 +18,8 @@ def call(_name, **args):
 def test_chat_overview_and_links(desk):
     set_llm(ScriptedLLM([Reply(text="Bakıyorum."), Reply(text="Bakıyorum.")]))
     with session() as db:
-        handle_message(db, "+905551110001", "vpn bağlanmıyor")
-        handle_message(db, "+905551110002", "Project lisansı lazım")
+        handle_message(db, "+15551110001", "vpn bağlanmıyor")
+        handle_message(db, "+15551110002", "Project lisansı lazım")
         db.add(Approval(ticket_id=2, approver="E1002", request="Project lisansı"))
     th = desk.post("/chat/threads").json()
     llm = ScriptedLLM([Reply(tool_calls=[call("desk_overview")]),
@@ -40,7 +40,7 @@ def test_chat_overview_and_links(desk):
 def test_chat_acts_with_the_users_authority(desk):
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
     with session() as db:
-        handle_message(db, "+905551110001", "projektör lambası yanmıyor")
+        handle_message(db, "+15551110001", "projektör lambası yanmıyor")
     th = desk.post("/chat/threads").json()
     set_llm(ScriptedLLM([Reply(tool_calls=[call("assign", ticket_id=1, to="me", note="I'll replace the lamp")]),
                          Reply(text="Done — #1 is yours now.")]))
@@ -83,7 +83,7 @@ def test_threads_are_private_and_deletable(desk):
 def test_brain_knows_the_person_it_talks_to(desk):
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
     with session() as db:
-        handle_message(db, "+905551110001", "projektör lambası yanmıyor")
+        handle_message(db, "+15551110001", "projektör lambası yanmıyor")
     th = desk.post("/chat/threads").json()
     set_llm(ScriptedLLM([Reply(tool_calls=[call("assign", ticket_id=1, to="me", note="")]), Reply(text="Yours.")]))
     desk.post(f"/chat/threads/{th['id']}", json={"text": "assign #1 to me"})

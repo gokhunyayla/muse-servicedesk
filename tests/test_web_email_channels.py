@@ -24,7 +24,7 @@ B = "/support-agent"
 SENT: list = []
 
 
-def _employee(contact: str = "0555 111 00 01") -> TestClient:
+def _employee(contact: str = "+1 555 111 0001") -> TestClient:
     """Open the support chat and get identified the way an employee would: contact → code → welcome."""
     from app import whatsapp, channels
     from app.main import app
@@ -42,13 +42,13 @@ def _employee(contact: str = "0555 111 00 01") -> TestClient:
 
 def test_web_chat_opens_a_ticket_and_receives_desk_replies(desk):
     emp = _employee()
-    assert '<b id="whoName">Ayşe Demir</b>' in emp.get(B).text
+    assert '<b id="whoName">Emma Johnson</b>' in emp.get(B).text
     set_llm(ScriptedLLM([Reply(text="VPN için önce ağınızı kontrol edelim.")]))
     r = emp.post("/support-agent/say", data={"text": "vpn bağlanmıyor"}).json()
     assert r["text"].startswith("VPN") and r["ticket"] == 1
     with session() as db:
         t = db.get(Ticket, 1)
-        assert t.requester == "+905551110001" and t.channel == "web"
+        assert t.requester == "+15551110001" and t.channel == "web"
     # a person on the desk replies from the console: queued, then picked up by the web chat, never sent to WhatsApp
     desk.post("/tickets/1/reply", json={"text": "Merhaba, bakıyorum."})
     assert channels.drain() == 0
@@ -59,7 +59,7 @@ def test_web_chat_opens_a_ticket_and_receives_desk_replies(desk):
     assert [h["who"] for h in hist] == ["you", "desk", "desk"]
     # the same employee continues over WhatsApp: the ticket follows, replies switch channel
     set_llm(ScriptedLLM([Reply(text="Tamam.")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "hâlâ aynı"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "hâlâ aynı"})
     with session() as db:
         assert db.get(Ticket, 1).channel == "whatsapp" and db.query(Ticket).count() == 1
 
@@ -74,11 +74,11 @@ def test_assistant_identifies_the_employee_in_the_conversation(desk):
     r = c.post(f"{B}/say", data={"text": "E1001 1985"}).json()                                    # wrong birth year
     assert "eşleşmedi" in r["text"] and r["identified"] is False
     r = c.post(f"{B}/say", data={"text": "E1001 1990"}).json()                                    # directory fallback works
-    assert r["identified"] is True and "Ayşe Demir" in r["text"] and "TR-LT-101" in r["text"]
+    assert r["identified"] is True and "Emma Johnson" in r["text"] and "LT-101" in r["text"]
     with session() as db:
         assert db.query(Ticket).count() == 0
-    emp = _employee("ayse.demir@example.com")                                                      # e-mail works too, code by mail
-    assert SENT[-1][0] == "ayse.demir@example.com"
+    emp = _employee("emma.johnson@example.com")                                                      # e-mail works too, code by mail
+    assert SENT[-1][0] == "emma.johnson@example.com"
     r = desk.post("/settings/portal", data={"title": "Help me", "note": "Internal use"}, follow_redirects=False)   # enabled unchecked
     assert r.status_code == 303
     assert "switched off" in emp.get(B).text and emp.get(f"{B}/history").status_code == 401
@@ -89,19 +89,19 @@ def test_identified_employee_sees_only_own_tickets(desk):
     from app import support
     from app.main import app
     set_llm(ScriptedLLM([Reply(text="Bakıyorum."), Reply(text="Bakıyorum."), Reply(text="Tamam, not aldım.")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "VPN bağlanmıyor"})          # Ayşe's ticket (over WhatsApp)
-    desk.post("/messages", json={"requester": "+905551110002", "text": "yazıcı bozuk"})              # Mehmet's ticket
+    desk.post("/messages", json={"requester": "+15551110001", "text": "VPN bağlanmıyor"})          # Emma's ticket (over WhatsApp)
+    desk.post("/messages", json={"requester": "+15551110002", "text": "yazıcı bozuk"})              # Liam's ticket
     c = TestClient(app)
     from app import whatsapp
     whatsapp.try_send = lambda to, text: (SENT.append((to, text)) or True)
-    r = c.post(f"{B}/say", data={"text": "0555 111 00 01"}).json()
+    r = c.post(f"{B}/say", data={"text": "merhaba, numaram +1 555 111 0001"}).json()   # Turkish from the first line
     assert r["identified"] is False
     assert "eşleşmedi" in c.post(f"{B}/say", data={"text": "000000"}).json()["text"]               # wrong code
     code = SENT[-1][1].split("code: ")[1][:6]
     r = c.post(f"{B}/say", data={"text": code}).json()
     assert r["identified"] is True and "1 açık talebiniz" in r["text"] and "VPN" in r["text"]
     mine = c.get(f"{B}/tickets").json()
-    assert [t["title"] for t in mine] == ["VPN bağlanmıyor"]                         # never Mehmet's
+    assert [t["title"] for t in mine] == ["VPN bağlanmıyor"]                         # never Liam's
     tid = mine[0]["id"]
     assert c.get(f"{B}/tickets/{tid + 1}").status_code == 404
     d = c.get(f"{B}/tickets/{tid}").json()
@@ -116,35 +116,35 @@ def test_identified_employee_sees_only_own_tickets(desk):
         assert cl.employee_no == "E1001" and cl.last_login_at is not None
     # the console lists the client and can disable them; a disabled client is not recognised any more
     page = desk.get("/clients").text
-    assert "Ayşe Demir" in page and "E1001" in page
+    assert "Emma Johnson" in page and "E1001" in page
     desk.post(f"/clients/{cl.id}/toggle", follow_redirects=False)
     c2 = TestClient(app)
-    assert "Sicil" in c2.post(f"{B}/say", data={"text": "+905551110001"}).json()["text"]
+    assert "employee number" in c2.post(f"{B}/say", data={"text": "+15551110001"}).json()["text"]   # no language hint: English
     # an admin adds someone the directory lacks: they get a code
-    desk.post("/clients", data={"name": "Yeni Kişi", "phone": "0555 777 00 00"}, follow_redirects=False)
-    assert "kod" in c2.post(f"{B}/say", data={"text": "+905557770000"}).json()["text"] and SENT[-1][0] == "+905557770000"
-    assert support.normalise("0555 111 00 01") == "+905551110001" and support.normalise("Ayse@Example.com") == "ayse@example.com"
+    desk.post("/clients", data={"name": "Yeni Kişi", "phone": "+44 7700 900000"}, follow_redirects=False)
+    assert "code" in c2.post(f"{B}/say", data={"text": "+447700900000"}).json()["text"] and SENT[-1][0] == "+447700900000"
+    assert support.normalise("+1 555 111 0001") == "+15551110001" and support.normalise("Emma@Example.com") == "emma@example.com"
     # the admin edits a client: new phone, employee number
     with session() as db:
-        new_id = db.query(Client).filter(Client.phone == "+905557770000").one().id
-    r = desk.post(f"/clients/{new_id}", data={"name": "Yeni Kişi", "employee_no": "E9001", "phone": "0555 777 00 01", "email": "yeni@example.com"}, follow_redirects=False)
+        new_id = db.query(Client).filter(Client.phone == "+447700900000").one().id
+    r = desk.post(f"/clients/{new_id}", data={"name": "Yeni Kişi", "employee_no": "E9001", "phone": "+44 7700 900001", "email": "yeni@example.com"}, follow_redirects=False)
     assert r.status_code == 303 and "updated" in r.headers["location"]
     with session() as db:
         c = db.get(Client, new_id)
-        assert c.phone == "+905557770001" and c.employee_no == "E9001" and c.email == "yeni@example.com"
+        assert c.phone == "+447700900001" and c.employee_no == "E9001" and c.email == "yeni@example.com"
     assert "Edit client" in desk.get("/clients").text
 
 
-def _mail(frm="mehmet.kaya@example.com", subject="Yazıcı çalışmıyor", body="3. kat yazıcı kağıt sıkıştırıyor.\n\n> eski alıntı\nOn Mon, X wrote:\n> bla"):
+def _mail(frm="liam.carter@example.com", subject="Yazıcı çalışmıyor", body="3. kat yazıcı kağıt sıkıştırıyor.\n\n> eski alıntı\nOn Mon, X wrote:\n> bla"):
     m = EmailMessage()
-    m["From"], m["To"], m["Subject"] = f"Mehmet Kaya <{frm}>", "desk@example.com", subject
+    m["From"], m["To"], m["Subject"] = f"Liam Carter <{frm}>", "desk@example.com", subject
     m.set_content(body)
     return m
 
 
 def test_email_parsing_drops_quotes_and_auto_replies():
     p = channels.parse_email(_mail().as_bytes())
-    assert p["from"] == "mehmet.kaya@example.com" and p["text"] == "3. kat yazıcı kağıt sıkıştırıyor." and p["ticket_id"] is None
+    assert p["from"] == "liam.carter@example.com" and p["text"] == "3. kat yazıcı kağıt sıkıştırıyor." and p["ticket_id"] is None
     assert channels.parse_email(_mail(frm="noreply@example.com").as_bytes()) is None
     m = _mail(subject="Re: [#7] Yazıcı")
     m["Auto-Submitted"] = "auto-replied"
@@ -157,8 +157,8 @@ def test_email_opens_a_ticket_and_answers_by_mail(desk, monkeypatch):
     monkeypatch.setattr(channels, "send_email", lambda to, subject, text: (sent.append((to, subject, text)) or (True, "")))
     set_llm(ScriptedLLM([Reply(text="Kağıt sıkışmasını açmak için tepsiyi çıkarın.")]))
     t, answer = channels.ingest_email(channels.parse_email(_mail().as_bytes()))
-    assert t.channel == "email" and t.requester == "mehmet.kaya@example.com"
-    assert sent[0][0] == "mehmet.kaya@example.com" and sent[0][1].startswith(f"[#{t.id}]") and "tepsiyi" in sent[0][2]
+    assert t.channel == "email" and t.requester == "liam.carter@example.com"
+    assert sent[0][0] == "liam.carter@example.com" and sent[0][1].startswith(f"[#{t.id}]") and "tepsiyi" in sent[0][2]
     # later desk messages to this requester go out by mail through the normal queue
     desk.post(f"/tickets/{t.id}/reply", json={"text": "Teknisyen yolda."})
     assert channels.drain() == 1 and sent[-1][2] == "Teknisyen yolda." and sent[-1][1].startswith(f"[#{t.id}]")
@@ -206,22 +206,22 @@ def test_greetings_and_small_talk_open_no_ticket(desk):
     assert is_greeting("Selam") and is_greeting("merhaba, orada mısın?") and is_greeting("hello there") and not is_greeting("selam, vpn bağlanmıyor")
     set_llm(ScriptedLLM([]))                                                   # a greeting needs no model at all
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", "Selam")
+        t, answer = handle_message(db, "+15551110001", "Selam")
         assert t is None and answer.startswith("Merhaba!") and db.query(Ticket).count() == 0
     set_llm(ScriptedLLM([Reply(text="CHAT")]))                                 # the model says it is small talk
     with session() as db:
-        t, answer = handle_message(db, "+905551110001", "bugün hava çok güzel değil mi")
+        t, answer = handle_message(db, "+15551110001", "bugün hava çok güzel değil mi")
         assert t is None and db.query(Ticket).count() == 0
     set_llm(ScriptedLLM([Reply(text="REQUEST"), Reply(text="Bakıyorum.")]))
     with session() as db:
-        t, _ = handle_message(db, "+905551110001", "yazıcı bozuk")
+        t, _ = handle_message(db, "+15551110001", "yazıcı bozuk")
         assert t is not None and t.title == "yazıcı bozuk"
-    emp = _employee()                                                          # Ayşe has an open ticket: greeting points at it, opens nothing
+    emp = _employee()                                                          # Emma has an open ticket: greeting points at it, opens nothing
     r = emp.post("/support-agent/say", data={"text": "merhaba"}).json()
     assert r["ticket"] == t.id and ("hâlâ açık" in r["text"] or "devam edelim mi" in r["text"])   # greets, opens nothing
     with session() as db:
         assert db.query(Ticket).count() == 1
-    assert desk.post("/messages", json={"requester": "+905551110002", "text": "günaydın"}).json()["ticket_id"] is None
+    assert desk.post("/messages", json={"requester": "+15551110002", "text": "günaydın"}).json()["ticket_id"] is None
 
 
 def test_stale_and_duplicate_whatsapp_messages_are_skipped(desk, monkeypatch):
@@ -230,7 +230,7 @@ def test_stale_and_duplicate_whatsapp_messages_are_skipped(desk, monkeypatch):
     monkeypatch.setattr(whatsapp, "try_send", lambda to, text: True)
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
     def payload(mid, ts, text):
-        return {"entry": [{"changes": [{"value": {"messages": [{"id": mid, "from": "905551110001", "timestamp": str(ts), "type": "text", "text": {"body": text}}]}}]}]}
+        return {"entry": [{"changes": [{"value": {"messages": [{"id": mid, "from": "15551110001", "timestamp": str(ts), "type": "text", "text": {"body": text}}]}}]}]}
     old = desk.post("/webhook", json=payload("wamid.old", int(time.time()) - 2 * 3600, "Selam")).json()
     fresh = desk.post("/webhook", json=payload("wamid.1", int(time.time()), "yazıcı bozuk")).json()
     again = desk.post("/webhook", json=payload("wamid.1", int(time.time()), "yazıcı bozuk")).json()

@@ -3,11 +3,11 @@
 # Uzun süre güncellenmemiş dizüstü (stale patch)
 
 ## Symptom
-Proactive alert: endpoint (laptop, not server) has no OS updates for e.g. 48 days (TR-LT-103). Do NOT bounce L1->L3->L2->L1. Owner of record: L2 endpoint diagnosis, L1 owns user contact/scheduling.
+Proactive alert: endpoint (laptop, not server) has no OS updates for e.g. 48 days (LT-103). Do NOT bounce L1->L3->L2->L1. Owner of record: L2 endpoint diagnosis, L1 owns user contact/scheduling.
 
 ## Checks
 1. L1: find_user/get_employee, verify_identity; ask user to power on, connect to internet (Wi-Fi/ethernet), plug in charger, keep device on. Confirm device name.
-2. L2: network_diagnostics - online? dns_ok? If online=false: STOP remote work, do not retry scripts blindly (cf. printer-fix failures on offline TR-LT-103, ticket 4). Schedule a specific time with user via schedule_followup / request_confirmation and note 'waiting device online', not 'stuck'.
+2. L2: network_diagnostics - online? dns_ok? If online=false: STOP remote work, do not retry scripts blindly (cf. printer-fix failures on offline LT-103, ticket 4). Schedule a specific time with user via schedule_followup / request_confirmation and note 'waiting device online', not 'stuck'.
 3. If online: list_endpoint_scripts - is there an OS-update/patch script? Check disk space first (disk <10% free blocks updates - run perf-report/disk check; clean disk before patching), battery, pending reboot.
 4. Check update policy actually reached device: per Microsoft Intune update-ring troubleshooting, first determine whether policy was delivered/applied to device (Device and user check-in status / View report, Settings > Accounts > Access work or school on device) before troubleshooting Windows Update itself. Check deferral/pause settings and last check-in time - stale check-in explains stale patch.
 

@@ -30,9 +30,9 @@ def test_webhook_verification():
 
 def test_text_message_is_answered_on_whatsapp(fresh):
     set_llm(ScriptedLLM([Reply(text="Merhaba, bakıyorum.")]))
-    r = TestClient(app).post("/webhook", json=wa({"from": "905551110001", "type": "text", "text": {"body": "vpn yok"}}))
+    r = TestClient(app).post("/webhook", json=wa({"from": "15551110001", "type": "text", "text": {"body": "vpn yok"}}))
     assert r.json() == {"handled": 1}
-    assert fresh == [("+905551110001", "Merhaba, bakıyorum.")]
+    assert fresh == [("+15551110001", "Merhaba, bakıyorum.")]
 
 
 def test_voice_note_is_transcribed_then_answered(fresh):
@@ -40,15 +40,15 @@ def test_voice_note_is_transcribed_then_answered(fresh):
     import app.voice as voice
     voice.to_wav = lambda audio: b"RIFF"          # skip ffmpeg in tests
     set_llm(ScriptedLLM([Reply(text="Kimlik doğrulayalım.")]))
-    TestClient(app).post("/webhook", json=wa({"from": "905551110001", "type": "audio", "audio": {"id": "m1"}}))
-    assert fresh[-1] == ("+905551110001", "Kimlik doğrulayalım.")
+    TestClient(app).post("/webhook", json=wa({"from": "15551110001", "type": "audio", "audio": {"id": "m1"}}))
+    assert fresh[-1] == ("+15551110001", "Kimlik doğrulayalım.")
 
 
 def test_outbound_queue_is_drained_to_whatsapp(fresh):
     with session() as db:
-        db.add(Outbound(to="+905551110002", text="Onay talebi #1"))
+        db.add(Outbound(to="+15551110002", text="Onay talebi #1"))
     assert whatsapp.drain_outbound() == 1
-    assert fresh == [("+905551110002", "Onay talebi #1")]
+    assert fresh == [("+15551110002", "Onay talebi #1")]
     with session() as db:
         assert db.query(Outbound).one().sent is True
 
@@ -56,7 +56,7 @@ def test_outbound_queue_is_drained_to_whatsapp(fresh):
 def test_dashboard_page_and_stats(desk):
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "close_ticket", {"resolution": "ok"})]), Reply(text="kapandı")]))
     c = desk
-    c.post("/messages", json={"requester": "+905551110001", "text": "vpn bağlanmıyor"})
+    c.post("/messages", json={"requester": "+15551110001", "text": "vpn bağlanmıyor"})
     s = c.get("/stats").json()
     assert s["total"] == 1 and s["auto_resolution_rate"] == 1.0 and s["top_issues"][0][0] == "vpn / network"
     assert "Muse ServiceDesk" in c.get("/").text
@@ -65,8 +65,8 @@ def test_dashboard_page_and_stats(desk):
 def test_desk_merges_tickets_into_a_problem_and_assigns_it(fresh, desk):
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")] * 3))
     c = desk
-    for who, text in (("+905551110001", "Outlook açılmıyor"), ("+905551110002", "mail sunucusu hata veriyor"),
-                      ("+905551110003", "e-posta gelmiyor")):
+    for who, text in (("+15551110001", "Outlook açılmıyor"), ("+15551110002", "mail sunucusu hata veriyor"),
+                      ("+15551110003", "e-posta gelmiyor")):
         c.post("/messages", json={"requester": who, "text": text})
     r = c.post("/problems", json={"ticket_ids": [1, 2, 3], "title": "Exchange outage",
                                   "update": "Biliyoruz, çalışıyoruz."}).json()
@@ -80,7 +80,7 @@ def test_desk_merges_tickets_into_a_problem_and_assigns_it(fresh, desk):
     r = c.post("/tickets/1/assign", json={"owner": "L3", "note": "Exchange kuyruğuna bak"}).json()
     assert r["owner"] == "L3" and "temizledim" in r["reply"]
     # and to a human: escalated, no model call
-    r = c.post("/tickets/2/assign", json={"owner": "human", "assignee": "Mehmet"}).json()
+    r = c.post("/tickets/2/assign", json={"owner": "human", "assignee": "Liam"}).json()
     assert r == {"id": 2, "status": "escalated", "owner": "human"}
     assert c.post("/problems", json={"ticket_ids": [1], "title": "x"}).status_code == 422
 
@@ -92,10 +92,10 @@ def test_console_requires_sign_in_and_admin_manages_users(desk):
     assert anon.post("/login", data={"email": "admin@test", "password": "wrong"}, follow_redirects=False).headers["location"].startswith("/login?error")
     # admin adds a support agent; the agent can sign in but cannot manage users
     # admin invites an agent: no password typed; the invite link (no SMTP) comes back to the admin
-    r = desk.post("/users", data={"name": "Zeynep", "email": "z@test", "role": "agent"}, follow_redirects=False)
+    r = desk.post("/users", data={"name": "Olivia", "email": "z@test", "role": "agent"}, follow_redirects=False)
     assert r.status_code == 303 and "&link=" in r.headers["location"]
     token = r.headers["location"].split("token=")[1]
-    assert [u["name"] for u in desk.get("/users.json").json()] == ["Desk Admin", "Zeynep"]
+    assert [u["name"] for u in desk.get("/users.json").json()] == ["Desk Admin", "Olivia"]
     agent = TestClient(app)
     assert agent.post("/login", data={"email": "z@test", "password": "anything"}, follow_redirects=False).headers["location"].startswith("/login?error")   # invited, no password yet
     r = agent.post("/reset", data={"token": token, "password": "agent-pass-1", "password2": "agent-pass-1"}, follow_redirects=False)
@@ -114,7 +114,7 @@ def test_console_requires_sign_in_and_admin_manages_users(desk):
     assert agent.get("/me").status_code == 401
     again = TestClient(app)
     again.post("/login", data={"email": "z@test", "password": "new-pass-123"}, follow_redirects=False)
-    assert again.get("/me").json()["name"] == "Zeynep"
+    assert again.get("/me").json()["name"] == "Olivia"
 
 
 def test_first_run_setup_creates_the_admin_and_roles_can_change(fresh):
@@ -153,9 +153,9 @@ def test_machine_endpoints_need_the_api_key_when_one_is_set(monkeypatch):
     from app import security
     monkeypatch.setattr(security, "API_KEY", "k-123")
     c = TestClient(app)
-    assert c.post("/messages", json={"requester": "+905551110001", "text": "x"}).status_code == 401
+    assert c.post("/messages", json={"requester": "+15551110001", "text": "x"}).status_code == 401
     set_llm(ScriptedLLM([Reply(text="ok")]))
-    assert c.post("/messages", json={"requester": "+905551110001", "text": "x"}, headers={"X-API-Key": "k-123"}).status_code == 200
+    assert c.post("/messages", json={"requester": "+15551110001", "text": "x"}, headers={"X-API-Key": "k-123"}).status_code == 200
     assert c.get("/webhook", params={"hub.mode": "subscribe", "hub.verify_token": "muse-servicedesk", "hub.challenge": "1"}).status_code == 200
 
 
@@ -175,7 +175,7 @@ def test_profile_name_and_password_change(desk):
 
 def test_desk_can_reply_and_change_status(desk):
     set_llm(ScriptedLLM([Reply(text="Bakıyorum.")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "projektör açılmıyor"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "projektör açılmıyor"})
     r = desk.post("/tickets/1/reply", json={"text": "Teknisyen 14:00'te gelecek."}).json()
     assert r == {"id": 1, "sent": True}
     with session() as db:
@@ -192,7 +192,7 @@ def test_timing_and_sla_settings(desk):
     from datetime import timedelta
     from app.db import Event, Ticket, session
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "close_ticket", {"resolution": "ok"})]), Reply(text="kapandı")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "vpn bağlanmıyor"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "vpn bağlanmıyor"})
     with session() as db:      # stretch the trail: created 10 min before the first reply, resolved 20 min in
         t = db.get(Ticket, 1)
         t.created_at = t.created_at - timedelta(minutes=10)
@@ -228,7 +228,7 @@ def test_secrets_are_managed_in_the_console_and_encrypted(desk, tmp_path, monkey
     page = desk.get("/settings?tab=channels").text
     assert "EAAtoken" not in page and "…-xyz" in page and "configured" in page
     desk.post("/settings/secrets?tab=channels", data={"clear_DEMO_MANAGER_PHONE": "1"}, follow_redirects=False)
-    assert systems.USERS["E1002"]["phone"] == "+905551110002"
+    assert systems.USERS["E1002"]["phone"] == "+15551110002"
 
 
 def test_knowledge_base_search_across_pools_and_human_editing(desk):
@@ -253,7 +253,7 @@ def test_agent_written_sops_are_drafts_until_an_admin_publishes(desk):
     from app import knowledge
     set_llm(ScriptedLLM([Reply(tool_calls=[ToolCall("c1", "write_sop", {"title": "Projector HDMI handshake", "content": "Power-cycle the switcher."})]),
                          Reply(text="Yazdım.")]))
-    desk.post("/messages", json={"requester": "+905551110001", "text": "projektör görüntü vermiyor"})
+    desk.post("/messages", json={"requester": "+15551110001", "text": "projektör görüntü vermiyor"})
     drafts = [s for s in knowledge.listing("draft") if s["source"] == "agent"]
     assert drafts and drafts[0]["author"] == "L1" and drafts[0]["ticket_ids"] == [1]
     assert knowledge.search("L1", "projector hdmi") == []                      # not visible until published
@@ -272,7 +272,7 @@ def test_ticket_list_filters_needs_action_and_unresolved(desk):
     from app.db import Ticket, session
     with session() as db:
         for st in ("open", "waiting_user", "waiting_approval", "escalated", "resolved"):
-            db.add(Ticket(requester="+905551110001", title=st, status=st))
+            db.add(Ticket(requester="+15551110001", title=st, status=st))
     hdr = {"accept": "application/json"}
     assert sorted(t["status"] for t in desk.get("/tickets?status=needs_action", headers=hdr).json()) == ["escalated", "open"]
     assert sorted(t["status"] for t in desk.get("/tickets?status=unresolved", headers=hdr).json()) == ["escalated", "open", "waiting_approval", "waiting_user"]

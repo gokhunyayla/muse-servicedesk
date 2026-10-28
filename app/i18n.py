@@ -2,19 +2,22 @@
 these are the few messages the system sends without a model (which-ticket question, closes, reminders)."""
 from __future__ import annotations
 
+import os
 import re
+
+DEFAULT_LANG = os.getenv("DESK_LANG", "en")     # used only when a message carries no language hints at all
 
 _TR_HINT = re.compile(r"[çğıöşüÇĞİÖŞÜ]|\b(ve|bir|için|değil|yok|var|ama|çok|şifre|bağlan\w*|çalışm\w*|lütfen|merhaba|teşekkür\w*|evet|hayır|tamam|kapat|iptal|oldu)\b", re.I)
 _EN_HINT = re.compile(r"\b(the|and|not|can\'?t|cannot|please|hello|hi|thanks|password|connect\w*|work\w*|my|is|are|yes|no|solved|close|cancel|done|ok)\b", re.I)
 
 
-def detect(text: str, default: str | None = "tr") -> str | None:
+def detect(text: str, default: str | None = ...) -> str | None:  # type: ignore[assignment]
     """'tr' or 'en' from a message; Turkish wins ties. With no hints at all ("ok", "5", "close") returns
     `default`, so callers can fall back to the ticket's language."""
     tr = len(_TR_HINT.findall(text or ""))
     en = len(_EN_HINT.findall(text or ""))
     if tr == 0 and en == 0:
-        return default
+        return DEFAULT_LANG if default is ... else default
     return "en" if en > tr else "tr"
 
 
@@ -27,6 +30,8 @@ def ticket_lang(ticket) -> str:
 
 
 T = {
+    "approval_request": {"tr": "Onay talebi #{id}: {name} için \"{request}\". Cevap: ONAY {id} veya RET {id}",
+                         "en": "Approval request #{id}: \"{request}\" for {name}. Reply: APPROVE {id} or DENY {id}"},
     "which_ticket": {"tr": "Birden fazla açık talebiniz var, hangisi için?\n{choices}\n(Örn. \"#{first} çözüldü\")",
                      "en": "You have several open tickets; which one is this about?\n{choices}\n(e.g. \"#{first} solved\")"},
     "resume_offer": {"tr": "Az önce {chan} üzerinden #{id} (\"{title}\") konusunda kalmıştık. Oradan devam edelim mi, yoksa bu yeni bir konu mu? (evet / yeni konu)",
