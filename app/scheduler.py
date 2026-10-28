@@ -24,6 +24,10 @@ def run_due_followups() -> int:
             ran += 1
             if ticket is None or ticket.status == "resolved":
                 continue
+            if f.note.startswith("offboarding:"):                 # the last day has ended: close the account
+                from app.people import execute_offboarding
+                execute_offboarding(db, int(f.note.split(":", 1)[1]))
+                continue
             if f.note == "confirmation reminder":
                 from app.i18n import t as tr_, ticket_lang
                 db.add(Outbound(to=ticket.requester, ticket_id=ticket.id,

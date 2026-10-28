@@ -784,6 +784,18 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
             from app.channels import email_config, portal_config
             from app.config import auth_settings
             pc, ec = portal_config(), email_config()
+            from app.people import config as people_config
+            pp = people_config()
+            def qlines(qs):
+                return "\n".join(f"{q['key']} | {'required' if q.get('required') else 'optional'} | {q.get('en', '')} | {q.get('tr', '')}" for q in qs)
+            people_html = f"""<h3>Joiners &amp; leavers</h3><p class="muted">HR starts onboarding and offboarding on any channel (a CV can be attached); the desk asks the manager these questions on the manager's own channel, then creates or closes the account. One question per line: <code>key | required/optional | English | Türkçe</code>.</p>
+<form method="post" action="/settings/people">
+<div class="srow"><div><b>HR group</b><small>Directory group whose members may start joiners and leavers</small></div><div class="min"><input name="hr_group" value="{_esc(pp['hr_group'])}" style="width:200px" {dis}></div></div>
+<div class="srow"><div><b>Network / VPN group</b><small>Added when the manager says yes to network access</small></div><div class="min"><input name="vpn_group" value="{_esc(pp['vpn_group'])}" style="width:200px" {dis}></div></div>
+<div class="srow"><div><b>Device options</b><small>Offered to the manager, comma-separated</small></div><div class="min"><input name="devices" value="{_esc(pp['devices'])}" style="width:320px" {dis}></div></div>
+<label>Onboarding questions</label><textarea name="onboarding_questions" rows="6" style="font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}>{_esc(qlines(pp['onboarding_questions']))}</textarea>
+<label>Offboarding questions</label><textarea name="offboarding_questions" rows="3" style="font-family:ui-monospace,Menlo,monospace;font-size:12px" {dis}>{_esc(qlines(pp['offboarding_questions']))}</textarea>
+{('<div class="row end"><button class="btn primary slim" type="submit">Save joiners &amp; leavers</button></div>' if admin else '')}</form>"""
             from app.tools import verification_config
             vc = verification_config()
             link = f"{auth_settings.public_url.rstrip('/')}/support-agent"
@@ -796,6 +808,7 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <div class="srow"><div><b>Identity stays verified for</b><small>After employee no + birth year, the same phone/e-mail is not asked again within this window (0 = every ticket)</small></div><div class="min"><input name="identity_hours" type="number" min="0" max="168" value="{int(vc.get("identity_hours", 8))}" style="width:90px" {dis}> <span>hours</span></div></div>
 <div class="srow"><div><b>Spoken phrase</b><small>Also require the phrase in a voice note</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="voice_phrase" value="1" {"checked" if vc["voice_phrase"] else ""} {dis}> on</label></div></div>
 {('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
+{people_html}
 <h3>Support page</h3><p class="muted">Outside the console, for employees the desk knows (directory or <a href="/clients">Clients</a>): a chat that opens tickets like WhatsApp, and a one-time-code sign-in to follow their own tickets: <a href="/support-agent" target="_blank">{_esc(link)}</a></p>
 <form method="post" action="/settings/portal">
 <div class="srow"><div><b>Enabled</b><small>Switch the page off to take the channel down</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if pc["enabled"] else ""} {dis}> on</label></div></div>
@@ -903,6 +916,34 @@ async def settings_graph(request: Request, admin: User = Depends(admin_user)):
             msg = "Microsoft 365 failed: " + str(e)[:160]
         return RedirectResponse(f"/settings?tab=connectors&info={quote(msg)}", 303)
     return RedirectResponse("/settings?tab=connectors&info=Microsoft+365+saved", 303)
+
+
+@router.post("/settings/people")
+async def settings_people(request: Request, admin: User = Depends(admin_user)):
+    from app.people import DEFAULT_PEOPLE
+    from app.sla import put_setting
+    check_origin(request)
+    form = await request.form()
+
+    def parse(text: str, default: list) -> list:
+        out = []
+        for line in str(text or "").splitlines():
+            parts = [x.strip() for x in line.split("|")]
+            if len(parts) < 3 or not parts[0] or not parts[2]:
+                continue
+            key = "".join(ch for ch in parts[0].lower() if ch.isalnum() or ch == "_")[:32]
+            out.append({"key": key, "required": parts[1].lower().startswith("req"), "en": parts[2][:300],
+                        "tr": (parts[3] if len(parts) > 3 and parts[3] else parts[2])[:300]})
+        return out or default
+    value = {"hr_group": str(form.get("hr_group", "hr")).strip()[:64] or "hr",
+             "vpn_group": str(form.get("vpn_group", "")).strip()[:64],
+             "devices": str(form.get("devices", "")).strip()[:300] or DEFAULT_PEOPLE["devices"],
+             "onboarding_questions": parse(form.get("onboarding_questions", ""), DEFAULT_PEOPLE["onboarding_questions"]),
+             "offboarding_questions": parse(form.get("offboarding_questions", ""), DEFAULT_PEOPLE["offboarding_questions"])}
+    put_setting("people", value)
+    with session() as db:
+        audit(db, admin.email, "settings.people", detail=f"hr_group={value['hr_group']} questions={len(value['onboarding_questions'])}+{len(value['offboarding_questions'])}", ip=_ip(request))
+    return RedirectResponse("/settings?tab=channels&info=Joiners+%26+leavers+saved", 303)
 
 
 @router.post("/settings/supervisor")

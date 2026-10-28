@@ -721,3 +721,6 @@ def schedule_followup(ctx: Ctx, hours: int, note: str) -> dict:
 def add_note(ctx: Ctx, text: str) -> dict:
     log(ctx.db, ctx.ticket.id, ctx.agent, "note", text)
     return {"ok": True}
+
+
+from app import people  # noqa: E402,F401  (joiners and leavers register their tools here)

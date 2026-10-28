@@ -217,12 +217,16 @@ async def say(request: Request, text: str = Form(""), image: UploadFile | None =
     who = _ident(request) or {"mode": "anon", "stage": "ask_contact", "name": ""}     # first message without a page load
     rate_limit(request, "support-say", 60, 300)
     data, mime = None, "image/jpeg"
-    if image is not None and image.filename:
-        data = await image.read()
-        mime = image.content_type or mime
-        if not mime.startswith("image/") or len(data) > 8_000_000:
-            return JSONResponse({"error": "only images up to 8 MB"}, 422)
     text = text.strip()
+    if image is not None and image.filename:
+        from app.attachments import is_document, with_document
+        raw, ctype = await image.read(), image.content_type or ""
+        if ctype.startswith("image/") and len(raw) <= 8_000_000:
+            data, mime = raw, ctype
+        elif is_document(image.filename, ctype) and len(raw) <= 10_000_000:
+            text = with_document(text, image.filename, ctype, raw)      # a CV, a form: read, not kept
+        else:
+            return JSONResponse({"error": "photos up to 8 MB, or PDF / Word documents up to 10 MB"}, 422)
     if not text and data is None:
         return JSONResponse({"error": "empty"}, 422)
     if who.get("mode") != "client":
@@ -473,7 +477,7 @@ APP = """
 <div class="log" id="log"><div class="m desk" id="hello">{HELLO}</div></div>
 <div class="typing" id="typing"></div>
 <form class="composer" id="f" onsubmit="return send(event)">
-<label class="att" title="Attach a photo"><input type="file" id="img" accept="image/*" onchange="preview()"><svg viewBox="0 0 24 24"><path d="M21.4 11.1 12.3 20.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label>
+<label class="att" title="Attach a photo or a document"><input type="file" id="img" accept="image/*,.pdf,.docx,.txt" onchange="preview()"><svg viewBox="0 0 24 24"><path d="M21.4 11.1 12.3 20.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label>
 <textarea id="t" rows="1" placeholder="Describe the problem…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send(event)}"></textarea>
 <button class="btn primary" type="submit">Send</button></form></section></div>
 <script>

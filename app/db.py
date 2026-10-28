@@ -375,6 +375,25 @@ class Connector(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class PeopleProcess(Base):
+    """An onboarding or offboarding started by HR: the facts HR gave, the manager's answers, and what was done."""
+    __tablename__ = "people_processes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))                       # onboarding | offboarding
+    status: Mapped[str] = mapped_column(String(24), default="waiting_manager")   # waiting_manager | scheduled | done | failed
+    hr_contact: Mapped[str] = mapped_column(String(255))                # who started it (phone or e-mail)
+    hr_ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    manager_no: Mapped[str] = mapped_column(String(255), default="")
+    manager_contact: Mapped[str] = mapped_column(String(255), default="")
+    manager_ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)              # name, start/last day, department, personal contact …
+    answers: Mapped[dict] = mapped_column(JSON, default=dict)           # question key -> the manager's answer
+    result: Mapped[dict] = mapped_column(JSON, default=dict)            # what was created / removed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class Device(Base):
     """A real machine running the Muse endpoint agent. It only ever calls out to the desk (heartbeat, job poll);
     the desk never connects in. Authenticated by a per-device token, stored hashed."""

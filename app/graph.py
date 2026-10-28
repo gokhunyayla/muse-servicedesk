@@ -358,20 +358,26 @@ def new_messages(since_iso: str, limit: int = 20) -> list[dict]:
             text = re.sub(r"<[^>]+>", " ", text)
             import html as _h
             text = _h.unescape(text)
-        image, mime = None, "image/jpeg"
+        image, mime, document = None, "image/jpeg", None
         if m.get("hasAttachments"):
+            import base64
+            from app.attachments import is_document
             try:
                 att = _call("GET", f"/users/{_mailbox()}/messages/{m['id']}/attachments", params={"$select": "id,name,contentType,size"})
                 for a in att.get("value", []):
-                    if str(a.get("contentType", "")).startswith("image/") and int(a.get("size", 0)) < 8_000_000:
+                    ctype, size = str(a.get("contentType", "")), int(a.get("size", 0))
+                    if size > 10_000_000:
+                        continue
+                    if image is None and ctype.startswith("image/"):
                         full = _call("GET", f"/users/{_mailbox()}/messages/{m['id']}/attachments/{a['id']}")
-                        import base64
-                        image, mime = base64.b64decode(full.get("contentBytes", "")), a["contentType"]
-                        break
+                        image, mime = base64.b64decode(full.get("contentBytes", "")), ctype
+                    elif document is None and is_document(a.get("name", ""), ctype):
+                        full = _call("GET", f"/users/{_mailbox()}/messages/{m['id']}/attachments/{a['id']}")
+                        document = (a.get("name", "document"), ctype, base64.b64decode(full.get("contentBytes", "")))
             except GraphError as e:
                 logger.warning("attachment read failed: %s", e)
         out.append({"from": (addr.get("address") or "").lower(), "name": addr.get("name", ""), "subject": (m.get("subject") or "")[:200],
-                    "raw_text": text, "image": image, "mime": mime, "received": m.get("receivedDateTime", ""),
+                    "raw_text": text, "image": image, "mime": mime, "document": document, "received": m.get("receivedDateTime", ""),
                     "message_id": m.get("internetMessageId", "")})
     return out
 

@@ -108,15 +108,19 @@ def parse_email(raw: bytes) -> dict | None:
     if not addr or _AUTO.search(addr) or _AUTO.search(msg.get("Subject", "")) or msg.get("Auto-Submitted", "no") != "no":
         return None
     subject = re.sub(r"\s+", " ", str(email.header.make_header(email.header.decode_header(msg.get("Subject", ""))))).strip()[:200]
-    text, image, mime = "", None, "image/jpeg"
+    from app.attachments import is_document
+    text, image, mime, document = "", None, "image/jpeg", None
     for part in msg.walk():
         ctype = part.get_content_type()
         disp = str(part.get("Content-Disposition", ""))
+        fname = part.get_filename() or ""
         if ctype == "text/plain" and "attachment" not in disp and not text:
             payload = part.get_payload(decode=True) or b""
             text = payload.decode(part.get_content_charset() or "utf-8", "replace")
         elif ctype.startswith("image/") and image is None:
             image, mime = part.get_payload(decode=True), ctype
+        elif document is None and fname and is_document(fname, ctype):
+            document = (fname, ctype, part.get_payload(decode=True) or b"")
     if not text and msg.get_content_type() == "text/html":
         text = re.sub(r"<[^>]+>", " ", (msg.get_payload(decode=True) or b"").decode(msg.get_content_charset() or "utf-8", "replace"))
     # drop quoted history and signatures so the agent sees the new request only
@@ -127,7 +131,7 @@ def parse_email(raw: bytes) -> dict | None:
         lines.append(line)
     body = "\n".join(lines).strip()
     m = re.search(r"\[#(\d+)\]", subject)
-    return {"from": addr, "name": name, "subject": subject, "text": body, "image": image, "mime": mime,
+    return {"from": addr, "name": name, "subject": subject, "text": body, "image": image, "mime": mime, "document": document,
             "ticket_id": int(m.group(1)) if m else None, "message_id": msg.get("Message-ID", "")}
 
 
@@ -145,6 +149,9 @@ def ingest_email(parsed: dict) -> tuple[Ticket | None, str] | None:
     text = parsed["text"] or parsed["subject"]
     if parsed["subject"] and parsed["ticket_id"] is None and parsed["subject"].lower() not in text.lower():
         text = f"{parsed['subject']}\n{text}".strip()
+    if parsed.get("document"):
+        from app.attachments import with_document
+        text = with_document(text, *parsed["document"])
     with session() as db:
         # a reply to one of our mails carries [#id] and continues that ticket; any other mail is a request of its own
         tagged = db.get(Ticket, parsed["ticket_id"]) if parsed["ticket_id"] else None
@@ -278,7 +285,8 @@ def _parse_graph(m: dict) -> dict | None:
     body = re.sub(r"\n{3,}", "\n\n", body)
     t = re.search(r"\[#(\d+)\]", m["subject"])
     return {"from": addr, "name": m.get("name", ""), "subject": m["subject"], "text": body, "image": m.get("image"),
-            "mime": m.get("mime", "image/jpeg"), "ticket_id": int(t.group(1)) if t else None, "message_id": m.get("message_id", "")}
+            "mime": m.get("mime", "image/jpeg"), "document": m.get("document"),
+            "ticket_id": int(t.group(1)) if t else None, "message_id": m.get("message_id", "")}
 
 
 def test_email() -> tuple[bool, str]:

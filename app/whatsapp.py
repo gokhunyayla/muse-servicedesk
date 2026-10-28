@@ -141,6 +141,10 @@ def _handle_payload(payload: dict) -> dict:
         elif kind == "image":
             image, mime = download_media(m["image"]["id"])
             text = m["image"].get("caption", "") or "(fotoğraf gönderdi)"
+        elif kind == "document":
+            from app.attachments import with_document
+            data, dmime = download_media(m["document"]["id"])
+            text = with_document(m["document"].get("caption", ""), m["document"].get("filename", "document"), dmime, data)
         elif kind == "video":
             data, _ = download_media(m["video"]["id"])
             frames = sample_frames(data)
