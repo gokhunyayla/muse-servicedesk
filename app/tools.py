@@ -91,6 +91,8 @@ def remembered_identity(db, requester: str) -> dict | None:
     """A verification done on this phone/e-mail within identity_hours (so the employee is not asked again)."""
     from datetime import datetime
     from app.db import Setting, _now
+    if int(verification_config().get("identity_hours") or 0) <= 0:      # policy: ask on every ticket
+        return None
     row = db.get(Setting, _identity_key(requester))
     v = row.value if row and row.value else None
     if not v or datetime.fromisoformat(v["until"]) < _now():
