@@ -129,7 +129,7 @@ def tickets(request: Request, status: str | None = None, owner: str | None = Non
         if q:
             qs = qs.filter(Ticket.title.contains(q) | Ticket.requester.contains(q))
         return [{"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "rating": t.rating, "incident_id": t.incident_id,
-                 "requester": t.requester, "created_at": t.created_at.isoformat()} for t in qs.limit(200)]
+                 "requester": t.requester, "assignee": t.assignee, "created_at": t.created_at.isoformat()} for t in qs.limit(200)]
 
 
 PAGE = """<!doctype html>
@@ -326,7 +326,7 @@ function renderList(){
  const needle=q.toLowerCase();
  const ts=needle?allTs.filter(t=>(t.title||'').toLowerCase().includes(needle)||(t.requester||'').toLowerCase().includes(needle)||String(t.id)===needle.replace('#','')):allTs;
  $('#tickets').innerHTML=ts.map(t=>`<div class="item ${cur===t.id?'on':''}" data-id="${t.id}" onclick="show(${t.id})"><input type="checkbox" ${sel.has(t.id)?'checked':''} onclick="event.stopPropagation()" onchange="toggle(${t.id},this.checked)">
-   <div><div class="t" title="${esc(t.title)}">#${t.id} ${esc(t.title)}</div><div class="m">${esc(t.owner)}${t.incident_id?` · problem #${t.incident_id}`:''}${t.rating?` · ${'★'.repeat(t.rating)}`:''}</div></div>
+   <div><div class="t" title="${esc(t.title)}">#${t.id} ${esc(t.title)}</div><div class="m">${esc(holder(t))}${t.incident_id?` · problem #${t.incident_id}`:''}${t.rating?` · ${'★'.repeat(t.rating)}`:''}</div></div>
    <div class="r">${pill(t.status)}<small>${ago(t.created_at)}</small></div></div>`).join('')||'<small style="padding:8px">No tickets match.</small>';
 }
 function toggleSelect(){selecting=!selecting;if(!selecting)sel.clear();$('#tickets').classList.toggle('selecting',selecting);$('#selectBtn').textContent=selecting?'Cancel':'Select';$('#mergeBtn').style.display=selecting?'':'none';updateSel();load();}
@@ -343,6 +343,7 @@ async function doAssign(){const id=$('#assignModal').dataset.id;$('#aGo').disabl
  await fetch('/tickets/'+id+'/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner:$('#aOwner').value,note:$('#aNote').value.trim(),assignee:$('#aName').value.trim()})});
  $('#aGo').disabled=false;$('#aGo').textContent='Assign';closeModal('assignModal');$('#aNote').value='';await load();show(id);}
 const AGENT_LABEL={L1:'L1 · first contact',L2:'L2 · devices & network',L3:'L3 · servers & security',L4:'L4 · vendors & logistics'};
+function holder(t){if(AGENT_LABEL[t.owner])return 'AI agent '+AGENT_LABEL[t.owner];if(t.assignee)return 'Human · '+t.assignee;if(t.owner==='human'||t.owner==='desk')return 'Human engineer · unassigned';return t.owner||'';}
 const openRuns=new Set();
 function paras(txt){const parts=String(txt).split(/\\s*(?=(?:#\\d+\\s*[\\[(—:-])|Deliberately skipped|Noticed|Did:|Skipped:)/).map(s=>s.trim()).filter(Boolean);
  return (parts.length>1?parts:String(txt).split(/(?<=[.!?])\\s+(?=[A-Z#])/)).map(s=>`<p>${esc(s)}</p>`).join('');}
@@ -385,7 +386,7 @@ function renderTiming(tm){if(!tm)return '';
 async function show(id,quiet){cur=id;const t=await (await fetch('/tickets/'+id)).json();
  $('#ttitle').innerHTML=`#${t.id} ${esc(t.title)} ${pill(t.status)}`;
  $('#tactions').innerHTML=`<button class="btn" onclick="openAssign(${t.id})">Assign</button>`+(t.status!=='resolved'?` <button class="btn" onclick="closeTicket(${t.id})">Close</button>`:'');
- $('#meta').innerHTML=`<h4>Details</h4><dl><dt>Requester</dt><dd>${esc(t.requester||'')} <span class="chip">${esc({whatsapp:'WhatsApp',web:'Web chat',email:'E-mail',api:'API'}[t.channel]||t.channel||'')}</span></dd><dt>Status</dt><dd><select onchange="setStatus(${t.id},this.value)">${['open','waiting_user','waiting_approval','escalated','resolved'].map(x=>`<option value="${x}" ${x===t.status?'selected':''}>${LABELS[x]}</option>`).join('')}</select></dd><dt>Owner</dt><dd>${esc(AGENT_LABEL[t.owner]||t.owner||'')}</dd>
+ $('#meta').innerHTML=`<h4>Details</h4><dl><dt>Requester</dt><dd>${esc(t.requester||'')} <span class="chip">${esc({whatsapp:'WhatsApp',web:'Web chat',email:'E-mail',api:'API'}[t.channel]||t.channel||'')}</span></dd><dt>Status</dt><dd><select onchange="setStatus(${t.id},this.value)">${['open','waiting_user','waiting_approval','escalated','resolved'].map(x=>`<option value="${x}" ${x===t.status?'selected':''}>${LABELS[x]}</option>`).join('')}</select></dd><dt>Owner</dt><dd>${esc(holder(t))}</dd>
   <dt>Identity</dt><dd>${t.verified?'<span class="tagok">verified</span>':'not verified'}</dd><dt>Opened</dt><dd>${fmt(t.created_at)}</dd>
   ${t.rating?`<dt>Rating</dt><dd>${'★'.repeat(t.rating)}${'☆'.repeat(5-t.rating)}</dd>`:''}
   ${t.incident_id?`<dt>Problem</dt><dd><a href="#" onclick="show(${t.incident_id});return false">#${t.incident_id}</a></dd>`:''}

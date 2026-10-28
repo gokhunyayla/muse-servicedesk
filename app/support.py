@@ -355,7 +355,7 @@ def my_tickets(request: Request) -> list[dict]:
         out = []
         for t in db.query(Ticket).filter(Ticket.requester.in_(_addresses(who))).order_by(Ticket.id.desc()).limit(100):
             last = [e for e in t.events if e.kind == "message"]
-            out.append({"id": t.id, "title": t.title.split("\n")[0][:90], "status": t.status, "owner": t.owner, "channel": t.channel,
+            out.append({"id": t.id, "title": t.title.split("\n")[0][:90], "status": t.status, "owner": t.owner, "assignee": t.assignee, "channel": t.channel,
                         "created_at": t.created_at.isoformat(timespec="minutes"), "rating": t.rating,
                         "last_at": last[-1].at.isoformat(timespec="minutes") if last else None,
                         "risk": risk(t, t.events) if t.status != "resolved" else None})
@@ -372,7 +372,7 @@ def my_ticket(request: Request, ticket_id: int) -> dict:
             raise HTTPException(404)
         msgs = [{"who": "you" if e.actor == "user" else "desk", "text": e.content, "at": e.at.isoformat(timespec="minutes")}
                 for e in t.events if e.kind == "message"]
-        return {"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "channel": t.channel, "rating": t.rating,
+        return {"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "assignee": t.assignee, "channel": t.channel, "rating": t.rating,
                 "created_at": t.created_at.isoformat(timespec="minutes"), "resolution": t.resolution, "messages": msgs,
                 "timing": timing(t, t.events)}
 
@@ -463,6 +463,8 @@ APP = """
 const B='/support-agent';let MODE='{MODE}';
 const log=document.getElementById('log'),T=document.getElementById('t'),TY=document.getElementById('typing'),IMG=document.getElementById('img');
 const LAB={open:'Open',waiting_user:'Waiting for you',waiting_approval:'Waiting for approval',escalated:'With an engineer',resolved:'Resolved'};
+const AG={L1:'AI agent L1 · first contact',L2:'AI agent L2 · devices & network',L3:'AI agent L3 · servers & security',L4:'AI agent L4 · vendors & logistics'};
+function holder(t){if(AG[t.owner])return AG[t.owner];if(t.assignee)return 'Engineer · '+t.assignee;if(t.owner==='human'||t.owner==='desk')return 'Engineer · being assigned';return t.owner||'';}
 let pendingImg=null,cur=null,tickets=[];
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function fmt(at){return at?at.replace('T',' '):new Date().toISOString().slice(0,16).replace('T',' ')}
@@ -472,7 +474,7 @@ function preview(){const f=IMG.files[0];if(!f)return;pendingImg=URL.createObject
 function setHead(t){const st=document.getElementById('hStatus'),S=document.getElementById('stars');
  if(!t){document.getElementById('hTitle').textContent='New conversation';st.style.display='none';document.getElementById('hMeta').textContent='';document.getElementById('btnClose').style.display='none';S.style.display='none';return;}
  document.getElementById('hTitle').textContent='#'+t.id+' · '+(t.title||'').split(String.fromCharCode(10))[0].slice(0,70);st.style.display='';st.textContent=LAB[t.status]||t.status;st.className='tag '+t.status;
- document.getElementById('hMeta').textContent='opened '+fmt(t.created_at)+' · via '+t.channel+(t.resolution?' · '+t.resolution:'');
+ document.getElementById('hMeta').textContent='with '+holder(t)+' · opened '+fmt(t.created_at)+' · via '+t.channel+(t.resolution?' · '+t.resolution:'');
  document.getElementById('btnClose').style.display=t.status==='resolved'?'none':'';
  if(t.status==='resolved'){S.style.display='';S.innerHTML='<span class="muted" style="font-size:12px">How did we do?</span> '+[1,2,3,4,5].map(n=>`<button class="${t.rating&&n<=t.rating?'on':''}" onclick="rate(${n})">★</button>`).join('');}else{S.style.display='none';}}
 function newConv(){cur=null;setHead(null);log.innerHTML='<div class="sys">Describe your problem or request. Photos of error screens help.<br>Each new topic becomes its own request; you will see it on the left.</div>';markList();T.focus();}
@@ -481,7 +483,7 @@ function toggleList(){const L=document.getElementById('layout');L.classList.togg
 function markList(){document.querySelectorAll('.side .it').forEach(b=>b.classList.toggle('on',Number(b.dataset.id)===cur));}
 async function loadTickets(){if(MODE!=='client')return;const r=await fetch(B+'/tickets');if(!r.ok)return;tickets=await r.json();
  const rb=document.getElementById('reqBtn');rb.style.display='';const op=tickets.filter(t=>t.status!=='resolved').length;rb.textContent='My requests'+(op?' · '+op+' open':'');
- const L=document.getElementById('tlist');L.innerHTML=tickets.length?tickets.map(t=>`<button class="it" data-id="${t.id}" onclick="openTicket(${t.id})"><b>#${t.id} ${esc(t.title)}</b><small><span class="tag ${t.status}">${LAB[t.status]||t.status}</span>${t.risk&&t.risk.pct>=100?'<span class="tag risk">SLA</span>':''}<span>${fmt(t.last_at||t.created_at)}</span></small></button>`).join(''):'<div class="sys">No requests yet.</div>';markList();}
+ const L=document.getElementById('tlist');L.innerHTML=tickets.length?tickets.map(t=>`<button class="it" data-id="${t.id}" onclick="openTicket(${t.id})"><b>#${t.id} ${esc(t.title)}</b><small><span class="tag ${t.status}">${LAB[t.status]||t.status}</span>${t.risk&&t.risk.pct>=100?'<span class="tag risk">SLA</span>':''}<span>${fmt(t.last_at||t.created_at)}</span></small><small>${esc(holder(t))}</small></button>`).join(''):'<div class="sys">No requests yet.</div>';markList();}
 async function openTicket(id){const r=await fetch(B+'/tickets/'+id);if(!r.ok)return;const t=await r.json();cur=id;setHead(t);log.innerHTML='';t.messages.forEach(m=>add(m.who,m.text,m.at));markList();}
 async function send(e){e.preventDefault();const text=T.value.trim();const f=IMG.files[0];if(!text&&!f)return;
  add('you',text||'(photo)',null,pendingImg);T.value='';const fd=new FormData();fd.append('text',text);if(f)fd.append('image',f);if(cur)fd.append('ticket',cur);IMG.value='';pendingImg=null;
