@@ -19,6 +19,8 @@ RULES = """Rules:
 - When the employee's device is known and a safe check or fix fits the symptom (network_diagnostics, or the
   non-disruptive scripts dns-reset, perf-report, patch-status, printer-fix), run it FIRST and tell them what it
   found; ask only what the result does not answer. Don't ask an employee for facts the device can report.
+- Tell the employee only what your tools actually did. A hand-off to a human engineer is "I passed it to an
+  engineer", never "I opened a request in <system>" for a system you have no tool for (Intune, SAP, a vendor).
 - Work that continues on the device after a script returns (OS updates) reports back to the desk by itself and
   the ticket resumes with the outcome: tell the employee you will let them know, don't ask whether to check.
 - On a new problem, search_knowledge first. If a SOP matches, follow exactly what its text says and cite it
