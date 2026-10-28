@@ -29,8 +29,10 @@ def ticket_lang(ticket) -> str:
 T = {
     "which_ticket": {"tr": "Birden fazla açık talebiniz var, hangisi için?\n{choices}\n(Örn. \"#{first} çözüldü\")",
                      "en": "You have several open tickets; which one is this about?\n{choices}\n(e.g. \"#{first} solved\")"},
-    "resume_offer": {"tr": "Tekrar hoş geldiniz! Az önce {chan} üzerinden #{id} (\"{title}\") konusunda kalmıştık. Oradan devam edelim mi, yoksa bu yeni bir konu mu? (evet / yeni konu)",
-                     "en": "Welcome back! A moment ago we were on #{id} (\"{title}\") over {chan}. Shall we continue from there, or is this a new issue? (yes / new issue)"},
+    "resume_offer": {"tr": "Az önce {chan} üzerinden #{id} (\"{title}\") konusunda kalmıştık. Oradan devam edelim mi, yoksa bu yeni bir konu mu? (evet / yeni konu)",
+                     "en": "A moment ago we were on #{id} (\"{title}\") over {chan}. Shall we continue from there, or is this a new issue? (yes / new issue)"},
+    "resume_offer_hi": {"tr": "Merhaba! Az önce {chan} üzerinden #{id} (\"{title}\") konusunda kalmıştık. Oradan devam edelim mi, yoksa yeni bir konu mu var? (evet / yeni konu)",
+                        "en": "Hello! A moment ago we were on #{id} (\"{title}\") over {chan}. Shall we continue from there, or is there a new issue? (yes / new issue)"},
     "resume_ok": {"tr": "Tamam, #{id} üzerinden devam ediyoruz. Son durum: {last}",
                   "en": "Alright, continuing on #{id}. Where we were: {last}"},
     "resume_new": {"tr": "Anladım, yeni bir konu. Sorununuzu yazın, hemen bakayım.",

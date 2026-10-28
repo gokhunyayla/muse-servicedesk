@@ -89,15 +89,17 @@ def recent_switch(db, requester: str, channel: str) -> Ticket | None:
     return None
 
 
-def resume_offer(db, requester: str, channel: str, lang: str, pending: str = "") -> tuple[Ticket, str] | None:
-    """If the employee just switched channels mid-conversation, ask whether to pick up where they left off."""
+def resume_offer(db, requester: str, channel: str, lang: str, pending: str = "", greeting: bool = False) -> tuple[Ticket, str] | None:
+    """If the employee just switched channels mid-conversation, ask whether to pick up where they left off.
+    `greeting`: they said hello first, so the question doubles as the greeting (one message, not two)."""
     import time as _t
     t = recent_switch(db, requester, channel)
     if t is None:
         return None
     _RESUME[requester] = {"ticket": t.id, "pending": pending, "until": _t.time() + 15 * 60}
     names = CHANNEL_NAMES["tr" if lang == "tr" else "en"]
-    return t, tr_("resume_offer", lang, chan=names.get(t.channel, t.channel), id=t.id, title=t.title.split(chr(10))[0][:50])
+    return t, tr_("resume_offer_hi" if greeting else "resume_offer", lang, chan=names.get(t.channel, t.channel), id=t.id,
+                  title=t.title.split(chr(10))[0][:50])
 
 
 def _similar_recent(db, ticket: Ticket, text: str, minutes: int = 15) -> list[Ticket]:
@@ -441,6 +443,9 @@ def handle_message(db, requester: str, text: str, image: bytes | None = None,
     # 3) A greeting is answered, never recorded: the desk is a conversation, a ticket is a request.
     if pinned is None and is_greeting(text):
         lang = detect(text, None) or (ticket_lang(open_tickets[0]) if open_tickets else "tr")
+        offer = resume_offer(db, requester, channel, lang, greeting=True)      # hello on a new channel: greet and offer in one go
+        if offer is not None:
+            return offer
         if open_tickets:
             return open_tickets[0], tr_("greeting_open", lang, id=open_tickets[0].id, title=open_tickets[0].title[:60])
         return None, tr_("greeting", lang)

@@ -165,6 +165,12 @@ def test_channel_switch_offers_to_continue_and_resumes_on_yes():
         assert t.id == tid and t.channel == "web" and "Bakıyorum" in answer
         msgs = [e.content for e in t.events if e.kind == "message" and e.actor == "user"]
         assert msgs[-1].startswith("hâlâ bağlanmıyor")
+    # a hello on the other channel: one message that greets and offers, never two
+    agents._RESUME.clear()
+    with session() as db:
+        db.get(Ticket, tid).channel = "whatsapp"
+        held, answer = handle_message(db, "+905551110001", "selam", channel="web")
+        assert held.id == tid and answer.startswith("Merhaba!") and "devam edelim mi" in answer
     # the other answer: a new issue
     agents._RESUME.clear()
     set_llm(ScriptedLLM([Reply(text="Yazıcıya bakıyorum.")]))
