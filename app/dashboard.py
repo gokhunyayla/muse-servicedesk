@@ -153,7 +153,7 @@ main{display:grid;gap:16px;padding:12px 16px 16px}main.dash{grid-template-column
 @media(max-width:1100px){main.dash{grid-template-columns:1fr 1fr}}@media(max-width:900px){main.dash,main.tix{grid-template-columns:1fr;padding:12px;gap:12px}}
 [data-mode=dashboard] .only-tickets{display:none!important}[data-mode=tickets] .only-dash{display:none!important}
 .tl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.search{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);min-width:220px}
-.list{padding:10px}.list .thead{padding:4px 6px 8px}.items{max-height:76vh;overflow:auto;display:flex;flex-direction:column}
+.list{padding:10px}.list .thead{padding:4px 6px 8px}.search.inlist{min-width:0;width:200px;padding:5px 9px;font-size:13px}@media(max-width:700px){.search.inlist{width:100%}}.items{max-height:76vh;overflow:auto;display:flex;flex-direction:column}
 .item{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;padding:9px 8px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
 .item>div{min-width:0}.item input{display:none}.items.selecting .item{grid-template-columns:22px 1fr auto}.items.selecting .item input{display:block}
 .item:hover{background:var(--bg)}.item.on{background:rgba(8,102,255,.14)}.item .t{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -222,7 +222,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 <div class="toolbar"><div class="tl"><div class="seg" id="period"><button data-p="today">Today</button><button data-p="week">Week</button><button data-p="month">Month</button><button data-p="quarter">Quarter</button><button data-p="year">Year</button><button data-p="all" class="on">All</button></div>
 <div class="seg only-tickets" id="statusSeg"><button data-s="" class="on">Any status</button><button data-s="needs_action" title="Open or escalated: the desk has to act">Needs our action</button><button data-s="unresolved" title="Everything not resolved">Unresolved</button><button data-s="open">Open</button><button data-s="waiting_user">Waiting</button><button data-s="waiting_approval">Approval</button><button data-s="escalated">Escalated</button><button data-s="resolved">Resolved</button></div>
 <div class="seg only-tickets" id="ownerSeg"><button data-o="" class="on">Any tier</button><button data-o="L1">L1</button><button data-o="L2">L2</button><button data-o="L3">L3</button><button data-o="L4">L4</button><button data-o="human">Human</button></div>
-<input class="search only-tickets" id="q" type="search" placeholder="Search title or requester…"></div>
+</div>
 <span class="live"><small id="scope"></small> · <i></i><span id="upd">live</span></span></div>
 <div class="cards only-dash" id="cards"></div>
 <main class="dash only-dash">
@@ -236,7 +236,7 @@ h4.sub{margin:16px 0 6px;font-size:12px;color:var(--muted);text-transform:upperc
 <div class="kpis six" id="supKpis" style="margin-top:10px"></div><h4 class="sub">Recent runs</h4><div id="sup" class="runs">—</div></section>
 </main>
 <main class="tix only-tickets">
-<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><small id="selinfo"></small><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
+<section class="card list"><div class="thead"><h3 id="tt">Tickets</h3><div class="actions"><input class="search inlist" id="q" type="search" placeholder="Filter by title or requester…" aria-label="Filter tickets"><small id="selinfo"></small><button class="btn" id="selectBtn" onclick="toggleSelect()">Select</button><button class="btn primary" id="mergeBtn" style="display:none" disabled onclick="openMerge()">Merge into problem</button></div></div>
 <div class="items" id="tickets"></div></section>
 <section class="card detail" id="detail"><div class="thead"><h3 id="ttitle">Ticket</h3><div class="actions" id="tactions"></div></div>
 <div class="dcols"><div><div id="trail" class="timeline"><small>Select a ticket to see its conversation and what the agents did.</small></div>
