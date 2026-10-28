@@ -226,7 +226,7 @@ def set_enabled(employee_no: str, on: bool) -> None:
     _call("PATCH", f"/users/{_uid(employee_no)}", json={"accountEnabled": on})
 
 
-def create_user(name: str, department: str, manager_no: str, phone: str) -> tuple[str, str, str]:
+def create_user(name: str, department: str, manager_no: str, phone: str, extra: dict | None = None) -> tuple[str, str, str]:
     """New account in the tenant's domain. Returns (employee_no, upn, initial password)."""
     import secrets as _s
     import unicodedata
@@ -239,6 +239,7 @@ def create_user(name: str, department: str, manager_no: str, phone: str) -> tupl
     body = {"accountEnabled": True, "displayName": name, "mailNickname": nick, "userPrincipalName": upn,
             "department": department, "mobilePhone": phone or None,
             "passwordProfile": {"forceChangePasswordNextSignIn": True, "password": pw}}
+    body.update({k: v for k, v in (extra or {}).items() if v})   # set at creation: a PATCH right after may 404 (replication)
     where = c["usage_location"].strip().upper() or _tenant_country()
     if where:
         body["usageLocation"] = where        # needed before a licence can be assigned

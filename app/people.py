@@ -276,18 +276,13 @@ def complete_onboarding(ctx: Ctx, process_id: int) -> dict:
     g = systems._graph()
     # 1. the account
     if g:
-        emp, upn, pw = g.create_user(d["name"], d["department"], p.manager_no, d.get("personal_phone", ""))
-        extra = {"jobTitle": d.get("title") or None}
-        if d.get("personal_email"):
-            extra["otherMails"] = [d["personal_email"]]
+        extra = {"jobTitle": d.get("title") or None, "otherMails": [d["personal_email"]] if d.get("personal_email") else None}
         attr = g.config().get("employee_attr") or "employeeId"
         if d.get("employee_no") and attr == "employeeId":
             extra["employeeId"] = d["employee_no"]
+        emp, upn, pw = g.create_user(d["name"], d["department"], p.manager_no, d.get("personal_phone", ""), extra=extra)
+        if extra.get("employeeId"):
             emp = d["employee_no"]
-        try:
-            g._call("PATCH", f"/users/{upn}", json={k: v for k, v in extra.items() if v})
-        except Exception as e:  # noqa: BLE001
-            problems.append(f"profile details: {e}")
     else:
         emp = systems.create_user(d["name"], d["department"], p.manager_no, d.get("personal_phone", ""))
         upn, pw = f"{emp.lower()}@company.com", systems.reset_password(emp)
@@ -298,6 +293,7 @@ def complete_onboarding(ctx: Ctx, process_id: int) -> dict:
     wanted = [x.strip() for x in a.get("groups", "").replace(";", ",").split(",") if x.strip() and x.strip().lower() not in ("none", "yok", "-")]
     if _yes(a.get("vpn", "")) and config().get("vpn_group"):
         wanted.append(config()["vpn_group"])
+    wanted = list(dict.fromkeys(wanted))                   # "vpn-users" named and "VPN: yes" is one group
     joined = []
     for grp in wanted:
         try:
