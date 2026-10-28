@@ -129,7 +129,7 @@ def tickets(request: Request, status: str | None = None, owner: str | None = Non
         if q:
             qs = qs.filter(Ticket.title.contains(q) | Ticket.requester.contains(q))
         return [{"id": t.id, "title": t.title, "status": t.status, "owner": t.owner, "rating": t.rating, "incident_id": t.incident_id,
-                 "created_at": t.created_at.isoformat()} for t in qs.limit(200)]
+                 "requester": t.requester, "created_at": t.created_at.isoformat()} for t in qs.limit(200)]
 
 
 PAGE = """<!doctype html>
@@ -275,11 +275,11 @@ const MODE=document.querySelector('.page').dataset.mode;const P=new URLSearchPar
 let period=P.get('period')||'all',owner=P.get('owner')||'',status=P.get('status')||'',q='';
 function seg(id,attr,val,fn){document.querySelectorAll('#'+id+' button').forEach(b=>{b.classList.toggle('on',b.dataset[attr]===val);b.onclick=()=>{fn(b.dataset[attr]);document.querySelectorAll('#'+id+' button').forEach(x=>x.classList.toggle('on',x===b));load();};});}
 seg('period','p',period,v=>period=v);seg('statusSeg','s',status,v=>status=v);seg('ownerSeg','o',owner,v=>owner=v);
-const qEl=$('#q');if(qEl){let tmr;qEl.oninput=()=>{clearTimeout(tmr);tmr=setTimeout(()=>{q=qEl.value.trim();load();},250);}}
+const qEl=$('#q');if(qEl){qEl.oninput=()=>{q=qEl.value.trim();renderList();};}   // filters the loaded list in place, no refetch
 function pick(o){location.href='/tickets?period='+period+(o?'&owner='+o:'');}
 const TIERS=[['','All tickets'],['L1','L1 · first contact'],['L2','L2 · devices & network'],['L3','L3 · servers & security'],['L4','L4 · vendors & logistics'],['human','Human engineer']];
 async function load(){
- const qp='?period='+period+(owner?'&owner='+owner:'')+(status?'&status='+status:'')+(q?'&q='+encodeURIComponent(q):'');
+ const qp='?period='+period+(owner?'&owner='+owner:'')+(status?'&status='+status:'');
  $('#scope').textContent=(period==='all'?'all time':'this '+period.replace('today','day'));
  if(MODE==='dashboard'){
   const s=await (await fetch('/stats?period='+period)).json();const st=s.by_status||{}, bo=s.by_owner||{}, ob=s.open_by_owner||{};
@@ -311,16 +311,22 @@ async function load(){
      <small>Looked at ${cl} emerging cluster${cl===1?'':'s'} and ${sig} failure signal${sig===1?'':'s'}${r.finished_at?' · took '+dur((new Date(r.finished_at)-new Date(r.started_at))/1000):''}</small></div></details>`}).join(''):'<small>No runs yet. Press Run now, or switch the mode to automatic in Settings.</small>';
    document.querySelectorAll('.run').forEach(el=>{el.open=openRuns.has(el.dataset.id);el.ontoggle=()=>{el.open?openRuns.add(el.dataset.id):openRuns.delete(el.dataset.id)}});}catch(e){}
  }else{
-  const ts=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
-  $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');$('#scope').textContent+=' · '+ts.length+' tickets';
-  $('#tickets').innerHTML=ts.map(t=>`<div class="item ${cur===t.id?'on':''}" data-id="${t.id}" onclick="show(${t.id})"><input type="checkbox" ${sel.has(t.id)?'checked':''} onclick="event.stopPropagation()" onchange="toggle(${t.id},this.checked)">
-   <div><div class="t" title="${esc(t.title)}">#${t.id} ${esc(t.title)}</div><div class="m">${esc(t.owner)}${t.incident_id?` · problem #${t.incident_id}`:''}${t.rating?` · ${'★'.repeat(t.rating)}`:''}</div></div>
-   <div class="r">${pill(t.status)}<small>${ago(t.created_at)}</small></div></div>`).join('')||'<small style="padding:8px">No tickets match.</small>';
+  allTs=await (await fetch('/tickets'+qp,{headers:{'x-requested-with':'fetch'}})).json();
+  $('#tt').textContent='Tickets'+(owner?' — '+(TIERS.find(t=>t[0]===owner)||[])[1]:'');$('#scope').textContent+=' · '+allTs.length+' tickets';
+  renderList();
   updateSel();if(cur)show(cur,true);else if(P.get('id')){show(+P.get('id'));}
  }
  $('#upd').textContent='updated '+new Date().toLocaleTimeString();
 }
 const sel=new Set();let selecting=false;
+let allTs=[];
+function renderList(){
+ const needle=q.toLowerCase();
+ const ts=needle?allTs.filter(t=>(t.title||'').toLowerCase().includes(needle)||(t.requester||'').toLowerCase().includes(needle)||String(t.id)===needle.replace('#','')):allTs;
+ $('#tickets').innerHTML=ts.map(t=>`<div class="item ${cur===t.id?'on':''}" data-id="${t.id}" onclick="show(${t.id})"><input type="checkbox" ${sel.has(t.id)?'checked':''} onclick="event.stopPropagation()" onchange="toggle(${t.id},this.checked)">
+   <div><div class="t" title="${esc(t.title)}">#${t.id} ${esc(t.title)}</div><div class="m">${esc(t.owner)}${t.incident_id?` · problem #${t.incident_id}`:''}${t.rating?` · ${'★'.repeat(t.rating)}`:''}</div></div>
+   <div class="r">${pill(t.status)}<small>${ago(t.created_at)}</small></div></div>`).join('')||'<small style="padding:8px">No tickets match.</small>';
+}
 function toggleSelect(){selecting=!selecting;if(!selecting)sel.clear();$('#tickets').classList.toggle('selecting',selecting);$('#selectBtn').textContent=selecting?'Cancel':'Select';$('#mergeBtn').style.display=selecting?'':'none';updateSel();load();}
 function toggle(id,on){on?sel.add(id):sel.delete(id);updateSel();}
 function updateSel(){$('#mergeBtn').disabled=sel.size<2;$('#selinfo').textContent=selecting&&sel.size?sel.size+' selected':'';}
