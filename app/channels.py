@@ -136,6 +136,9 @@ def parse_email(raw: bytes) -> dict | None:
 
 
 def sender_allowed(addr: str, cfg: dict | None = None) -> bool:
+    from app import phishing
+    if phishing.is_blocked(addr):
+        return False
     allowed = [a.strip().lower().lstrip("@") for a in str((cfg or email_config()).get("allowed", "")).split(",") if a.strip()]
     if not allowed:
         return True

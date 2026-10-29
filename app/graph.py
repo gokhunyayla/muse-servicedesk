@@ -394,6 +394,67 @@ def new_messages(since_iso: str, limit: int = 20) -> list[dict]:
     return out
 
 
+# ---- mail security (phishing response) --------------------------------------------------------------
+# Needs the application permission Mail.ReadWrite. Nothing is ever hard-deleted: mail is moved to Deleted Items
+# and can be moved back.
+
+def tenant_domains() -> list[str]:
+    d = _call("GET", "/domains", params={"$select": "id,isVerified"})
+    return [x["id"].lower() for x in d.get("value", []) if x.get("isVerified")]
+
+
+def find_mail(sender: str, subject: str = "", days: int = 30) -> list[dict]:
+    """The same e-mail (sender, subject contains) in every member mailbox of the tenant, from the last ``days`` days."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    sender, subject = sender.strip().lower(), subject.strip().lower()
+    hits = []
+    for p in list_people():
+        box = p["email"] or p["upn"]
+        try:
+            d = _call("GET", f"/users/{box}/messages", params={
+                "$filter": f"from/emailAddress/address eq '{_q(sender)}' and receivedDateTime ge {since}", "$top": 25,
+                "$select": "id,subject,isRead,receivedDateTime,internetMessageId,parentFolderId"})
+        except GraphError as e:
+            if " 404 " in str(e) or "MailboxNotEnabled" in str(e):          # account without a mailbox
+                continue
+            raise
+        for m in d.get("value", []):
+            if subject and subject not in (m.get("subject") or "").lower():
+                continue
+            hits.append({"mailbox": box, "employee_no": p["employee_no"], "name": p["name"], "phone": p["phone"],
+                         "id": m["id"], "subject": m.get("subject", ""), "read": bool(m.get("isRead")),
+                         "received": m.get("receivedDateTime", ""), "message_id": m.get("internetMessageId", "")})
+    return hits
+
+
+def inspect_mail(mailbox: str, message_id: str) -> dict:
+    """What an analyst looks at: sender authentication results, reply-to, and where the links really go."""
+    import html as _h
+    import re
+    m = _call("GET", f"/users/{mailbox}/messages/{message_id}",
+              params={"$select": "subject,from,replyTo,body,internetMessageHeaders,hasAttachments"})
+    headers = {h["name"].lower(): h["value"] for h in m.get("internetMessageHeaders") or []}
+    auth = headers.get("authentication-results", "")
+    result = {k: (re.search(rf"\b{k}=(\w+)", auth, re.I) or [None, "none"])[1].lower() for k in ("spf", "dkim", "dmarc")}
+    body = (m.get("body") or {}).get("content", "")
+    links = []
+    for href, text in re.findall(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', body, re.I | re.S):
+        shown = re.sub(r"<[^>]+>", "", _h.unescape(text)).strip()
+        links.append({"href": _h.unescape(href)[:300], "shown": shown[:120]})
+    if not links:
+        links = [{"href": u, "shown": ""} for u in re.findall(r"https?://[^\s\"'<>]+", body)[:10]]
+    text = _h.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<style.*?</style>", " ", body, flags=re.S | re.I)))
+    return {"from": ((m.get("from") or {}).get("emailAddress") or {}).get("address", "").lower(),
+            "reply_to": [r["emailAddress"]["address"].lower() for r in m.get("replyTo") or []],
+            "auth": result, "links": links[:10], "attachments": bool(m.get("hasAttachments")),
+            "text": re.sub(r"\s+", " ", text).strip()[:1500]}
+
+
+def move_mail(mailbox: str, message_id: str, folder: str) -> str:
+    """Move a message (folder: deleteditems, inbox, junkemail); returns its new id."""
+    return _call("POST", f"/users/{mailbox}/messages/{message_id}/move", json={"destinationId": folder}).get("id", "")
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

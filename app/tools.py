@@ -512,17 +512,27 @@ def reset_mfa(ctx: Ctx, employee_no: str) -> dict:
 @tool("Analyze a suspicious e-mail (sender, subject, body with links). Returns safe / suspicious / phishing.",
       ("L1", "L2", "L3"), sender=STR, subject=STR, body=STR)
 def analyze_email(ctx: Ctx, sender: str, subject: str, body: str) -> dict:
-    return systems.analyze_email(sender, subject, body)
+    from app import phishing
+    return phishing.analyze(sender, subject, body, reporter=ctx.ticket.requester)
 
 
-@tool("Remove a phishing e-mail from every mailbox in the tenant.", ("L1", "L3"), subject=STR, sender=STR)
+@tool("Remove a phishing e-mail from every mailbox in the tenant (moved to Deleted Items, recoverable); recipients "
+      "and admins are told. Only after analyze_email says phishing.", ("L1", "L3"), subject=STR, sender=STR)
 def quarantine_email(ctx: Ctx, subject: str, sender: str) -> dict:
-    return systems.quarantine(subject, sender)
+    from app import phishing
+    return phishing.sweep(ctx.ticket.id, sender, subject, reporter=ctx.ticket.requester, db=ctx.db)
 
 
-@tool("Block a sender address/domain at the mail gateway.", ("L1", "L3"), sender=STR)
+@tool("Put the e-mails removed on this ticket back into the inboxes (a false alarm).", ("L1", "L3"))
+def restore_email(ctx: Ctx) -> dict:
+    from app import phishing
+    return phishing.restore(ctx.ticket.id, db=ctx.db)
+
+
+@tool("Block a sender address/domain so its mail no longer reaches the desk.", ("L1", "L3"), sender=STR)
 def block_sender(ctx: Ctx, sender: str) -> dict:
-    return systems.block_sender(sender)
+    from app import phishing
+    return phishing.block(sender, db=ctx.db)
 
 
 @tool("Isolate a laptop from the network (EDR). Only the management channel stays open. Do this first "

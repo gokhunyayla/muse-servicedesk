@@ -78,6 +78,10 @@ T = {
                       "en": "🦠 Microsoft Defender detected {names} on {host} ({files}; Defender: {defender}). I noticed and fixed it: the threat was removed, signatures updated and a quick scan came back clean. Ticket #{id} is closed."},
     "malware_open": {"tr": "⚠️ {host} üzerinde Microsoft Defender {names} tespit etti ({files}). Otomatik temizleyemedim: {why}. Bilet #{id} L3'te; cihazı izole etmeyi düşünün.",
                      "en": "⚠️ Microsoft Defender detected {names} on {host} ({files}). I could not clean it automatically: {why}. Ticket #{id} is with L3; consider isolating the device."},
+    "phish_user": {"tr": "🎣 Güvenlik uyarısı: \"{subject}\" konulu, {sender} adresinden gelen e-posta bir oltalama girişimiydi ve posta kutunuzdan kaldırıldı. Bağlantısına tıkladıysanız veya şifrenizi girdiyseniz lütfen hemen bu mesaja yanıt verin.",
+                   "en": "🎣 Security notice: the e-mail \"{subject}\" from {sender} was a phishing attempt and has been removed from your mailbox. If you clicked its link or entered your password, reply to this message right away."},
+    "phish_admin": {"tr": "🎣 Oltalama: \"{subject}\" ({sender}) {n} posta kutusuna ulaşmıştı. Fark ettim ve giderdim: hepsi Silinmiş Öğeler'e taşındı (geri alınabilir), alıcılar uyarıldı, gönderen engellendi. Açanlar: {opened}. Bilet #{id}.",
+                    "en": "🎣 Phishing: \"{subject}\" ({sender}) had reached {n} mailbox(es). I noticed and fixed it: every copy moved to Deleted Items (recoverable), recipients warned, sender blocked. Opened by: {opened}. Ticket #{id}."},
     "auto_off": {"tr": "otomatik düzeltme kapalı", "en": "automatic remediation is off"},
     "voice_failed": {"tr": "Sesli mesajı anlayamadım, yazar mısınız?", "en": "I could not understand the voice note; could you type it?"},
 }

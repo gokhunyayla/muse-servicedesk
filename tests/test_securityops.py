@@ -41,7 +41,7 @@ def test_phishing_triage_quarantines_tenant_wide_and_blocks_sender():
         res = dict((e.content, e.data) for e in t.events if e.kind == "tool_result")
     assert res["analyze_email"]["verdict"] == "phishing"
     assert res["quarantine_email"]["mailboxes_affected"] == 17 and res["quarantine_email"]["tenant_wide"]
-    assert PHISH["sender"] in res["block_sender"]["blocked"]
+    assert PHISH["sender"] in res["block_sender"].get("blocked", []), res["block_sender"]
 
 
 def test_malware_response_isolates_first_then_scans_and_releases():
