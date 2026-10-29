@@ -55,7 +55,7 @@ def handle(hostname: str, threats: list[dict]) -> dict:
     from app import endpoints, systems, vulnwatch
     from app.i18n import t as tr
     names = ", ".join(dict.fromkeys(t.get("name") or t["id"] for t in threats))
-    files = ", ".join(dict.fromkeys(r for t in threats for r in t.get("resources") or []))[:300]
+    files = ", ".join(dict.fromkeys(str(r).split(":_", 1)[-1] for t in threats for r in t.get("resources") or []))[:300]   # Defender writes "file:_C:\\..."
     defender = ", ".join(dict.fromkeys(t.get("status") or "" for t in threats if t.get("status")))
     dev = endpoints.get(hostname)
     owner = dev.owner if dev is not None else ""
