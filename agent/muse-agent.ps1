@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.5.0"
+$Version = "1.5.1"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -418,7 +418,22 @@ try {
       return "Crash drill armed: Microsoft-signed NotMyFault ($([IO.Path]::GetFileName($exe))) will cause a blue screen in about 20 seconds; Windows restarts by itself."
     }
     "driver-rollback" {
-      throw "driver rollback is not enabled on this device (servers keep their certified drivers); hand off to L2/L4"
+      # reversible: the driver's service is set to Disabled and stopped, the file stays; Windows' own drivers are never touched
+      $file = [IO.Path]::GetFileName([string]$jobArgs.driver)
+      if ($file -notmatch '^[A-Za-z0-9_.-]{1,60}\.sys$') { throw "driver file name required, e.g. myfault.sys" }
+      $path = Join-Path "$env:SystemRoot\System32\drivers" $file
+      if (-not (Test-Path $path)) { throw "$file is not in the drivers folder" }
+      $sig = Get-AuthenticodeSignature $path -ErrorAction SilentlyContinue
+      if ($sig -and $sig.Status -eq "Valid" -and $sig.SignerCertificate.Subject -match "CN=Microsoft Windows(,| Publisher| Hardware)") { throw "$file is part of Windows; not touched (hand off to L4 for hardware)" }
+      $svc = @(Get-CimInstance Win32_SystemDriver | Where-Object { $_.PathName -and ([IO.Path]::GetFileName(($_.PathName -replace '^\\\?\?\\', '')) -ieq $file) })
+      if (-not $svc) { throw "no driver service uses $file" }
+      foreach ($s in $svc) {
+        if ($s.StartMode -eq "Boot") { throw "$($s.Name) is a boot driver; switching it off could stop Windows from starting; hand off" }
+        & sc.exe config $s.Name start= disabled | Out-Null
+        & sc.exe stop $s.Name 2>$null | Out-Null
+      }
+      $names = ($svc | ForEach-Object { $_.Name }) -join ", "
+      return "Switched off driver $file (service $names set to Disabled and stopped). The file is kept, so it can be re-enabled with: sc config <name> start= demand. Signer: $(if ($sig -and $sig.SignerCertificate) { $sig.SignerCertificate.Subject -replace '^CN=([^,]+).*', '$1' } else { 'unsigned' })."
     }
     default { throw "script '$script' is not allow-listed on this device" }
   }

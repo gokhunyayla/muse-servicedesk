@@ -275,7 +275,7 @@ SCRIPTS = {
     "dns-reset":       {"desc": "reset DNS settings and cache", "needs_consent": False},
     "printer-fix":     {"desc": "clear print queue, restart spooler", "needs_consent": False},
     "perf-report":     {"desc": "CPU/memory/disk/startup report", "needs_consent": False},
-    "driver-rollback": {"desc": "roll back the last updated driver (reboots)", "needs_consent": True},
+    "driver-rollback": {"desc": "switch off a recently added third-party driver crash-report named (pass driver=<file>.sys; reversible, takes effect at the next restart)", "needs_consent": True},
     "disk-cleanup":    {"desc": "remove temp files and old updates", "needs_consent": True},
     "lock-screen":     {"desc": "lock the workstation immediately", "needs_consent": False},
     "patch-status":    {"desc": "last installed update, pending updates, reboot, last install run", "needs_consent": False},

@@ -635,13 +635,14 @@ def write_sop(ctx: Ctx, title: str, content: str) -> dict:
       "runs there). Scripts marked [consent] need the employee's explicit OK first. Available: "
       + "; ".join(f"{k} = {v['desc']}{' [consent]' if v['needs_consent'] else ''}" for k, v in systems.SCRIPTS.items() if not v.get("admin_only"))
       + ". If one of these fits, use it rather than telling the employee to do it themselves.",
-      ("L1", "L2"), hostname=STR, script=STR)
-def run_endpoint_script(ctx: Ctx, hostname: str, script: str) -> dict:
+      ("L1", "L2"), hostname=STR, script=STR,
+      driver={**STR, "optional": True, "description": "driver-rollback only: the driver file crash-report named, e.g. myfault.sys"})
+def run_endpoint_script(ctx: Ctx, hostname: str, script: str, driver: str = "") -> dict:
     if script not in systems.SCRIPTS or systems.SCRIPTS[script].get("admin_only"):
         return {"ok": False, "error": f"script not allow-listed; available: {[k for k, v in systems.SCRIPTS.items() if not v.get('admin_only')]}"}
     from app import endpoints
     if endpoints.get(hostname) is not None:                 # a real machine with the endpoint agent
-        return endpoints.run(hostname, script, ctx.ticket.id, ctx.agent, db=ctx.db)
+        return endpoints.run(hostname, script, ctx.ticket.id, ctx.agent, db=ctx.db, args={"driver": driver} if driver else None)
     return systems.run_script(hostname, script)
 
 

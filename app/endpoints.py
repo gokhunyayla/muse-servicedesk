@@ -195,6 +195,11 @@ def _valid_args(script: str, args: dict | None) -> dict:
     """Parameters travel only for the parameterised scripts and only in a narrow shape."""
     import re
     from app import systems
+    if script == "driver-rollback":
+        drv = str((args or {}).get("driver", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,60}\.sys", drv):
+            raise ValueError("driver-rollback needs the driver file, e.g. myfault.sys (from crash-report)")
+        return {"driver": drv}
     if script not in ("app-update", "app-rollback"):
         return {}
     a = dict(args or {})
