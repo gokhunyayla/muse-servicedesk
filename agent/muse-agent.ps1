@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.3.0"
+$Version = "1.3.1"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -150,7 +150,7 @@ function Invoke-Allowed($script, $jobArgs) {
       $flavor = if (Test-Path (Join-Path $root "php8ts.dll")) { "ts" } else { "nts" }
       $build = $rel.PSObject.Properties | Where-Object { $_.Name -like "$flavor-vs*-x64" } | Select-Object -First 1
       if (-not $build) { throw "no $flavor x64 build for PHP $branch" }
-      $target = [string]$rel.version
+      $target = ([string]$rel.version -split "-")[0]          # the feed marks rebuilds as 8.3.36-1; PHP itself says 8.3.36
       if ($jobArgs.min_version -and ([version]$target -lt [version]$jobArgs.min_version)) { throw "the newest PHP $branch ($target) is still below $($jobArgs.min_version)" }
       if ([version]$target -le [version]$before) { return "PHP $before is already the newest $branch release ($target); nothing to do." }
       $zip = $build.Value.zip

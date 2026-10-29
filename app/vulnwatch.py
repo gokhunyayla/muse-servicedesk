@@ -163,6 +163,29 @@ def findings(devices: dict[str, dict] | None = None, kev: list[dict] | None = No
     return out
 
 
+def _ver(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4])
+
+
+def _per_app(found: list[dict]) -> list[dict]:
+    """One finding per application on a device: a single update to the highest fixed version clears all its CVEs,
+    so one ticket, one patch and one message, the most severe CVE named first."""
+    groups: dict[tuple, list[dict]] = {}
+    for f in found:
+        groups.setdefault((f["hostname"], f["app"]), []).append(f)
+    out = []
+    for fs in groups.values():
+        fs.sort(key=lambda f: (f["ransomware"], f["score"] or 0), reverse=True)
+        top = dict(fs[0])
+        if len(fs) > 1:
+            top["cve"] = ", ".join(f["cve"] for f in fs)
+            top["name"] = f"{fs[0]['name']} +{len(fs) - 1}"
+            top["fixed_in"] = max((f["fixed_in"] for f in fs), key=_ver)
+            top["ransomware"] = any(f["ransomware"] for f in fs)
+        out.append(top)
+    return out
+
+
 # ---- acting -----------------------------------------------------------------------------------------------------
 
 def _admins() -> list[str]:
@@ -246,7 +269,7 @@ def run_watch(force: bool = False) -> list[dict]:
     checked = sum(len((d.get("metrics") or {}).get("software") or []) for d in devices.values())
     try:
         kev = fetch_kev()
-        for f in findings(devices, kev):
+        for f in _per_app(findings(devices, kev)):
             done.append({**f, **remediate(f)})
     except Exception as e:  # noqa: BLE001
         error = f"{type(e).__name__}: {e}"[:300]

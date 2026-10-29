@@ -111,3 +111,11 @@ def test_run_now_needs_an_admin_or_the_api_key(desk, monkeypatch):
     assert TestClient(app).post("/vulnwatch/run").status_code == 403
     page = desk.get("/settings?tab=connectors").text
     assert "Daily vulnerability watch" in page and "Patch automatically" in page
+
+
+def test_several_cves_on_one_app_are_one_patch_to_the_highest_fix():
+    base = {"hostname": "LT-101", "app": "PHP", "version": "8.3.7", "path": "C:\\php", "description": "", "owner": ""}
+    found = [{**base, "cve": "CVE-2026-1", "name": "a", "fixed_in": "8.3.36", "score": 7.5, "ransomware": False},
+             {**base, "cve": "CVE-2024-4577", "name": "PHP-CGI", "fixed_in": "8.3.8", "score": 9.8, "ransomware": True}]
+    [f] = vulnwatch._per_app(found)
+    assert f["cve"] == "CVE-2024-4577, CVE-2026-1" and f["fixed_in"] == "8.3.36" and f["ransomware"]
