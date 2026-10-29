@@ -300,8 +300,10 @@ def supervisor_run_now(request: Request, user=Depends(current_user)) -> dict:
     check_origin(request)
     with session() as db:
         audit(db, user.email, "supervisor.run")
-    r = supervisor.run("manual")
-    return {"id": r.id, "summary": r.summary, "actions": r.actions, "findings": r.findings, "error": r.error}
+    # a pass can take minutes (web research, many tickets): run it beside the request, the page follows /supervisor/runs
+    import threading
+    threading.Thread(target=supervisor.run, args=("manual",), daemon=True, name="supervisor-manual").start()
+    return {"status": "started"}
 
 
 @app.get("/sla/at-risk")
