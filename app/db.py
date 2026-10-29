@@ -302,6 +302,26 @@ class Sop(Base):
     used: Mapped[int] = mapped_column(default=0)                   # how often it came up in searches
 
 
+class SopLesson(Base):
+    """Something the desk learned about following a SOP. The SOP itself (the core rule) never changes by the
+    system; a lesson is an addendum agents read after the core steps, only once it passed the safety check AND
+    an admin approved it. Suspending it puts the desk back on the core SOP alone."""
+    __tablename__ = "sop_lessons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sop_key: Mapped[str] = mapped_column(String(128), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="proposed")   # proposed | rejected | approved | suspended
+    check: Mapped[dict] = mapped_column(JSON, default=dict)             # {"ok": bool, "problems": [...]}
+    ticket_ids: Mapped[list] = mapped_column(JSON, default=list)
+    proposed_by: Mapped[str] = mapped_column(String(64), default="")
+    decided_by: Mapped[str] = mapped_column(String(255), default="")
+    note: Mapped[str] = mapped_column(Text, default="")                 # why it was rejected / suspended
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class SopVersion(Base):
     """Previous content of a SOP, kept on every edit."""
     __tablename__ = "sop_versions"

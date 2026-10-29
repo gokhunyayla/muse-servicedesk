@@ -690,6 +690,26 @@ def sop_status(key: str, s: SopStatus, request: Request, user=Depends(current_us
     return {"key": key, "status": s.status}
 
 
+class LessonDecision(BaseModel):
+    status: str          # approved | rejected | suspended
+    note: str = ""
+
+
+@app.post("/lessons/{lesson_id}/status")
+def lesson_status(lesson_id: int, d: LessonDecision, request: Request, user=Depends(current_user)) -> dict:
+    """An admin approves, rejects or suspends a lesson the desk proposed (approval re-runs the safety check)."""
+    from app import knowledge
+    if user.role != "admin":
+        raise HTTPException(403, "admin only")
+    check_origin(request)
+    with session() as db:
+        r = knowledge.decide_lesson(lesson_id, d.status, by=user.email, note=d.note, db=db)
+        if not r["ok"]:
+            raise HTTPException(422, r["error"])
+        audit(db, user.email, f"lesson.{d.status}", target=str(lesson_id), detail=d.note)
+    return r
+
+
 @app.post("/approvals/{approval_id}", dependencies=[Depends(api_key)])
 def decide_approval(approval_id: int, d: Decision) -> dict:
     from app.agents import handle_approval

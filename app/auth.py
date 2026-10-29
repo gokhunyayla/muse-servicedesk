@@ -1175,6 +1175,31 @@ def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = 
 <div class="row end" style="margin-top:8px">{acts}</div></div>"""
     chips = "".join(f'<a class="tab {"on" if tier == t else ""}" href="/knowledge?tier={t}&q={_esc(q)}">{t}</a>' for t in ("", "L1", "L2", "L3", "L4", "shared")).replace('href="/knowledge?tier=&', 'href="/knowledge?tier=&').replace('>​</a>', '>All</a>')
     chips = chips.replace(f'<a class="tab {"on" if tier == "" else ""}" href="/knowledge?tier=&q={_esc(q)}"></a>', f'<a class="tab {"on" if tier == "" else ""}" href="/knowledge?q={_esc(q)}">All</a>')
+    lessons = knowledge.lessons()
+    titles_by_key = {r["key"]: r["title"] for r in rows}
+    def lessoncard(x):
+        chk = x["check"] or {}
+        verdict = ('<span class="tag active">safety check passed</span>' if chk.get("ok")
+                   else '<span class="tag disabled">safety check failed</span>')
+        tickets = (" · tickets " + ", ".join(f'<a href="/tickets?id={i}">#{i}</a>' for i in x["ticket_ids"])) if x["ticket_ids"] else ""
+        acts = ""
+        if admin and x["status"] == "proposed":
+            acts = (f'<button class="btn" onclick="lessonSet({x["id"]},\'rejected\')">Reject</button> '
+                    f'<button class="btn primary slim" onclick="lessonSet({x["id"]},\'approved\')">Approve</button>')
+        elif admin and x["status"] == "approved":
+            acts = f'<button class="btn" onclick="lessonSet({x["id"]},\'suspended\')">Suspend</button>'
+        elif admin and x["status"] == "suspended" and chk.get("ok"):
+            acts = f'<button class="btn" onclick="lessonSet({x["id"]},\'approved\')">Re-approve</button>'
+        problems = ("<small>" + _esc("; ".join(chk.get("problems") or [])) + "</small><br>") if chk.get("problems") else ""
+        return f"""<div class="draft"><div class="dh"><span class="tag">lesson {x['id']}</span><b>{_esc(titles_by_key.get(x['sop_key'], x['sop_key']))}</b>
+<span class="tag {'active' if x['status']=='approved' else ('invited' if x['status']=='proposed' else 'disabled')}">{x['status']}</span>{verdict}<small>{_esc(x['proposed_by'])} · {x['created_at'][:16].replace('T', ' ')}{tickets}</small></div>
+<p style="margin:8px 0 4px"><b>Adds:</b> {_esc(x['text'])}</p><p class="muted" style="margin:0 0 4px"><b>Why:</b> {_esc(x['reason'])}</p>{problems}
+{('<small class="muted">' + _esc(x['note']) + '</small>') if x['note'] else ''}<div class="row end" style="margin-top:8px">{acts}</div></div>"""
+    pending = [x for x in lessons if x["status"] == "proposed"]
+    lesson_section = (f"""<h3>Lessons learned ({len([x for x in lessons if x['status'] == 'approved'])} active)</h3>
+<p class="muted">The core procedures above never change by themselves. When the desk learns something from a ticket, it proposes a short <b>lesson</b> to add under a procedure. Every lesson passes an automatic safety check (it may never weaken identity checks, approvals or consent, switch protections off or use a tool the tier lacks) and then waits for an admin. Suspend a lesson and the desk is back on the core procedure at once.</p>
+{('<h4>Awaiting review (' + str(len(pending)) + ')</h4>' + ''.join(lessoncard(x) for x in pending)) if pending else ''}
+{''.join(lessoncard(x) for x in lessons if x['status'] != 'proposed')}""") if lessons else ""
     from app import references
     refs = references.listing()
     def refcard(d):
@@ -1202,6 +1227,7 @@ def knowledge_page(user: User = Depends(current_user), tier: str = "", q: str = 
 <h3>Knowledge base</h3><div class="tl" style="margin-bottom:10px"><div class="tabs" style="margin:0;border:0">{chips}</div>
 <form method="get" action="/knowledge" style="display:inline"><input type="hidden" name="tier" value="{_esc(tier)}"><input class="search" name="q" value="{_esc(q)}" placeholder="Search…" style="width:240px"></form></div>
 {''.join(card(r) for r in live) or '<p class="muted">Nothing here yet.</p>'}
+{lesson_section}
 {ref_section}
 <div class="modal" id="sopModal"><div class="box" style="width:min(720px,100%)"><h3 id="sopTitle">Add a SOP</h3>
 <label>Tier</label><select id="sTier"><option value="L1">L1 · first contact</option><option value="L2">L2 · devices &amp; network</option><option value="L3">L3 · servers &amp; security</option><option value="L4">L4 · vendors &amp; logistics</option><option value="shared">shared · every agent</option></select>
@@ -1220,6 +1246,7 @@ async function removeRef(id){{if(!confirm('Remove this document from the knowled
 async function refSearch(){{const q=document.getElementById('refq').value.trim();if(!q)return;const r=await (await fetch('/references/search?q='+encodeURIComponent(q))).json();
  document.getElementById('refOut').innerHTML=r.length?r.map(x=>`<div class="draft"><div class="dh"><span class="tag">REF:${{x.ref}}</span><span class="tag">${{x.kind}} · ${{x.enforcement}}</span><b>${{esc(x.document)}}</b><small>${{x.heading?esc(x.heading)+' · ':''}}${{x.page?'page '+x.page:''}}</small></div><pre>${{esc(x.text)}}</pre></div>`).join(''):'<p class="muted">No passage matches.</p>';}}
 function esc(x){{return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
+async function lessonSet(id,status){{const note=status==='approved'?'':(prompt('Reason (optional)')||'');const r=await fetch('/lessons/'+id+'/status',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{status,note}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
 async function setStatus(k,status){{const r=await fetch('/sops/'+k+'/status',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{status}})}});if(r.ok)location.reload();else alert('Failed: '+(await r.text()));}}
 </script>"""
     return _page("Knowledge", body, wide=True, user=user, active="knowledge")

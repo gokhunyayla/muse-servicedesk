@@ -171,6 +171,27 @@ def propose_sop(ctx: Ctx, tier: str, title: str, content: str, sources: list[str
     return {"ok": True, "sop_id": key, "status": "published" if auto else "draft"}
 
 
+@tool("A published SOP was followed but led agents wrong (they asked for what a tool finds itself, used the wrong "
+      "tool, missed a step): propose ONE short lesson to add under it. The SOP itself never changes; the lesson passes "
+      "an automatic safety check and waits for an admin. Never weaken identity checks, approvals or consent.",
+      SUP, sop_id=STR, lesson=STR, reason=STR, ticket_ids={"type": "array", "items": {"type": "integer"}})
+def propose_lesson(ctx: Ctx, sop_id: str, lesson: str, reason: str, ticket_ids: list[int] | None = None) -> dict:
+    from app import knowledge
+    r = knowledge.propose_lesson(sop_id, lesson, reason, by="supervisor", ticket_ids=ticket_ids, db=ctx.db)
+    for i in ticket_ids or []:
+        t = ctx.db.get(Ticket, int(i))
+        if t:
+            log(ctx.db, t.id, "supervisor", "note", f"Lesson {'proposed' if r['ok'] else 'rejected by the safety check'} for {sop_id}: {lesson[:200]}")
+    return r
+
+
+@tool("An approved lesson is making things worse (new failures or low ratings on tickets that used it): suspend "
+      "it. The desk falls back to the core SOP at once; an admin can re-approve later.", SUP, lesson_id=STR, reason=STR)
+def suspend_lesson(ctx: Ctx, lesson_id: str, reason: str) -> dict:
+    from app import knowledge
+    return knowledge.decide_lesson(int(lesson_id), "suspended", by="supervisor", note=reason, db=ctx.db)
+
+
 @tool("Only a person can unblock this (access, purchase, policy, on-site work, vendor contact): open a "
       "ticket for the desk stating exactly what is needed and why, with the affected tickets.",
       SUP, need=STR, why=STR, ticket_ids={"type": "array", "items": {"type": "integer"}})
@@ -343,6 +364,10 @@ Your duties, in order:
 3. LEARN: for (a), research the real fix on the web (web_search, then fetch_page on 1-2 good sources,
    prefer vendor docs) and propose_sop for the right tier: concrete symptom → checks → fix steps naming the
    desk's own tools/scripts where they exist → when to hand off. At most {max_research} research tasks per run.
+   If a SOP existed and the agents followed it but still went wrong, do NOT write a new SOP: propose_lesson
+   under that SOP (one or two sentences, the concrete correction, naming the tool). Core SOPs are never
+   rewritten by you. If an approved lesson appears in failing tickets (the agents cite [lesson N]),
+   suspend_lesson it. Approved lessons now: {lessons}
 4. SLA: for tickets "at risk" or breached, act so the clock moves, with the least drastic step that works:
    waiting on the employee → nudge_employee; waiting on an approval → remind_approver; the owning tier is
    stuck or wrong → reassign_ticket with precise instructions; nothing an agent can do → bump_to_human.
@@ -394,8 +419,12 @@ def run(trigger: str = "schedule") -> SupervisorRun:
                 from app import knowledge
                 from app.tools import REGISTRY
                 tool_names = sorted(n for n, t in REGISTRY.items() if any(x in t.tiers for x in ("L1", "L2", "L3", "L4")))
-                sops = {tier: knowledge.titles(tier, db=db) for tier in ("L1", "L2", "L3", "L4")}
+                sops = {}
+                for r in knowledge.listing(status="published", db=db):
+                    sops.setdefault(r["tier"], []).append(f"{r['key']}: {r['title']}")
+                learned = [f"[lesson {x['id']}] {x['sop_key']}: {x['text']}" for x in knowledge.lessons(status="approved", db=db)]
                 prompt = PROMPT.format(max_research=cfg["max_research"], tools=", ".join(tool_names),
+                                       lessons=json.dumps(learned, ensure_ascii=False) if learned else "none",
                                        sops=json.dumps(sops, ensure_ascii=False), clusters=json.dumps(clusters, ensure_ascii=False),
                                        signals=json.dumps(signals, ensure_ascii=False), open_sup=open_sup,
                                        at_risk=json.dumps(risks, ensure_ascii=False), risk_pct=sla_targets().get("at_risk_pct", 80))

@@ -120,7 +120,12 @@ def search(tier: str, query: str, limit: int = 3, db=None) -> list[dict]:
         out = []
         for own, hits, s in scored[:limit]:
             s.used += 1
-            out.append({"id": s.key, "title": s.title, "tier": s.tier, "content": s.content,
+            learned = lessons(s.key, status="approved", db=db)
+            content = s.content
+            if learned:
+                content += ("\n\nLearned on the job (approved additions; the steps above always come first and win any "
+                            "conflict):\n" + "\n".join(f"- {x['text']} [lesson {x['id']}]" for x in learned))
+            out.append({"id": s.key, "title": s.title, "tier": s.tier, "content": content,
                         "from_other_tier": not own, "version": s.version})
         return out
 
@@ -163,8 +168,14 @@ def write(tier: str, title: str, content: str, author: str = "", source: str = "
         return key
 
 
+SYSTEM_WRITERS = {"L1", "L2", "L3", "L4", "supervisor", "SUP", "agent"}
+
+
 def update(key: str, title: str, content: str, by: str, tier: str | None = None, db=None) -> bool:
-    """Edit a SOP (new version; the old one is kept)."""
+    """Edit a SOP (new version; the old one is kept). Core procedures are changed by people only: the desk's
+    own agents and the Supervisor add lessons (below) instead."""
+    if by in SYSTEM_WRITERS:
+        return False
     with _db(db) as db:
         s = db.query(Sop).filter(Sop.key == key).first()
         if s is None:
@@ -195,3 +206,92 @@ def listing(status: str | None = None, db=None) -> list[dict]:
         return [{"key": s.key, "tier": s.tier, "title": s.title, "status": s.status, "author": s.author, "source": s.source,
                  "version": s.version, "updated_at": s.updated_at.isoformat(), "used": s.used, "content": s.content,
                  "sources": s.sources, "ticket_ids": s.ticket_ids} for s in q]
+
+
+# ---- lessons: what the desk learned, kept apart from the core procedures --------------------------
+
+# Things a lesson may never do, whoever proposes it: weaken identity checks, approvals or consent, hand out
+# secrets, or switch protections off. Checked in English and Turkish because lessons are written from tickets.
+FORBIDDEN = [
+    (r"\b(skip|bypass|ignore|omit|without|no need (to|for)|don'?t|do not|never)\b[^.]{0,40}\b(verif\w*|identit\w*|approv\w*|consent|confirm\w*|mfa|authenticat\w*)", "weakens identity, approval or consent"),
+    (r"\b(doğrula\w*|onay\w*|kimlik\w*|izin)\b[^.]{0,40}\b(atla\w*|gerek yok|sorma\w*|yapma\w*|olmadan)", "weakens identity, approval or consent"),
+    (r"\b(atla\w*|sormadan|onaysız|doğrulamadan)\b", "weakens identity, approval or consent"),
+    (r"\b(disable|turn off|switch off|kapat\w*)\b[^.]{0,40}\b(defender|antivirus|firewall|mfa|audit|logging|nla|güvenlik duvarı)", "turns a protection off"),
+    (r"\b(send|share|tell|paste|gönder\w*|paylaş\w*|yaz\w*)\b[^.]{0,40}\b(password|şifre\w*|token|secret|api key)\b[^.]{0,30}\b(e-?mail|chat|ticket|whatsapp|mail|bilet)", "hands out a secret over a channel"),
+    (r"\b(all|every|herkes\w*|tüm)\b[^.]{0,20}\b(admin|global administrator|yönetici yetki\w*)", "grants broad privileges"),
+]
+
+
+def check_lesson(sop_key: str, text: str, db=None) -> dict:
+    """The automatic gate every lesson passes before an admin even sees it as approvable."""
+    import re as _re
+    from app.tools import REGISTRY as TOOLS
+    problems = []
+    text = (text or "").strip()
+    if not 15 <= len(text) <= 600:
+        problems.append("a lesson is one or two sentences (15-600 characters)")
+    sop = get(sop_key, db=db)
+    if sop is None or sop.status != "published":
+        problems.append(f"no published SOP {sop_key} to add it to")
+    low = text.lower()
+    for pattern, why in FORBIDDEN:
+        if _re.search(pattern, low):
+            problems.append(why)
+    if sop is not None:
+        named = {t for t in TOOLS if _re.search(rf"\b{_re.escape(t)}\b", text)}
+        allowed = {t for t in TOOLS if sop.tier == "shared" or sop.tier in TOOLS[t].tiers}
+        for t in sorted(named - allowed):
+            problems.append(f"tool {t} is not available to {sop.tier}")
+        for t in sorted(set(_re.findall(r"\b[a-z]+(?:_[a-z0-9]+)+\b", text)) - set(TOOLS)):
+            problems.append(f"{t} is not a tool the desk has")
+    return {"ok": not problems, "problems": list(dict.fromkeys(problems))}
+
+
+def propose_lesson(sop_key: str, text: str, reason: str, by: str, ticket_ids: list[int] | None = None, db=None) -> dict:
+    from app.db import SopLesson
+    chk = check_lesson(sop_key, text, db=db)
+    with _db(db) as db:
+        same = db.query(SopLesson).filter(SopLesson.sop_key == sop_key, SopLesson.text == text.strip(),
+                                          SopLesson.status.in_(["proposed", "approved"])).first()
+        if same is not None:
+            return {"ok": True, "lesson_id": same.id, "status": same.status, "note": "already proposed"}
+        row = SopLesson(sop_key=sop_key, text=text.strip(), reason=reason.strip(), proposed_by=by, check=chk,
+                        ticket_ids=list(ticket_ids or []), status="proposed" if chk["ok"] else "rejected",
+                        note="" if chk["ok"] else "safety check: " + "; ".join(chk["problems"]))
+        db.add(row)
+        db.flush()
+        return {"ok": chk["ok"], "lesson_id": row.id, "status": row.status, "problems": chk["problems"],
+                "next": "waits for an admin to approve" if chk["ok"] else "rejected by the safety check; the core SOP stays as is"}
+
+
+def decide_lesson(lesson_id: int, status: str, by: str, note: str = "", db=None) -> dict:
+    """approved | rejected (admins) or suspended (admins or the Supervisor, any time). Approving re-runs the check."""
+    from app.db import SopLesson
+    if status not in ("approved", "rejected", "suspended"):
+        return {"ok": False, "error": "status must be approved, rejected or suspended"}
+    with _db(db) as db:
+        row = db.get(SopLesson, int(lesson_id))
+        if row is None:
+            return {"ok": False, "error": "unknown lesson"}
+        if status == "approved":
+            if by in SYSTEM_WRITERS:
+                return {"ok": False, "error": "only a person approves a lesson"}
+            chk = check_lesson(row.sop_key, row.text, db=db)
+            row.check = chk
+            if not chk["ok"]:
+                return {"ok": False, "error": "safety check fails: " + "; ".join(chk["problems"])}
+        row.status, row.decided_by, row.decided_at, row.note = status, by, _now(), note or row.note
+        return {"ok": True, "lesson_id": row.id, "status": status}
+
+
+def lessons(sop_key: str | None = None, status: str | None = None, db=None) -> list[dict]:
+    from app.db import SopLesson
+    with _db(db) as db:
+        q = db.query(SopLesson).order_by(SopLesson.id)
+        if sop_key:
+            q = q.filter(SopLesson.sop_key == sop_key)
+        if status:
+            q = q.filter(SopLesson.status == status)
+        return [{"id": r.id, "sop_key": r.sop_key, "text": r.text, "reason": r.reason, "status": r.status,
+                 "check": r.check or {}, "ticket_ids": r.ticket_ids or [], "proposed_by": r.proposed_by,
+                 "decided_by": r.decided_by, "note": r.note, "created_at": r.created_at.isoformat()} for r in q]
