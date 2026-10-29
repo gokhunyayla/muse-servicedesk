@@ -403,6 +403,15 @@ def tenant_domains() -> list[str]:
     return [x["id"].lower() for x in d.get("value", []) if x.get("isVerified")]
 
 
+def _same_subject(wanted: str, actual: str) -> bool:
+    """Subjects as people retype them: dashes, quotes, "Fw:"/"Re:" and spacing do not matter."""
+    import difflib
+    import re
+    norm = lambda x: re.sub(r"\s+", " ", re.sub(r"^((re|fw|fwd|ynt|ilt)\s*:\s*)+|[\u2010-\u2015\-\"'\u201c\u201d\u2018\u2019]", " ", x.lower())).strip()
+    w, a = norm(wanted), norm(actual)
+    return bool(w) and (w in a or difflib.SequenceMatcher(None, w, a).ratio() >= 0.85)
+
+
 def find_mail(sender: str, subject: str = "", days: int = 30) -> list[dict]:
     """The same e-mail (sender, subject contains) in every member mailbox of the tenant, from the last ``days`` days."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -410,16 +419,19 @@ def find_mail(sender: str, subject: str = "", days: int = 30) -> list[dict]:
     hits = []
     for p in list_people():
         box = p["email"] or p["upn"]
+        if "#ext#" in (p["upn"] or "").lower() or "@" not in box:      # guests / external admins have no mailbox here
+            continue
         try:
             d = _call("GET", f"/users/{box}/messages", params={
                 "$filter": f"from/emailAddress/address eq '{_q(sender)}' and receivedDateTime ge {since}", "$top": 25,
                 "$select": "id,subject,isRead,receivedDateTime,internetMessageId,parentFolderId"})
         except GraphError as e:
-            if " 404 " in str(e) or "MailboxNotEnabled" in str(e):          # account without a mailbox
+            if any(x in str(e) for x in (" 404 ", " 400 ", "MailboxNotEnabled")):   # account without a usable mailbox
+                logger.info("mail search skipped %s: %s", box, e)
                 continue
             raise
         for m in d.get("value", []):
-            if subject and subject not in (m.get("subject") or "").lower():
+            if subject and not _same_subject(subject, m.get("subject") or ""):
                 continue
             hits.append({"mailbox": box, "employee_no": p["employee_no"], "name": p["name"], "phone": p["phone"],
                          "id": m["id"], "subject": m.get("subject", ""), "read": bool(m.get("isRead")),
