@@ -100,12 +100,27 @@ def init_db(url: str | None = None) -> None:
         with server.connect() as conn:
             conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{parsed.database}` CHARACTER SET utf8mb4"))
         server.dispose()
+        if "charset" not in parsed.query:
+            url = parsed.update_query_dict({"charset": "utf8mb4"})
     _engine = create_engine(url, pool_pre_ping=True)
     Base.metadata.create_all(_engine)
     _add_missing_columns(_engine)
+    _utf8mb4(_engine)
     _Session = sessionmaker(_engine, expire_on_commit=False)
     from app import knowledge
     knowledge.seed_from_files()          # first run: load data/sops/*.md into the knowledge base
+
+
+def _utf8mb4(engine) -> None:
+    """MySQL/MariaDB tables made with a 3-byte charset cannot store emoji, which people and the desk both send:
+    convert this database's own tables once. Nothing outside this database is touched."""
+    if engine.dialect.name != "mysql":
+        return
+    with engine.begin() as conn:
+        old = conn.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() "
+                                "AND table_collation NOT LIKE 'utf8mb4%'")).scalars().all()
+        for name in old:
+            conn.execute(text(f"ALTER TABLE `{name}` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))
 
 
 def _add_missing_columns(engine) -> None:
