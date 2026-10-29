@@ -24,6 +24,7 @@ SPEC = {   # name -> (env fallback, label, group)
     "WA_ACCESS_TOKEN": ("WA_ACCESS_TOKEN", "WhatsApp access token", "channels"),
     "WA_PHONE_NUMBER_ID": ("WA_PHONE_NUMBER_ID", "WhatsApp phone number ID", "channels"),
     "WA_VERIFY_TOKEN": ("WA_VERIFY_TOKEN", "WhatsApp webhook verify token", "channels"),
+    "WA_BUSINESS_ACCOUNT_ID": ("WA_BUSINESS_ACCOUNT_ID", "WhatsApp Business account ID", "channels"),
     "DEMO_MANAGER_PHONE": ("DEMO_MANAGER_PHONE", "Demo manager phone (approvals go here)", "channels"),
     "API_KEY": ("API_KEY", "Integration API key (X-API-Key)", "channels"),
     "TAVILY_API_KEY": ("TAVILY_API_KEY", "Tavily search key (Supervisor research)", "channels"),

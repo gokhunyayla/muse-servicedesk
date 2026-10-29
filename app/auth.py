@@ -825,7 +825,8 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <div class="srow"><div><b>{_esc(cfg.meta_model_heavy)}</b><small>prompt / completion per 1M tokens</small></div><div class="min"><input name="{_esc(cfg.meta_model_heavy)}__prompt" type="number" min="0" step="0.01" value="{pr["models"].get(cfg.meta_model_heavy, {}).get("prompt", 0)}" style="width:100px" {dis}> / <input name="{_esc(cfg.meta_model_heavy)}__completion" type="number" min="0" step="0.01" value="{pr["models"].get(cfg.meta_model_heavy, {}).get("completion", 0)}" style="width:100px" {dis}></div></div>
 {('<div class="row end"><button class="btn primary slim" type="submit">Save pricing</button></div>' if admin else '')}</form>"""
         else:
-            rows = (secret_row("WA_PHONE_NUMBER_ID", "Meta for Developers → WhatsApp → API Setup") + secret_row("WA_ACCESS_TOKEN", "System-user token (never expires)")
+            rows = (secret_row("WA_BUSINESS_ACCOUNT_ID", "WhatsApp Manager → account ID; then Connect below")
+                    + secret_row("WA_PHONE_NUMBER_ID", "Filled by Connect, or Meta for Developers → WhatsApp → API Setup") + secret_row("WA_ACCESS_TOKEN", "System-user token (never expires)")
                     + secret_row("WA_VERIFY_TOKEN", "Must match the webhook configuration at Meta") + secret_row("DEMO_MANAGER_PHONE", "Seeded managers E1002/E1003 answer approvals from this number")
                     + secret_row("API_KEY", "Required as X-API-Key on /messages, /voice, /image, … when set") + secret_row("TAVILY_API_KEY", "Optional; DuckDuckGo needs no key"))
             from app.channels import email_config, portal_config
@@ -848,7 +849,7 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
             link = f"{auth_settings.public_url.rstrip('/')}/support-agent"
             body = f"""<p class="muted">Employees can reach the desk over WhatsApp, the web chat and e-mail; every channel lands on the same tickets and agents.</p>
 <h3>WhatsApp &amp; integrations</h3>
-<form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
+<form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>{('<form method="post" action="/settings/whatsapp/connect" class="row end" style="gap:8px;margin-top:6px"><small class="muted">After saving the account ID and token: subscribes the desk to the account, takes its number and creates the update template used outside the 24-hour window.</small><input name="phone" placeholder="number to use, e.g. +905052352703" style="width:230px"><button class="btn" type="submit">Connect WhatsApp</button></form>' if admin else '')}
 <p class="muted" style="margin-top:14px">E-mail intake and sending live under Settings → E-mail.</p>
 <h3>Credential resets</h3><p class="muted">A reset always needs identity (employee no + birth year) and a one-time code on the employee's other channel. Optionally also a random phrase said in a voice note (liveness, not identity).</p>
 <form method="post" action="/settings/verification">
@@ -1300,6 +1301,25 @@ async def settings_smtp(request: Request, admin: User = Depends(admin_user)):
         ok, err = send_email(admin.email, "Muse ServiceDesk: SMTP test", "If you can read this, outgoing mail works.")
         return RedirectResponse(f"/settings?tab=email&info={quote('Test mail sent to ' + admin.email if ok else 'Test failed: ' + err)}", 303)
     return RedirectResponse("/settings?tab=email&info=SMTP+saved", 303)
+
+
+@router.post("/settings/whatsapp/connect")
+async def settings_whatsapp_connect(request: Request, admin: User = Depends(admin_user)):
+    """Subscribe the app to the WhatsApp Business account, take its number, create the update template."""
+    from app import vault, whatsapp
+    from fastapi.concurrency import run_in_threadpool
+    check_origin(request)
+    form = await request.form()
+    r = await run_in_threadpool(whatsapp.connect, vault.get("WA_BUSINESS_ACCOUNT_ID"), str(form.get("phone", "")))
+    if r.get("phone_number_id"):
+        vault.set_many({"WA_PHONE_NUMBER_ID": r["phone_number_id"]})
+    with session() as db:
+        audit(db, admin.email, "settings.whatsapp.connect", detail=str({k: r.get(k) for k in ("ok", "phone_number_id", "template", "error")}), ip=_ip(request))
+    nums = ", ".join(f"{n['display_phone_number']} ({n.get('verified_name', '')})" for n in r.get("numbers", []))
+    msg = (f"Connected: number {r['phone_number_id']}, template {r['template']}" if r.get("ok")
+           else f"Not connected: {r.get('error')}" + (f" — numbers: {nums}" if nums else ""))
+    from urllib.parse import quote
+    return RedirectResponse(f"/settings?tab=channels&info={quote(msg)}", 303)
 
 
 @router.post("/settings/secrets")

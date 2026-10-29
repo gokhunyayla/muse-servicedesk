@@ -1,5 +1,5 @@
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from app.channels import reachable
@@ -53,6 +53,23 @@ class Incoming(BaseModel):
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+PRIVACY = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy · Muse ServiceDesk</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 16px;color:#1d1d1f}h1{font-size:26px}h2{font-size:18px;margin-top:28px}</style></head><body>
+<h1>Muse ServiceDesk privacy notice</h1>
+<p>Muse ServiceDesk is the IT service desk of the organisation that runs this installation (here: Cloudrium). It answers employees on WhatsApp, e-mail and the web support page.</p>
+<h2>What we process</h2><p>The messages, voice notes, photos, videos and documents you send to the desk; your phone number or e-mail address; your directory record (name, employee number, department, manager, devices); and the tickets, actions and approvals that follow from your requests.</p>
+<h2>Why</h2><p>Only to resolve your IT requests: identify you, act on your accounts and devices with your consent where required, keep an audit trail, and tell you and your manager what was done.</p>
+<h2>Who processes it</h2><p>The desk runs on the organisation's own server. Message content is sent to Meta's Model API to understand and answer it, to Meta's WhatsApp Business Platform to deliver WhatsApp messages, and to Microsoft 365 for directory and mailbox actions. Nothing is sold or used for advertising.</p>
+<h2>How long</h2><p>Tickets and their trail are kept as long as the organisation's IT records policy requires; secrets such as temporary passwords are never stored in readable form.</p>
+<h2>Your choices and deletion</h2><p>Ask the desk (any channel) or write to support@cloudrium.com to see, correct or delete your data; deletion requests are completed within 30 days unless the law requires us to keep a record.</p>
+</body></html>"""
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy() -> str:
+    return PRIVACY
 
 
 @app.post("/messages", dependencies=[Depends(api_key)])

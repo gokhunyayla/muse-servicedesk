@@ -30,6 +30,9 @@ def _headers() -> dict:
 
 
 PERMANENT = {131030, 131026, 131021, 100}   # not in test allow-list, not a WhatsApp user, same number, bad param
+OUTSIDE_WINDOW = {131047}                    # more than 24 h since the person last wrote: only a template may go
+TEMPLATE = "it_desk_update"                  # one utility template carries any desk message outside the window
+TEMPLATE_BODY = "IT Service Desk update: {{1}}"
 
 
 class SendError(Exception):
@@ -38,14 +41,9 @@ class SendError(Exception):
         self.code, self.permanent = code, permanent
 
 
-def send(to: str, text: str) -> bool:
-    """Deliver one text. Raises SendError on a provider error (permanent ones should not be retried)."""
-    token, phone_id, _ = _cfg()
-    if not token or not phone_id:
-        logger.warning("WhatsApp not configured; would send to %s: %s", to, text[:80])
-        return False
-    r = httpx.post(f"{GRAPH}/{phone_id}/messages", headers=_headers(), timeout=30,
-                   json={"messaging_product": "whatsapp", "to": to.lstrip("+"), "type": "text", "text": {"body": text}})
+def _post(body: dict) -> None:
+    _, phone_id, _ = _cfg()
+    r = httpx.post(f"{GRAPH}/{phone_id}/messages", headers=_headers(), timeout=30, json={"messaging_product": "whatsapp", **body})
     if r.status_code >= 400:
         try:
             err = r.json().get("error", {})
@@ -54,7 +52,63 @@ def send(to: str, text: str) -> bool:
         code = int(err.get("code", r.status_code))
         msg = err.get("message", r.text[:200])
         raise SendError(code, msg, permanent=code in PERMANENT)
+
+
+def template_param(text: str) -> str:
+    """Template variables may not hold line breaks, tabs or long runs of spaces, and stay under 1024 characters."""
+    import re
+    flat = re.sub(r"\s*\n+\s*", " · ", text.strip())
+    flat = re.sub(r"[\t ]+", " ", flat)
+    return flat[:1000]
+
+
+def send(to: str, text: str) -> bool:
+    """Deliver one text; outside the 24-hour window the same text goes inside the approved utility template.
+    Raises SendError on a provider error (permanent ones should not be retried)."""
+    token, phone_id, _ = _cfg()
+    if not token or not phone_id:
+        logger.warning("WhatsApp not configured; would send to %s: %s", to, text[:80])
+        return False
+    try:
+        _post({"to": to.lstrip("+"), "type": "text", "text": {"body": text}})
+    except SendError as e:
+        if e.code not in OUTSIDE_WINDOW:
+            raise
+        _post({"to": to.lstrip("+"), "type": "template", "template": {
+            "name": TEMPLATE, "language": {"code": "en"},
+            "components": [{"type": "body", "parameters": [{"type": "text", "text": template_param(text)}]}]}})
     return True
+
+
+def connect(waba_id: str, phone: str = "") -> dict:
+    """Wire the desk to a WhatsApp Business account with the saved token: subscribe this app to its webhooks,
+    pick the phone number (the one given, else the only one), and make sure the update template exists."""
+    import re
+    token = _cfg()[0]
+    if not token or not waba_id:
+        return {"ok": False, "error": "save the access token and the WhatsApp Business account ID first"}
+    def call(method, path, **kw):
+        r = httpx.request(method, f"{GRAPH}/{path}", headers=_headers(), timeout=30, **kw)
+        if r.status_code >= 400:
+            raise RuntimeError(r.json().get("error", {}).get("message", r.text[:200]) if r.content else str(r.status_code))
+        return r.json() if r.content else {}
+    try:
+        call("POST", f"{waba_id}/subscribed_apps")
+        numbers = call("GET", f"{waba_id}/phone_numbers", params={"fields": "id,display_phone_number,verified_name,quality_rating"}).get("data", [])
+        digits = re.sub(r"\D", "", phone)
+        pick = [n for n in numbers if digits and re.sub(r"\D", "", n["display_phone_number"]).endswith(digits[-9:])] or (numbers if len(numbers) == 1 else [])
+        have = call("GET", f"{waba_id}/message_templates", params={"name": TEMPLATE, "fields": "name,status,language"}).get("data", [])
+        if not any(t.get("name") == TEMPLATE for t in have):
+            call("POST", f"{waba_id}/message_templates", json={
+                "name": TEMPLATE, "category": "UTILITY", "language": "en",
+                "components": [{"type": "BODY", "text": TEMPLATE_BODY,
+                                "example": {"body_text": [["Ticket #102: your VPN is connected again; reply here if anything is still wrong."]]}}]})
+            have = call("GET", f"{waba_id}/message_templates", params={"name": TEMPLATE, "fields": "name,status,language"}).get("data", [])
+    except (RuntimeError, httpx.HTTPError) as e:
+        return {"ok": False, "error": str(e)[:300]}
+    status = next((t.get("status") for t in have if t.get("name") == TEMPLATE), "missing")
+    return {"ok": bool(pick), "numbers": numbers, "phone_number_id": pick[0]["id"] if pick else "",
+            "template": status, "error": "" if pick else "choose which number to use"}
 
 
 def try_send(to: str, text: str) -> bool:
