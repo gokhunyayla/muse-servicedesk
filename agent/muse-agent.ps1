@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.4.2"
+$Version = "1.5.0"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -118,6 +118,36 @@ function Get-Threats {
   } catch { return @() }
 }
 
+$BugChecks = @{
+  "0x0000000a" = @("IRQL_NOT_LESS_OR_EQUAL", "driver"); "0x000000d1" = @("DRIVER_IRQL_NOT_LESS_OR_EQUAL", "driver")
+  "0x00000050" = @("PAGE_FAULT_IN_NONPAGED_AREA", "driver or memory"); "0x0000007e" = @("SYSTEM_THREAD_EXCEPTION_NOT_HANDLED", "driver")
+  "0x0000003b" = @("SYSTEM_SERVICE_EXCEPTION", "driver or system files"); "0x0000001a" = @("MEMORY_MANAGEMENT", "memory")
+  "0x000000ef" = @("CRITICAL_PROCESS_DIED", "system files"); "0x00000133" = @("DPC_WATCHDOG_VIOLATION", "driver or firmware")
+  "0x0000007a" = @("KERNEL_DATA_INPAGE_ERROR", "disk"); "0x00000077" = @("KERNEL_STACK_INPAGE_ERROR", "disk")
+  "0x00000124" = @("WHEA_UNCORRECTABLE_ERROR", "hardware"); "0x0000009f" = @("DRIVER_POWER_STATE_FAILURE", "driver")
+  "0x00000019" = @("BAD_POOL_HEADER", "driver or memory"); "0x000000c2" = @("BAD_POOL_CALLER", "driver")
+  "0x000000e2" = @("MANUALLY_INITIATED_CRASH", "manual"); "0x00000139" = @("KERNEL_SECURITY_CHECK_FAILURE", "driver or memory")
+}
+
+function Get-Crashes($days = 7) {
+  # blue screens Windows recorded after the restart (WER event 1001 in the System log)
+  try {
+    $since = (Get-Date).AddDays(-$days)
+    return @(Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = 1001; ProviderName = "Microsoft-Windows-WER-SystemErrorReporting"; StartTime = $since } -MaxEvents 10 -ErrorAction Stop |
+      ForEach-Object {
+        $m = [string]$_.Message
+        $code = if ($m -match "0x[0-9a-fA-F]{8}") { $Matches[0].ToLower() } else { "" }
+        $info = if ($BugChecks.ContainsKey($code)) { $BugChecks[$code] } else { @("", "unknown") }
+        @{ id = [string]$_.RecordId; at = $_.TimeCreated.ToUniversalTime().ToString("s") + "Z"; code = $code; name = $info[0]; hint = $info[1]
+           dump = $(if ($m -match "([A-Za-z]:\\\S+?\.dmp)") { $Matches[1] } else { "" }) } })
+  } catch { return @() }
+}
+
+function Get-DiskHealth {
+  try { return @(Get-PhysicalDisk -ErrorAction Stop | ForEach-Object { @{ name = [string]$_.FriendlyName; health = [string]$_.HealthStatus; status = [string]($_.OperationalStatus -join ",") } }) }
+  catch { return @() }
+}
+
 function Get-Defender {
   try {
     $s = Get-MpComputerStatus -ErrorAction Stop
@@ -154,6 +184,9 @@ function Get-Metrics {
     software           = $software
     threats            = @(Get-Threats)
     defender           = Get-Defender
+    crashes            = @(Get-Crashes)
+    disk_health        = @(Get-DiskHealth)
+    repair_run         = $(if (Test-Path (Join-Path $Home_ "repair-result.txt")) { (Get-Content (Join-Path $Home_ "repair-result.txt") -Raw).Trim() } else { "" })
   }
 }
 
@@ -321,6 +354,68 @@ try {
       Register-ScheduledTask -TaskName "MuseAgentInstallUpdates" -Action $action -Principal $principal | Out-Null
       Start-ScheduledTask -TaskName "MuseAgentInstallUpdates"
       return "Started installing $($todo.Count) update(s) in the background: $($titles -join '; '). This usually takes 10-30 minutes; the desk is told automatically when it finishes (result and whether a restart is needed)."
+    }
+    "crash-report" {
+      # what an engineer looks at first: the stop codes, drivers that changed lately, disk health
+      $crashes = @(Get-Crashes 30)
+      $lines = @()
+      if ($crashes.Count -eq 0) { $lines += "No blue screen recorded in the last 30 days." }
+      foreach ($c in ($crashes | Select-Object -First 5)) { $lines += "Blue screen $($c.at): $($c.code) $($c.name) (likely cause: $($c.hint))$(if ($c.dump) { '; dump ' + $c.dump })" }
+      $since = (Get-Date).AddDays(-14)
+      $fresh = @(Get-ChildItem "$env:SystemRoot\System32\drivers" -Filter *.sys -ErrorAction SilentlyContinue | Where-Object { $_.CreationTime -ge $since -or $_.LastWriteTime -ge $since } |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 8 | ForEach-Object {
+          $sig = Get-AuthenticodeSignature $_.FullName -ErrorAction SilentlyContinue
+          $who = if ($sig -and $sig.SignerCertificate) { ($sig.SignerCertificate.Subject -replace '^CN=([^,]+).*', '$1') } else { "unsigned" }
+          "$($_.Name) ($who, changed $($_.LastWriteTime.ToString('yyyy-MM-dd HH:mm')))" })
+      $lines += "Drivers added or changed in the last 14 days: $(if ($fresh) { $fresh -join '; ' } else { 'none' })"
+      $disks = @(Get-DiskHealth)
+      $lines += "Disk health: $(if ($disks) { ($disks | ForEach-Object { "$($_.name) $($_.health)" }) -join '; ' } else { 'unknown' })"
+      $bad = @($disks | Where-Object { $_.health -and $_.health -ne "Healthy" })
+      $hw = @($crashes | Where-Object { $_.hint -in @("disk", "hardware", "memory") })
+      $verdict = if ($bad -or $hw) { "Verdict: hardware suspected ($(@($bad | ForEach-Object { $_.name + ' ' + $_.health }) + @($hw | ForEach-Object { $_.name }) -join ', '))" }
+                 elseif ($crashes) { "Verdict: software (driver or system files); repair is worth trying" } else { "Verdict: no crash to act on" }
+      return ($lines + $verdict) -join "`n"
+    }
+    "system-repair" {
+      # DISM then SFC take 10-40 minutes: a one-off SYSTEM task, the outcome reaches the desk with the heartbeat
+      $worker = Join-Path $Home_ "system-repair.ps1"
+      @'
+$out = Join-Path $env:ProgramData "MuseAgent\repair-result.txt"
+"started $((Get-Date).ToUniversalTime().ToString('u'))" | Set-Content $out
+try {
+  $dism = (& dism.exe /Online /Cleanup-Image /RestoreHealth 2>&1 | Out-String)
+  $sfc = (& sfc.exe /scannow 2>&1 | Out-String) -replace "`0", ""
+  $d = if ($dism -match "operation completed successfully") { "component store repaired or healthy" } else { "DISM did not finish cleanly" }
+  $s = if ($sfc -match "did not find any integrity violations") { "no corrupt system files" }
+       elseif ($sfc -match "successfully repaired") { "corrupt system files found and repaired" }
+       elseif ($sfc -match "unable to fix") { "corrupt system files found that could not be repaired" } else { "SFC result unclear" }
+  "finished $((Get-Date).ToUniversalTime().ToString('u')); DISM: $d; SFC: $s" | Set-Content $out
+} catch { "failed $((Get-Date).ToUniversalTime().ToString('u')): $($_.Exception.Message)" | Set-Content $out }
+'@ | Set-Content -Path $worker -Encoding UTF8
+      $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$worker`""
+      $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+      Unregister-ScheduledTask -TaskName "MuseAgentSystemRepair" -Confirm:$false -ErrorAction SilentlyContinue
+      Register-ScheduledTask -TaskName "MuseAgentSystemRepair" -Action $action -Principal $principal | Out-Null
+      Start-ScheduledTask -TaskName "MuseAgentSystemRepair"
+      return "Started Windows system repair (DISM RestoreHealth, then SFC) in the background. It usually takes 10-40 minutes; the desk is told automatically when it finishes."
+    }
+    "crash-drill" {
+      # admin drill: Microsoft Sysinternals NotMyFault makes a controlled blue screen; the machine restarts by itself
+      $dir = Join-Path $Home_ "notmyfault"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
+      $zip = Join-Path $dir "NotMyFault.zip"
+      Invoke-WebRequest -UseBasicParsing "https://download.sysinternals.com/files/NotMyFault.zip" -OutFile $zip -TimeoutSec 120
+      Expand-Archive $zip -DestinationPath $dir -Force
+      $exe = Join-Path $dir "notmyfaultc64.exe"
+      if (-not (Test-Path $exe)) { $exe = Join-Path $dir "notmyfault64.exe" }
+      $sig = Get-AuthenticodeSignature $exe
+      if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "Microsoft Corporation") { throw "NotMyFault signature is not a valid Microsoft signature; nothing run" }
+      $arg = if ($exe -like "*notmyfaultc64.exe") { "-accepteula crash 0x01" } else { "-accepteula /crash" }
+      $action = New-ScheduledTaskAction -Execute $exe -Argument $arg
+      $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+      $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(20)
+      Unregister-ScheduledTask -TaskName "MuseAgentCrashDrill" -Confirm:$false -ErrorAction SilentlyContinue
+      Register-ScheduledTask -TaskName "MuseAgentCrashDrill" -Action $action -Principal $principal -Trigger $trigger | Out-Null
+      return "Crash drill armed: Microsoft-signed NotMyFault ($([IO.Path]::GetFileName($exe))) will cause a blue screen in about 20 seconds; Windows restarts by itself."
     }
     "driver-rollback" {
       throw "driver rollback is not enabled on this device (servers keep their certified drivers); hand off to L2/L4"

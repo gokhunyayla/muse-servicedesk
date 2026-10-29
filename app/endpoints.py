@@ -71,13 +71,15 @@ def heartbeat(db, d: Device, payload: dict) -> None:
     d.agent_version = str(payload.get("version", d.agent_version))[:32]
     m = payload.get("metrics")
     if isinstance(m, dict):
-        before = str((d.metrics or {}).get("updates_run", ""))
+        old = d.metrics or {}
         d.metrics = {k: v for k, v in m.items() if isinstance(k, str) and len(k) < 40}
-        after = str(d.metrics.get("updates_run", ""))
-        if after != before and after.startswith(("finished", "failed")):
-            _background_finished(db, d, "install-updates", after)
-        from app import malwatch
+        for key, script in (("updates_run", "install-updates"), ("repair_run", "system-repair")):   # background work ended
+            before, after = str(old.get(key, "")), str(d.metrics.get(key, ""))
+            if after != before and after.startswith(("finished", "failed")):
+                _background_finished(db, d, script, after)
+        from app import crashwatch, malwatch
         malwatch.on_heartbeat(d.hostname, d.metrics)
+        crashwatch.on_heartbeat(d.hostname, d.metrics)
 
 
 def take_jobs(db, d: Device) -> list[dict]:

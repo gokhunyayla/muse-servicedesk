@@ -62,12 +62,17 @@ def run_proactive_checks() -> list[int]:
                                           (Ticket.status != "resolved") | (Ticket.created_at >= _now() - timedelta(days=COOLDOWN_DAYS))).count()
             if dup:
                 continue
-            title = f"[Proactive:{f['kind']}] {f['hostname']}"
-            ticket, answer = handle_message(db, f["phone"], f"{f['text']} Owner: {f['employee_no']}. "
-                                                            f"Fix what you can remotely, then tell the employee.", force_new=True)
-            ticket.title = title
-            if answer:                               # nobody wrote in: the desk speaks first, on the owner's channel
-                from app.db import Outbound
-                db.add(Outbound(to=f["phone"], ticket_id=ticket.id, text=answer))
-            opened.append(ticket.id)
+        opened.append(open_ticket(f))
     return opened
+
+
+def open_ticket(f: dict) -> int:
+    """Hand one finding to L1 as if the owner had written in; the desk speaks first on the owner's channel."""
+    with session() as db:
+        ticket, answer = handle_message(db, f["phone"], f"{f['text']} Owner: {f['employee_no']}. "
+                                                        f"Fix what you can remotely, then tell the employee.", force_new=True)
+        ticket.title = f"[Proactive:{f['kind']}] {f['hostname']}"
+        if answer:                               # nobody wrote in: the desk speaks first, on the owner's channel
+            from app.db import Outbound
+            db.add(Outbound(to=f["phone"], ticket_id=ticket.id, text=answer))
+        return ticket.id
