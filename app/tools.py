@@ -251,7 +251,8 @@ def vpn_status(ctx: Ctx, hostname: str) -> dict:
     d = systems.device(hostname)
     if not d:
         return {"ok": False, "error": "unknown device"}
-    return {"ok": True, "hostname": hostname, "vpn_profile": d["vpn_profile"], "online": d["online"]}
+    return {"ok": True, "hostname": hostname, "vpn_profile": d["vpn_profile"], "online": d["online"],
+            **({"vpn": d["vpn"], "fix": "run_endpoint_script vpn-reset"} if d.get("real") and d.get("vpn") else {})}
 
 
 @tool("Push a fresh VPN profile to a laptop.", ("L1", "L2"), hostname=STR)
@@ -260,7 +261,7 @@ def renew_vpn_profile(ctx: Ctx, hostname: str) -> dict:
     if not d:
         return {"ok": False, "error": "unknown device"}
     if d.get("real"):
-        return {"ok": False, "error": "this device has no managed VPN client; try run_endpoint_script vpn-reset or dns-reset"}
+        return {"ok": False, "error": "a real device keeps its VPN profile; reconnect it with run_endpoint_script vpn-reset"}
     if not d["online"]:
         return {"ok": False, "error": "device offline; cannot push profile"}
     d["vpn_profile"] = "valid"

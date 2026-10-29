@@ -168,8 +168,16 @@ def state(hostname: str) -> dict | None:
     m = d.metrics or {}
     return {"real": True, "online": _online(d), "dns_ok": bool(m.get("dns_ok", True)),
             "disk_used_pct": m.get("disk_used_pct", 0), "os_patch_days": m.get("last_patch_days", 0),
-            "vpn_profile": "no managed VPN client", "last_seen": d.last_seen.isoformat() if d.last_seen else None,
+            "vpn_profile": _vpn_state(m.get("vpn")), "vpn": m.get("vpn") or {}, "last_seen": d.last_seen.isoformat() if d.last_seen else None,
             "owner": d.owner, "metrics": m, "os": d.os}
+
+
+def _vpn_state(v) -> str:
+    if not isinstance(v, dict) or v.get("profile") in (None, "none", "unknown"):
+        return "no managed VPN client"
+    if v.get("connected"):
+        return "connected" + ("" if v.get("target_ok") in (None, True) else "; internal network not answering")
+    return f"disconnected ({v.get('status') or 'down'})"
 
 
 def all_states() -> dict[str, dict]:

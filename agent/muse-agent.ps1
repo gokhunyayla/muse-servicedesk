@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.5.1"
+$Version = "1.6.0"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -143,6 +143,31 @@ function Get-Crashes($days = 7) {
   } catch { return @() }
 }
 
+function Get-Vpn {
+  # the company VPN as Windows sees it (built-in client, all-user profile), and whether the internal check target answers
+  try {
+    $c = @(Get-VpnConnection -AllUserConnection -ErrorAction Stop) | Select-Object -First 1
+    if (-not $c) { return @{ profile = "none" } }
+    $target = ""; $reach = $null
+    $cfg = Join-Path $Home_ "vpn-check.txt"
+    if (Test-Path $cfg) {
+      $target = (Get-Content $cfg -Raw).Trim()
+      if ($target -match '^([\w.-]+):(\d+)$') {
+        $tcp = New-Object Net.Sockets.TcpClient
+        try { $reach = $tcp.ConnectAsync($Matches[1], [int]$Matches[2]).Wait(3000) -and $tcp.Connected } catch { $reach = $false } finally { $tcp.Close() }
+      }
+    }
+    return @{ profile = [string]$c.Name; status = [string]$c.ConnectionStatus; connected = ($c.ConnectionStatus -eq "Connected")
+              server = [string]$c.ServerAddress; tunnel = [string]$c.TunnelType; target = $target; target_ok = $reach }
+  } catch { return @{ profile = "unknown"; error = $_.Exception.Message } }
+}
+
+function Connect-Vpn($name) {
+  $out = (& rasdial.exe "$name" 2>&1 | Out-String).Trim()
+  Start-Sleep -Seconds 3
+  return $out
+}
+
 function Get-DiskHealth {
   try { return @(Get-PhysicalDisk -ErrorAction Stop | ForEach-Object { @{ name = [string]$_.FriendlyName; health = [string]$_.HealthStatus; status = [string]($_.OperationalStatus -join ",") } }) }
   catch { return @() }
@@ -185,6 +210,7 @@ function Get-Metrics {
     threats            = @(Get-Threats)
     defender           = Get-Defender
     crashes            = @(Get-Crashes)
+    vpn                = Get-Vpn
     disk_health        = @(Get-DiskHealth)
     repair_run         = $(if (Test-Path (Join-Path $Home_ "repair-result.txt")) { (Get-Content (Join-Path $Home_ "repair-result.txt") -Raw).Trim() } else { "" })
   }
@@ -273,11 +299,30 @@ function Invoke-Allowed($script, $jobArgs) {
       return "DNS cache cleared and registration renewed. Test lookup www.microsoft.com -> $r"
     }
     "vpn-reset" {
-      $svc = Get-Service | Where-Object { $_.Name -match "vpn|wireguard|openvpn|forti|anyconnect|globalprotect|tailscale" -and $_.Status -ne "Disabled" }
+      # the Windows VPN profile: drop the tunnel, restart the remote-access services, clear DNS, dial again, test inside
+      $c = @(Get-VpnConnection -AllUserConnection -ErrorAction SilentlyContinue) | Select-Object -First 1
       Clear-DnsClientCache
-      if (-not $svc) { return "No VPN client is installed on this device. DNS cache cleared; nothing else to reset." }
-      $svc | Restart-Service -Force
-      return "Restarted VPN service(s): $(($svc | ForEach-Object Name) -join ', '); DNS cache cleared."
+      if (-not $c) {
+        $svc = Get-Service | Where-Object { $_.Name -match "wireguard|openvpn|forti|anyconnect|globalprotect|tailscale" -and $_.Status -ne "Disabled" }
+        if (-not $svc) { return "No VPN profile or client on this device. DNS cache cleared; nothing else to reset." }
+        $svc | Restart-Service -Force
+        return "Restarted VPN service(s): $(($svc | ForEach-Object Name) -join ', '); DNS cache cleared."
+      }
+      $before = [string]$c.ConnectionStatus
+      & rasdial.exe "$($c.Name)" /disconnect 2>&1 | Out-Null
+      foreach ($s in "RasMan", "SstpSvc") { Restart-Service -Name $s -Force -ErrorAction SilentlyContinue }
+      Start-Sleep -Seconds 2
+      $dial = Connect-Vpn $c.Name
+      $v = Get-Vpn
+      $inside = if ($v.target) { if ($v.target_ok) { "internal check $($v.target) answers" } else { "internal check $($v.target) does NOT answer" } } else { "no internal check configured" }
+      return "VPN '$($c.Name)' ($($c.TunnelType) to $($c.ServerAddress)) was $before; reset the tunnel, restarted RasMan/SSTP, cleared DNS and dialled again: now $($v.status); $inside. rasdial: $($dial -replace '\s+', ' ')"
+    }
+    "vpn-drill" {
+      # admin drill: drop the company VPN so the desk can be shown fixing it
+      $c = @(Get-VpnConnection -AllUserConnection -ErrorAction Stop) | Select-Object -First 1
+      if (-not $c) { throw "no VPN profile on this device" }
+      & rasdial.exe "$($c.Name)" /disconnect 2>&1 | Out-Null
+      return "VPN '$($c.Name)' disconnected for the drill; it stays down until someone reconnects it."
     }
     "printer-fix" {
       $spool = Join-Path $env:WINDIR "System32\spool\PRINTERS"

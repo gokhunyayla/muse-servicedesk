@@ -271,7 +271,8 @@ def block_sender(sender: str) -> dict:
 # Allow-listed endpoint scripts. Only these names can run on a laptop; the endpoint agent
 # refuses anything else. Simulated here; the real endpoint agent returns the same shape.
 SCRIPTS = {
-    "vpn-reset":       {"desc": "restart VPN client, flush DNS cache", "needs_consent": False},
+    "vpn-reset":       {"desc": "company VPN: drop and redial the tunnel, restart the remote-access services, flush DNS, then test an internal address", "needs_consent": False},
+    "vpn-drill":       {"desc": "admin drill: disconnect the company VPN", "needs_consent": False, "admin_only": True},
     "dns-reset":       {"desc": "reset DNS settings and cache", "needs_consent": False},
     "printer-fix":     {"desc": "clear print queue, restart spooler", "needs_consent": False},
     "perf-report":     {"desc": "CPU/memory/disk/startup report", "needs_consent": False},
