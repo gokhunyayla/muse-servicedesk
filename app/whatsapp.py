@@ -32,7 +32,7 @@ def _headers() -> dict:
 PERMANENT = {131030, 131026, 131021, 100}   # not in test allow-list, not a WhatsApp user, same number, bad param
 OUTSIDE_WINDOW = {131047}                    # more than 24 h since the person last wrote: only a template may go
 TEMPLATE = "it_desk_update"                  # one utility template carries any desk message outside the window
-TEMPLATE_BODY = "IT Service Desk update: {{1}}"
+TEMPLATE_BODY = "IT Service Desk update: {{1}} Reply to this message if you need anything else."   # Meta: no variable at the end
 
 
 class SendError(Exception):
@@ -90,7 +90,12 @@ def connect(waba_id: str, phone: str = "") -> dict:
     def call(method, path, **kw):
         r = httpx.request(method, f"{GRAPH}/{path}", headers=_headers(), timeout=30, **kw)
         if r.status_code >= 400:
-            raise RuntimeError(r.json().get("error", {}).get("message", r.text[:200]) if r.content else str(r.status_code))
+            try:
+                e = r.json().get("error", {})
+                why = " ".join(x for x in (e.get("message", ""), e.get("error_user_title", ""), e.get("error_user_msg", "")) if x)
+            except ValueError:
+                why = r.text[:200]
+            raise RuntimeError(f"{method} {path.split('?')[0].split('/')[-1]}: {why}")
         return r.json() if r.content else {}
     try:
         call("POST", f"{waba_id}/subscribed_apps")
