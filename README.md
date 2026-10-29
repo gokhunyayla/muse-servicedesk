@@ -108,6 +108,23 @@ autonomous paths can be shown on demand; the agents never see them.
 
 Every call is accounted (`/ai`): tokens, latency, what it served, tool failure rates by tier, CSV export.
 
+### Also in the console
+
+* **Knowledge base** (`/knowledge`): one SOP pool per tier plus `shared`; agents search before acting and cite
+  `[SOP:key]`; drafts from agents and the Supervisor wait for an admin; lessons with their safety-check verdict.
+* **Reference policies** (`/knowledge`): uploaded PDF/DOCX/Markdown policies split into passages agents must quote as
+  `[REF:doc#n]`; *strict* passages bind the agent even if the employee insists, *flexible* ones may be deviated from
+  with a recorded reason; the Supervisor checks actions against strict rules.
+* **Desk Chat** (`/chat`): desk users talk to the desk's brain — what is open, who holds what, SLA risk — and act with
+  their own authority (assign, reply, approve, run the Supervisor, publish a draft), every action audited.
+* **Reports** (Settings → Reports): daily, weekly and monthly numbers with a Muse Wonder narrative, e-mailed.
+* **AI usage** (`/ai`): every model call with tokens, latency and what it served; tool failure rates by tier; cost per
+  ticket when prices are set; CSV export.
+* **MCP connectors** (Settings → Connectors): any MCP server (HTTP or stdio) — network gear, ITSM, firewalls — appears to
+  the chosen tiers as `mcp.<name>.<tool>` under the same authority rules; credentials encrypted.
+* **SLA** (Settings → SLA): targets per tier; the Supervisor acts on tickets at risk with the least drastic step.
+* **Desk users**: invited at `/users`, roles admin/agent, PBKDF2 passwords, self-service reset, audit log of every action.
+
 ## Try it
 
 * **WhatsApp**: the desk's number and an invitation code are in the submission notes. Someone the desk does not
