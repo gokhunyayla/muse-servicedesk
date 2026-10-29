@@ -13,6 +13,7 @@ from app.tools import Ctx, run_tool, tools_for
 
 MAX_STEPS = 10
 MAX_DEPTH = 3
+MAX_REFUSALS = 3     # the same tool refused this many times on one ticket: stop and hand off to a person
 
 RULES = """Rules:
 - Reply in the employee's language, short and plain.
@@ -334,6 +335,9 @@ class Agent:
             return self._loop(db, ticket, ctx, llm, messages, specs, depth)
 
     def _loop(self, db, ticket, ctx, llm, messages, specs, depth) -> str:
+        from collections import Counter
+        refused: Counter = Counter(e.content for e in ticket.events
+                                   if e.kind == "tool_result" and isinstance(e.data, dict) and e.data.get("ok") is False)
         for _ in range(MAX_STEPS):
             try:
                 reply = llm.chat(messages, specs, heavy=self.heavy)
@@ -357,6 +361,15 @@ class Agent:
                 log(db, ticket.id, self.tier, "tool_result", call.name, result)
                 messages.append({"role": "tool", "tool_call_id": call.id,
                                  "content": json.dumps(result, ensure_ascii=False, default=str)})
+                # a check inside a tool refused the step: the model gets the reason and may fix it, but not forever
+                if isinstance(result, dict) and result.get("ok") is False and not call.name.startswith("handoff_"):
+                    refused[call.name] += 1
+                    if refused[call.name] >= MAX_REFUSALS and ticket.status not in ("resolved", "escalated"):
+                        why = str(result.get("error") or result.get("missing") or "")[:200]
+                        run_tool(ctx, "escalate_to_human", {"reason": f"{call.name} refused {refused[call.name]} times: {why}",
+                                                            "tried": f"{self.tier} retried {call.name} {refused[call.name]} times"})
+                        log(db, ticket.id, self.tier, "tool_call", "escalate_to_human", {"reason": f"{call.name} refused {refused[call.name]} times"})
+                        return tr_("escalated", ticket_lang(ticket))
         # out of steps: park it for a human instead of leaving the employee hanging
         if ticket.status not in ("resolved", "escalated"):
             run_tool(ctx, "escalate_to_human", {"reason": "agent could not finish within its step budget",
