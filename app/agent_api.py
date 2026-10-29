@@ -129,6 +129,41 @@ def cancel_people_process(process_id: int, request: Request, admin: User = Depen
     return {"ok": True, "status": "cancelled"}
 
 
+@router.post("/vulnwatch/run")
+def vulnwatch_run(request: Request) -> dict:
+    """Run the vulnerability watch now (console admins, or an integration with the API key). It runs in the background:
+    findings arrive as tickets and messages to the admins."""
+    import threading
+    from app import vulnwatch
+    from app.auth import current_user
+    from app.security import api_key
+    user = None
+    try:
+        user = current_user(request)
+    except HTTPException:
+        pass
+    if user is not None:
+        if user.role != "admin":
+            raise HTTPException(403, "admins only")
+        check_origin(request)
+    else:
+        api_key(request)
+    threading.Thread(target=vulnwatch.run_watch, kwargs={"force": True}, daemon=True, name="vulnwatch-now").start()
+    return {"ok": True, "status": "started"}
+
+
+@router.post("/settings/vulnwatch")
+async def settings_vulnwatch(request: Request, admin: User = Depends(admin_user)):
+    from app.sla import get_setting, put_setting
+    check_origin(request)
+    form = await request.form()
+    put_setting("vulnwatch", {**get_setting("vulnwatch", {}), "enabled": form.get("enabled") == "1",
+                              "auto_remediate": form.get("auto_remediate") == "1"})
+    with session() as db:
+        audit(db, admin.email, "settings.vulnwatch", detail=f"enabled={form.get('enabled') == '1'} auto={form.get('auto_remediate') == '1'}", ip=_ip(request))
+    return RedirectResponse("/settings?tab=connectors&info=Vulnerability+watch+saved", 303)
+
+
 @router.get("/devices.json")
 def devices_json(admin: User = Depends(admin_user)) -> list[dict]:
     return endpoints.listing()

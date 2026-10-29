@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.2.0"
+$Version = "1.3.0"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -86,6 +86,21 @@ function Get-PendingReboot {
          (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired")
 }
 
+function Get-Software {
+  # installed programs (both registry views) plus portable runtimes the desk knows how to patch
+  $keys = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+  $list = @(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.DisplayVersion -and -not $_.SystemComponent } |
+    ForEach-Object { @{ name = [string]$_.DisplayName; version = [string]$_.DisplayVersion; publisher = [string]$_.Publisher } })
+  foreach ($root in @("C:\php", "C:\tools\php")) {
+    $exe = Join-Path $root "php.exe"
+    if (Test-Path $exe) {
+      $v = (& $exe -r "echo PHP_VERSION;" 2>$null)
+      if ($v) { $list += @{ name = "PHP"; version = [string]$v; publisher = "The PHP Group"; path = $root } }
+    }
+  }
+  return @($list | Select-Object -First 300)
+}
+
 function Get-Metrics {
   $os = Get-CimInstance Win32_OperatingSystem
   $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
@@ -97,6 +112,7 @@ function Get-Metrics {
   $run = Join-Path $Home_ "updates-result.txt"
   $updatesRun = if (Test-Path $run) { (Get-Content $run -Raw).Trim() } else { "" }
   if ($updatesRun.Length -gt 1500) { $updatesRun = $updatesRun.Substring(0, 1500) }
+  $software = Get-Software
   $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254*" } | Select-Object -First 1).IPAddress
   return @{
     disk_used_pct      = [int](100 - ($disk.FreeSpace / $disk.Size * 100))
@@ -111,13 +127,63 @@ function Get-Metrics {
     dns_ok             = $dnsOk
     ip                 = $ip
     updates_run        = $updatesRun
+    software           = $software
   }
 }
 
 # ---- the allow-listed scripts ---------------------------------------------------------------------
 
-function Invoke-Allowed($script) {
+function Invoke-Allowed($script, $jobArgs) {
   switch ($script) {
+    "app-update" {
+      # only apps this agent knows how to patch, only from the vendor's own release feed, checksum verified
+      if ($jobArgs.app -ne "php") { throw "no updater for '$($jobArgs.app)' on this device" }
+      $root = if ($jobArgs.path) { [string]$jobArgs.path } else { "C:\php" }
+      if ($root -notin @("C:\php", "C:\tools\php")) { throw "PHP path not allowed: $root" }
+      $exe = Join-Path $root "php.exe"
+      if (-not (Test-Path $exe)) { throw "PHP not found at $root" }
+      $before = (& $exe -r "echo PHP_VERSION;")
+      $branch = ($before -split "\.")[0..1] -join "."
+      $feed = Invoke-RestMethod -UseBasicParsing "https://windows.php.net/downloads/releases/releases.json" -TimeoutSec 60
+      $rel = $feed.$branch
+      if (-not $rel) { throw "no release line $branch in the PHP for Windows feed" }
+      $flavor = if (Test-Path (Join-Path $root "php8ts.dll")) { "ts" } else { "nts" }
+      $build = $rel.PSObject.Properties | Where-Object { $_.Name -like "$flavor-vs*-x64" } | Select-Object -First 1
+      if (-not $build) { throw "no $flavor x64 build for PHP $branch" }
+      $target = [string]$rel.version
+      if ($jobArgs.min_version -and ([version]$target -lt [version]$jobArgs.min_version)) { throw "the newest PHP $branch ($target) is still below $($jobArgs.min_version)" }
+      if ([version]$target -le [version]$before) { return "PHP $before is already the newest $branch release ($target); nothing to do." }
+      $zip = $build.Value.zip
+      $tmp = Join-Path $env:TEMP "php-$target.zip"
+      Invoke-WebRequest -UseBasicParsing "https://windows.php.net/downloads/releases/$($zip.path)" -OutFile $tmp -TimeoutSec 300
+      $sha = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
+      if ($sha -ne ([string]$zip.sha256).ToLower()) { Remove-Item $tmp -Force; throw "checksum mismatch for $($zip.path); nothing changed" }
+      $backups = Join-Path $Home_ "backups"; New-Item -ItemType Directory -Force -Path $backups | Out-Null
+      $backupId = "php-$before-" + (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+      Copy-Item $root (Join-Path $backups $backupId) -Recurse -Force
+      $stage = Join-Path $env:TEMP "php-$target"; Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+      Expand-Archive $tmp -DestinationPath $stage -Force
+      if (Test-Path (Join-Path $root "php.ini")) { Copy-Item (Join-Path $root "php.ini") $stage -Force }   # keep the configuration
+      Get-ChildItem $root | Remove-Item -Recurse -Force
+      Copy-Item (Join-Path $stage "*") $root -Recurse -Force
+      $after = (& $exe -r "echo PHP_VERSION;")
+      if ($after -ne $target) { throw "PHP reports $after after the update, expected $target; restore with app-rollback $backupId" }
+      return "PHP updated $before -> $after from windows.php.net ($($zip.path), sha256 verified). Backup: $backupId"
+    }
+    "app-rollback" {
+      if ($jobArgs.app -ne "php") { throw "no rollback for '$($jobArgs.app)' on this device" }
+      $root = if ($jobArgs.path) { [string]$jobArgs.path } else { "C:\php" }
+      if ($root -notin @("C:\php", "C:\tools\php")) { throw "PHP path not allowed: $root" }
+      $backups = Join-Path $Home_ "backups"
+      $pick = if ($jobArgs.backup -and $jobArgs.backup -ne "latest") { Get-Item (Join-Path $backups ([IO.Path]::GetFileName([string]$jobArgs.backup))) -ErrorAction SilentlyContinue }
+              else { Get-ChildItem $backups -Directory -Filter "php-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1 }
+      if (-not $pick) { throw "no PHP backup to restore" }
+      $now = (& (Join-Path $root "php.exe") -r "echo PHP_VERSION;" 2>$null)
+      Get-ChildItem $root | Remove-Item -Recurse -Force
+      Copy-Item (Join-Path $pick.FullName "*") $root -Recurse -Force
+      $back = (& (Join-Path $root "php.exe") -r "echo PHP_VERSION;")
+      return "PHP rolled back $now -> $back from backup $($pick.Name)"
+    }
     "dns-reset" {
       Clear-DnsClientCache
       ipconfig /registerdns | Out-Null
@@ -243,7 +309,7 @@ if ($Run) {
         if (-not $job) { continue }
         Log "job $($job.id): $($job.script)"
         try {
-          $out = Invoke-Allowed $job.script
+          $out = Invoke-Allowed $job.script $job.args
           Call "POST" "/agent/jobs/$($job.id)/result" @{ ok = $true; output = [string]$out } | Out-Null
         } catch {
           Call "POST" "/agent/jobs/$($job.id)/result" @{ ok = $false; output = [string]$_.Exception.Message } | Out-Null

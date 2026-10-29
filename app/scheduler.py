@@ -54,6 +54,22 @@ def run_due_followups() -> int:
     return ran
 
 
+_watch_thread: threading.Thread | None = None
+
+
+def _vulnwatch_tick() -> None:
+    """The daily vulnerability watch runs beside the loop: a patch can take minutes, messages must keep flowing."""
+    global _watch_thread
+    from app import vulnwatch
+    cfg = vulnwatch.config()
+    if not cfg["enabled"] or time.time() - float(cfg.get("last_run") or 0) < vulnwatch.EVERY_SEC:
+        return
+    if _watch_thread is not None and _watch_thread.is_alive():
+        return
+    _watch_thread = threading.Thread(target=vulnwatch.run_watch, daemon=True, name="vulnwatch")
+    _watch_thread.start()
+
+
 def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600) -> threading.Thread:
     def loop():
         from app.proactive import run_proactive_checks
@@ -66,6 +82,7 @@ def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600
                 drain_outbound()
                 from app.channels import poll_email
                 poll_email()
+                _vulnwatch_tick()
                 if time.time() - last_proactive >= proactive_every_sec:
                     run_proactive_checks()
                     last_proactive = time.time()

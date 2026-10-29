@@ -280,7 +280,10 @@ SCRIPTS = {
     "lock-screen":     {"desc": "lock the workstation immediately", "needs_consent": False},
     "patch-status":    {"desc": "last installed update, pending updates, reboot, last install run", "needs_consent": False},
     "install-updates": {"desc": "download and install pending OS updates in the background (10-30 min; may need a restart)", "needs_consent": True},
+    "app-update":      {"desc": "patch an application to its vendor's newest release in the same line (backup first; args app, min_version)", "needs_consent": True},
+    "app-rollback":    {"desc": "restore an application from the backup taken before app-update (args app, backup)", "needs_consent": True},
 }
+PATCHABLE_APPS = {"php"}          # applications the endpoint agent knows how to patch and roll back
 
 
 def run_script(hostname: str, script: str) -> dict:

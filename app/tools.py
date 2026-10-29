@@ -320,19 +320,44 @@ def lookup_advisory(ctx: Ctx, query: str) -> dict:
     q = query.strip().upper()
     for cve, adv in systems.ADVISORIES.items():
         if q == cve or q == adv["name"].upper():
-            return {"ok": True, "cve": cve, **adv}
+            return {"ok": True, "cve": cve, **adv, "source": "simulated advisory feed"}
+    if q.startswith("CVE-"):                              # a real CVE: NVD and the CISA known-exploited list
+        from app import vulnwatch
+        try:
+            info = vulnwatch.nvd(q)
+            kev = next((k for k in vulnwatch.fetch_kev() if k.get("cveID") == q), None)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"advisory sources unreachable: {e}"}
+        if info:
+            return {"ok": True, "cve": q, "score": info.get("score"), "description": info.get("description"),
+                    "affected": info.get("ranges"), "known_exploited": bool(kev),
+                    "ransomware": bool(kev and kev.get("knownRansomwareCampaignUse") == "Known"), "source": "NVD + CISA KEV"}
     return {"ok": False, "error": "no advisory found"}
 
 
 @tool("Scan the server inventory for hosts affected by a CVE.", ("L3",), cve=STR)
 def find_vulnerable_servers(ctx: Ctx, cve: str) -> dict:
     hosts = systems.find_vulnerable(cve.upper())
-    return {"ok": True, "cve": cve.upper(), "affected": hosts, "count": len(hosts)}
+    real = []
+    if cve.upper() not in systems.ADVISORIES:             # real CVE: check what the endpoint agents report as installed
+        from app import vulnwatch
+        try:
+            kev = [k for k in vulnwatch.fetch_kev() if k.get("cveID") == cve.upper()] or [{"cveID": cve.upper(), "product": ""}]
+            real = vulnwatch.findings(kev=kev) if kev[0].get("product") else []
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"advisory sources unreachable: {e}"}
+    return {"ok": True, "cve": cve.upper(), "affected": hosts + [{"hostname": f["hostname"], "app": f["app"], "version": f["version"],
+                                                                  "fixed_in": f["fixed_in"], "real_device": True} for f in real],
+            "count": len(hosts) + len(real)}
 
 
 @tool("Upgrade a package on a server. Takes a snapshot first so the change can be rolled back.",
       ("L3",), hostname=STR, package=STR, version=STR)
 def apply_patch(ctx: Ctx, hostname: str, package: str, version: str) -> dict:
+    from app import endpoints
+    if endpoints.get(hostname) is not None:               # a real machine: the agent patches from the vendor feed, backup first
+        return endpoints.run(hostname, "app-update", ctx.ticket.id, ctx.agent, wait=600, db=ctx.db,
+                             args={"app": package.lower(), "min_version": version})
     srv = systems.SERVERS.get(hostname)
     if not srv or package not in srv["packages"]:
         return {"ok": False, "error": "unknown host or package"}
@@ -355,8 +380,14 @@ def verify_patch(ctx: Ctx, hostname: str, cve: str) -> dict:
             "service_healthy": True, "still_vulnerable": still_vulnerable}
 
 
-@tool("Roll a server back to a snapshot taken before a patch.", ("L3",), snapshot_id=STR)
-def rollback_patch(ctx: Ctx, snapshot_id: str) -> dict:
+@tool("Roll a server back to a snapshot taken before a patch. For a real machine with the endpoint agent give hostname and "
+      "package too; snapshot_id is then the backup id from the patch output (or 'latest').", ("L3",), snapshot_id=STR,
+      hostname={"type": "string", "optional": True}, package={"type": "string", "optional": True})
+def rollback_patch(ctx: Ctx, snapshot_id: str, hostname: str = "", package: str = "") -> dict:
+    from app import endpoints
+    if hostname and endpoints.get(hostname) is not None:  # a real machine: restore the agent's backup
+        return endpoints.run(hostname, "app-rollback", ctx.ticket.id, ctx.agent, wait=300, db=ctx.db,
+                             args={"app": (package or "php").lower(), "backup": snapshot_id or "latest"})
     return {"ok": systems.rollback(snapshot_id), "snapshot_id": snapshot_id}
 
 

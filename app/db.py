@@ -419,6 +419,7 @@ class DeviceJob(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"))
     script: Mapped[str] = mapped_column(String(64))
+    args: Mapped[dict | None] = mapped_column(JSON, nullable=True)        # validated parameters (app-update: app, min_version)
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
     requested_by: Mapped[str] = mapped_column(String(64), default="")    # agent tier or desk user
     status: Mapped[str] = mapped_column(String(16), default="queued")    # queued | running | done | failed | expired

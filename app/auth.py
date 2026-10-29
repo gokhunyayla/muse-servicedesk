@@ -718,6 +718,14 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
             return (f'<div class="srow"><div><b>{_esc(d["hostname"])}</b> {state}{"" if d["enabled"] else " <span class=\"tag disabled\">disabled</span>"}'
                     f'<small>owner {_esc(d["owner"] or "—")} · last seen {seen} UTC{(" · " + _esc(facts)) if facts else ""}</small></div><div class="min">{btn}</div></div>')
         devs = endpoints.listing()
+        from app import vulnwatch
+        vw = vulnwatch.config()
+        import datetime as _dt
+        vlast = _dt.datetime.utcfromtimestamp(float(vw.get("last_run") or 0)).strftime("%Y-%m-%d %H:%M UTC") if vw.get("last_run") else "never"
+        vuln_html = f"""<form method="post" action="/settings/vulnwatch" style="margin-top:10px">
+<div class="srow"><div><b>Daily vulnerability watch</b><small>Once a day: CISA's known-exploited list and NVD, matched against what the agents report as installed · last run {vlast}</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if vw["enabled"] else ""} {dis}> on</label></div></div>
+<div class="srow"><div><b>Patch automatically</b><small>When the agent has an updater for the application: vendor feed, checksum, backup first, version verified; admins are told what was found and done</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="auto_remediate" value="1" {"checked" if vw["auto_remediate"] else ""} {dis}> on</label></div></div>
+{('<div class="row end"><button class="btn slim" type="button" onclick="fetch(\'/vulnwatch/run\',{{method:\'POST\'}}).then(()=>alert(\'Started; findings arrive as tickets and messages.\'))">Run now</button> <button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>"""
         devices_html = "".join(drow(d) for d in devs) or '<p class="muted">No devices enrolled yet.</p>'
         gst = vault.status("GRAPH_CLIENT_SECRET")
         gsec = ('<span class="tag active">configured</span> <small class="muted">…' + _esc(gst["hint"]) + '</small>') if gst["configured"] else '<span class="tag disabled">not set</span>'
@@ -738,6 +746,7 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <h3>Endpoint agents</h3>
 <p class="muted">Machines running the Muse endpoint agent. The agent only calls out to the desk (heartbeat, job poll); the agents' device tools run the allow-listed scripts on the real machine and the output lands on the ticket.</p>
 {devices_html}
+{vuln_html}
 {('<form method="post" action="/devices" class="row" style="gap:8px;align-items:flex-end;margin-top:8px"><div><label>Hostname</label><input name="hostname" placeholder="LT-101" required style="width:160px"></div><div><label>Owner (employee no or UPN)</label><input name="owner" placeholder="E1001" style="width:220px"></div><button class="btn primary slim" type="submit">Enrol device</button></form>' if admin else '')}
 <h3>MCP connectors</h3>"""
         def ccard(c):

@@ -89,7 +89,7 @@ def take_jobs(db, d: Device) -> list[dict]:
             j.status = "expired"
             continue
         j.status, j.started_at = "running", _now()
-        out.append({"id": j.id, "script": j.script})
+        out.append({"id": j.id, "script": j.script, "args": j.args or {}})
     return out
 
 
@@ -187,7 +187,32 @@ def device_for_owner(employee_no: str) -> str | None:
         return d.hostname if d is not None else None
 
 
-def run(hostname: str, script: str, ticket_id: int | None, requested_by: str, wait: int = JOB_WAIT_SEC, db=None) -> dict:
+def _valid_args(script: str, args: dict | None) -> dict:
+    """Parameters travel only for the parameterised scripts and only in a narrow shape."""
+    import re
+    from app import systems
+    if script not in ("app-update", "app-rollback"):
+        return {}
+    a = dict(args or {})
+    app = str(a.get("app", "")).lower()
+    if app not in systems.PATCHABLE_APPS:
+        raise ValueError(f"no updater for '{app}'; patchable: {sorted(systems.PATCHABLE_APPS)}")
+    out = {"app": app}
+    if a.get("min_version"):
+        if not re.fullmatch(r"\d+(\.\d+){1,3}", str(a["min_version"])):
+            raise ValueError("min_version must look like 8.3.8")
+        out["min_version"] = str(a["min_version"])
+    if a.get("backup"):
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", str(a["backup"])):
+            raise ValueError("bad backup id")
+        out["backup"] = str(a["backup"])
+    if a.get("path") in ("C:\\php", "C:\\tools\\php"):
+        out["path"] = a["path"]
+    return out
+
+
+def run(hostname: str, script: str, ticket_id: int | None, requested_by: str, wait: int = JOB_WAIT_SEC, db=None,
+        args: dict | None = None) -> dict:
     """Queue an allow-listed script on a real device and wait for its result. With `db` (the ticket's own session)
     the job is written and committed there, so the ticket it points to is visible to the device's session too."""
     from app import systems
@@ -199,7 +224,11 @@ def run(hostname: str, script: str, ticket_id: int | None, requested_by: str, wa
     if not _online(d):
         return {"ok": False, "hostname": d.hostname, "error": "device offline (no heartbeat in the last few minutes)",
                 "last_seen": d.last_seen.isoformat() if d.last_seen else None}
-    j = DeviceJob(device_id=d.id, script=script, ticket_id=ticket_id, requested_by=requested_by)
+    try:
+        clean = _valid_args(script, args)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    j = DeviceJob(device_id=d.id, script=script, ticket_id=ticket_id, requested_by=requested_by, args=clean or None)
     if db is not None:
         db.add(j)
         db.commit()                      # the device polls from its own session: it must see the job (and ticket) now
