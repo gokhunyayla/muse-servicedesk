@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.4.0"
+$Version = "1.4.1"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -221,6 +221,16 @@ function Invoke-Allowed($script, $jobArgs) {
       $names = (@($found | ForEach-Object { $_.ThreatName }) | Select-Object -Unique) -join ", "
       $verdict = if ($left.Count -eq 0) { "Result: clean" } else { "Result: threats remain: " + (($left | ForEach-Object { $_.ThreatName }) -join ", ") }
       return "Defender threats on record: $(if ($names) { $names } else { 'none' }); active before: $($active.Count); removed and quick scan finished. $verdict"
+    }
+    "defender-test" {
+      # drill: the industry-standard EICAR test file (harmless text every antivirus must catch); built from parts so
+      # this script itself is not flagged
+      $p1 = 'X5O!P%@AP[4\PZX54(P^)7CC)7}$'; $p2 = 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+      $file = Join-Path $env:PUBLIC "muse-eicar-test.com"
+      try { [IO.File]::WriteAllText($file, $p1 + $p2) } catch { return "Defender blocked the EICAR test file as it was written: protection works. ($($_.Exception.Message))" }
+      Start-Sleep -Seconds 5
+      $still = Test-Path $file
+      return "EICAR test file written to $file; after 5 s it is $(if ($still) { 'still there (real-time protection did not act yet)' } else { 'gone: Defender caught it' })."
     }
     "dns-reset" {
       Clear-DnsClientCache

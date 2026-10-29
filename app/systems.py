@@ -281,6 +281,7 @@ SCRIPTS = {
     "patch-status":    {"desc": "last installed update, pending updates, reboot, last install run", "needs_consent": False},
     "install-updates": {"desc": "download and install pending OS updates in the background (10-30 min; may need a restart)", "needs_consent": True},
     "app-update":      {"desc": "patch an application to its vendor's newest release in the same line (backup first; args app, min_version)", "needs_consent": True},
+    "defender-test":   {"desc": "antivirus drill: write the harmless EICAR test file and see Microsoft Defender catch it", "needs_consent": True},
     "malware-clean":   {"desc": "Microsoft Defender: remove detected threats, update signatures, quick scan, report what is left", "needs_consent": False},
     "app-rollback":    {"desc": "restore an application from the backup taken before app-update (args app, backup)", "needs_consent": True},
 }
