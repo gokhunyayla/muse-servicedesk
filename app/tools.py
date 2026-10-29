@@ -509,7 +509,9 @@ def reset_mfa(ctx: Ctx, employee_no: str) -> dict:
 
 # ---- security: mail & endpoint response -----------------------------------------------------
 
-@tool("Analyze a suspicious e-mail (sender, subject, body with links). Returns safe / suspicious / phishing.",
+@tool("Analyze a suspicious e-mail. The sender address is enough (subject helps): the tool finds the mail in the "
+      "company mailboxes itself and reads its headers and links, so do not ask the employee to paste it; body only if "
+      "they already sent it. Returns safe / suspicious / phishing, how many mailboxes got it and who opened it.",
       ("L1", "L2", "L3"), sender=STR, subject=STR, body=STR)
 def analyze_email(ctx: Ctx, sender: str, subject: str, body: str) -> dict:
     from app import phishing

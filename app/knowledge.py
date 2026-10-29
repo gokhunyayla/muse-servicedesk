@@ -76,22 +76,26 @@ def migrate_renamed() -> int:
 
 def seed_from_files() -> int:
     """Load data/sops/<tier>/*.md: every shipped SOP whose key the table does not have yet (a fresh install gets
-    them all, an existing one gets the SOPs added in later releases; retired or edited ones are left alone).
+    them all, an existing one gets the SOPs added in later releases). A shipped SOP nobody has edited follows the
+    newer shipped text (the old text is kept as a version); edited or retired ones are left alone.
     Returns how many were added."""
     migrate_renamed()
     with session() as db:
-        have = {k for (k,) in db.query(Sop.key)}
+        have = {s.key: s for s in db.query(Sop)}
         n = 0
         for tier in ("L1", "L2", "L3", "L4"):
             d = SOP_DIR / tier
             if not d.is_dir():
                 continue
             for p in sorted(d.glob("*.md")):
-                if f"{tier}/{p.stem}" in have:
-                    continue
                 body = p.read_text(encoding="utf-8")
                 title = body.splitlines()[0].lstrip("# ").strip() if body else p.stem
                 content = "\n".join(body.splitlines()[1:]).strip()
+                old = have.get(f"{tier}/{p.stem}")
+                if old is not None:
+                    if old.source == "seed" and (old.updated_by or "seed") == "seed" and old.content != content:
+                        update(old.key, title, content, by="seed", db=db)
+                    continue
                 db.add(Sop(key=f"{tier}/{p.stem}", tier=tier, title=title, content=content, status="published",
                            author="seed", source="seed"))
                 n += 1
