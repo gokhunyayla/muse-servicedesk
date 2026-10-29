@@ -222,10 +222,19 @@ def run_watch(force: bool = False) -> list[dict]:
     if not force and (not cfg["enabled"] or time.time() - float(cfg.get("last_run") or 0) < EVERY_SEC):
         return []
     put_setting("vulnwatch", {**get_setting("vulnwatch", {}), "last_run": time.time()})
-    done = []
+    from app import endpoints
+    done, error = [], ""
+    devices = endpoints.all_states()
+    checked = sum(len((d.get("metrics") or {}).get("software") or []) for d in devices.values())
     try:
-        for f in findings():
+        kev = fetch_kev()
+        for f in findings(devices, kev):
             done.append({**f, **remediate(f)})
     except Exception as e:  # noqa: BLE001
+        error = f"{type(e).__name__}: {e}"[:300]
         logger.warning("vulnerability watch failed: %s", e)
+    put_setting("vulnwatch", {**get_setting("vulnwatch", {}), "last_result": {
+        "at": time.time(), "devices": len(devices), "software_checked": checked, "kev_entries": len(_kev_cache["items"]),
+        "findings": [{k: f.get(k) for k in ("hostname", "cve", "app", "version", "fixed_in", "status", "ticket")} for f in done],
+        "error": error}})
     return done

@@ -152,6 +152,24 @@ def vulnwatch_run(request: Request) -> dict:
     return {"ok": True, "status": "started"}
 
 
+@router.get("/vulnwatch/status")
+def vulnwatch_status(request: Request) -> dict:
+    """What the last vulnerability watch saw and did (console admins, or the API key)."""
+    from app import vulnwatch
+    from app.auth import current_user
+    from app.security import api_key
+    try:
+        if current_user(request).role != "admin":
+            raise HTTPException(403, "admins only")
+    except HTTPException as e:
+        if e.status_code == 403:
+            raise
+        api_key(request)
+    c = vulnwatch.config()
+    return {"enabled": c["enabled"], "auto_remediate": c["auto_remediate"], "last_run": c.get("last_run"),
+            "last_result": c.get("last_result") or {}}
+
+
 @router.post("/settings/vulnwatch")
 async def settings_vulnwatch(request: Request, admin: User = Depends(admin_user)):
     from app.sla import get_setting, put_setting
