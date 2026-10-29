@@ -29,6 +29,7 @@ DEFAULT_WATCH = {"enabled": True,          # check the sources once a day
                  "last_run": 0.0}
 EVERY_SEC = 24 * 3600
 _kev_cache: dict = {"at": 0.0, "items": []}
+_nvd_last = 0.0
 
 
 def config() -> dict:
@@ -53,7 +54,17 @@ def nvd(cve: str) -> dict:
     cache = get_setting("nvd_cache", {})
     if cve in cache:
         return cache[cve]
-    r = httpx.get(NVD_URL, params={"cveId": cve}, timeout=60, headers={"User-Agent": "muse-servicedesk-vulnwatch"})
+    # NVD without an API key allows 5 requests per 30 seconds: stay under it, and wait once if it still says 429
+    global _nvd_last
+    for attempt in range(2):
+        wait = 6.5 - (time.time() - _nvd_last)
+        if wait > 0:
+            time.sleep(wait)
+        _nvd_last = time.time()
+        r = httpx.get(NVD_URL, params={"cveId": cve}, timeout=60, headers={"User-Agent": "muse-servicedesk-vulnwatch"})
+        if r.status_code != 429:
+            break
+        time.sleep(30)
     r.raise_for_status()
     vulns = r.json().get("vulnerabilities", [])
     if not vulns:
@@ -110,18 +121,25 @@ def affected_range(version: str, ranges: list[dict]) -> dict | None:
 
 
 def _candidates(software: list[dict], kev: list[dict]) -> list[tuple[dict, dict]]:
-    """(installed item, KEV entry) pairs whose names fit; NVD's version ranges decide afterwards."""
+    """(installed item, KEV entry) pairs that name the same application: the installed name starts with the KEV
+    product and the vendor fits the publisher or the name. NVD's version ranges decide afterwards. The operating system
+    itself is left to OS updates (install-updates), not matched here."""
     out = []
     for item in software:
         name = _norm(item.get("name"))
+        who = _norm(f"{item.get('publisher', '')} {item.get('name', '')}")
         if not name:
             continue
         for k in kev:
             product = _norm(k.get("product"))
-            if len(product) < 3:
+            vendor = _norm(k.get("vendorProject")).replace(" group", "").replace(" foundation", "").replace(" inc", "")
+            if len(product) < 3 or product.startswith("windows"):
                 continue
-            if name == product or name.startswith(product + " ") or (" " + product + " ") in (" " + name + " "):
-                out.append((item, k))
+            if not (name == product or name.startswith(product + " ")):
+                continue
+            if vendor and not any(w in who for w in vendor.split() if len(w) > 2):
+                continue
+            out.append((item, k))
     return out
 
 

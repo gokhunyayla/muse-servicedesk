@@ -11,7 +11,8 @@ from app import endpoints, vault, vulnwatch
 from app.db import Outbound, Ticket, init_db, session
 from app.sla import put_setting
 
-KEV = [{"cveID": "CVE-2024-4577", "vendorProject": "PHP Group", "product": "PHP", "vulnerabilityName": "PHP-CGI OS Command Injection",
+KEV = [{"cveID": "CVE-2021-43226", "vendorProject": "Microsoft", "product": "Windows", "vulnerabilityName": "CLFS"},
+       {"cveID": "CVE-2024-4577", "vendorProject": "PHP Group", "product": "PHP", "vulnerabilityName": "PHP-CGI OS Command Injection",
         "knownRansomwareCampaignUse": "Known", "shortDescription": "Windows PHP-CGI argument injection"},
        {"cveID": "CVE-2099-0001", "vendorProject": "Acme", "product": "Rocket", "vulnerabilityName": "x"}]
 NVD = {"cve": "CVE-2024-4577", "score": 9.8, "description": "In PHP versions 8.3.* before 8.3.8 …",
@@ -48,8 +49,9 @@ def _device(desk, software):
 
 
 def test_finds_only_installed_and_affected_versions(desk):
-    _device(desk, [{"name": "PHP", "version": "8.3.7", "path": "C:\\php"}, {"name": "Rocketship", "version": "1.0"},
-                   {"name": "7-Zip 24.09 (x64)", "version": "24.09"}])
+    _device(desk, [{"name": "PHP", "version": "8.3.7", "path": "C:\\php", "publisher": "The PHP Group"},
+                   {"name": "Rocketship", "version": "1.0"}, {"name": "7-Zip 24.09 (x64)", "version": "24.09"},
+                   {"name": "Microsoft Visual C++ 2015-2022 Redistributable (x64)", "version": "14.40", "publisher": "Microsoft Corporation"}])
     f = vulnwatch.findings()
     assert [(x["hostname"], x["cve"], x["version"], x["fixed_in"]) for x in f] == [("LT-101", "CVE-2024-4577", "8.3.7", "8.3.8")]
     assert f[0]["ransomware"] and f[0]["score"] == 9.8
