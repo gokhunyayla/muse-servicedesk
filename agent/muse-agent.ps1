@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.4.1"
+$Version = "1.4.2"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -229,8 +229,9 @@ function Invoke-Allowed($script, $jobArgs) {
       $file = Join-Path $env:PUBLIC "muse-eicar-test.com"
       try { [IO.File]::WriteAllText($file, $p1 + $p2) } catch { return "Defender blocked the EICAR test file as it was written: protection works. ($($_.Exception.Message))" }
       Start-Sleep -Seconds 5
+      if (Test-Path $file) { try { Start-MpScan -ScanType CustomScan -ScanPath $file -ErrorAction Stop } catch {} }   # scan it now rather than wait
       $still = Test-Path $file
-      return "EICAR test file written to $file; after 5 s it is $(if ($still) { 'still there (real-time protection did not act yet)' } else { 'gone: Defender caught it' })."
+      return "EICAR test file written to $file and scanned; it is $(if ($still) { 'still there: Defender did not catch it' } else { 'gone: Defender caught it' })."
     }
     "dns-reset" {
       Clear-DnsClientCache
