@@ -212,8 +212,12 @@ def _handle_payload(payload: dict) -> dict:
             text = (m["video"].get("caption", "") or "(video gönderdi)") + f" [video: {len(frames)} frames]"
         else:
             continue
-        with session() as db:
-            _, answer = handle_message(db, frm, text, image, mime, extra_images=extra, channel="whatsapp", voice=voice)
+        from app import enrol
+        if kind == "text" and enrol.wants(frm):           # a stranger with an invitation: enrolment, not a ticket
+            answer = enrol.step(frm, text)
+        else:
+            with session() as db:
+                _, answer = handle_message(db, frm, text, image, mime, extra_images=extra, channel="whatsapp", voice=voice)
         try_send(frm, answer)
         handled += 1
     return {"handled": handled}

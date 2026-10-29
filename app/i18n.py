@@ -7,7 +7,8 @@ import re
 
 DEFAULT_LANG = os.getenv("DESK_LANG", "en")     # used only when a message carries no language hints at all
 
-_TR_HINT = re.compile(r"[çğıöşüÇĞİÖŞÜ]|\b(ve|bir|için|değil|yok|var|ama|çok|şifre|bağlan\w*|çalışm\w*|lütfen|merhaba|teşekkür\w*|evet|hayır|tamam|kapat|iptal|oldu)\b", re.I)
+# the letter class is matched case-sensitively: under re.I Python folds İ/ı onto i/I and every English "i" would count as Turkish
+_TR_HINT = re.compile(r"(?-i:[çğıöşüÇĞİÖŞÜ])|\b(ve|bir|için|değil|yok|var|ama|çok|şifre|bağlan\w*|çalışm\w*|lütfen|merhaba|teşekkür\w*|evet|hayır|tamam|kapat|iptal|oldu)\b", re.I)
 _EN_HINT = re.compile(r"\b(the|and|not|can\'?t|cannot|please|hello|hi|thanks|password|connect\w*|work\w*|my|is|are|yes|no|solved|close|cancel|done|ok)\b", re.I)
 
 

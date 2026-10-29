@@ -261,10 +261,25 @@ def identify(who: dict, text: str) -> tuple[str, dict]:
     who = {**who, "lang": lang}
     stage = who.get("stage", "ask_contact")
     tr = lang == "tr"
+    if stage == "enrol":
+        # a stranger who proved their contact: the enrolment conversation, then the normal welcome once they exist
+        from app import enrol
+        reply = enrol.step(who["contact"], text)
+        with session() as db:
+            known = recognise(db, who["contact"])
+        if known is not None:
+            who.update(stage="done", **{k: known[k] for k in ("name", "phone", "email", "employee_no", "client_id")})
+            msg, new = _welcome(who)
+            return reply + "\n\n" + msg, new
+        return reply, who
     if stage == "ask_code":
         m = CODE_RE.search(text)
         if m:
             ok = _check_code(who["contact"], m.group(1))
+            if ok and who.get("enrol"):
+                from app import enrol
+                who.update(stage="enrol", enrol=False)
+                return enrol.step(who["contact"], ""), who
             if ok:
                 return _welcome(who)
             who["tries"] = int(who.get("tries", 0)) + 1
@@ -298,6 +313,17 @@ def identify(who: dict, text: str) -> tuple[str, dict]:
     contact = normalise(m.group(0))
     with session() as db:
         known = recognise(db, contact) if contact else None
+        from app import enrol
+        if known is None and contact and enrol.active():
+            # unknown but enrolment is open: prove the contact first, then the invitation code
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            db.query(ClientCode).filter(ClientCode.contact == contact, ClientCode.used.is_(False)).update({"used": True})
+            db.add(ClientCode(contact=contact, code_hash=_hash(contact, code), expires_at=_now() + timedelta(minutes=CODE_MINUTES)))
+            _deliver(contact, code)
+            who.update(stage="ask_code", contact=contact, tries=0, enrol=True, name="", phone="", email="", employee_no="", client_id=None)
+            where = ("WhatsApp" if "@" not in contact else "e-posta") if tr else ("WhatsApp" if "@" not in contact else "e-mail")
+            return (f"{contact} dizinde kayıtlı değil. Bir davet kodunuz varsa hesabınızı açabilirim: önce {where} ile gönderdiğim 6 haneli kodu yazın ({CODE_MINUTES} dk geçerli)." if tr else
+                    f"{contact} is not in the directory. If you have an invitation code I can set up your account: first type the 6-digit code I sent over {where} (valid {CODE_MINUTES} min)."), who
         if known is None:
             who.update(stage="ask_employee")
             return (f"{contact or m.group(0)} için dizinde kayıt bulamadım. Sicil numaranızı ve doğum yılınızı yazarsanız oradan doğrulayayım (örn. E1001 1990)." if tr else

@@ -315,6 +315,17 @@ def _group_id(name: str) -> str:
     return v[0]["id"]
 
 
+def ensure_group(name: str) -> str:
+    """The security group's id, creating it (mail-disabled, no owners) when the tenant lacks it."""
+    try:
+        return _group_id(name)
+    except GraphError:
+        nick = "".join(ch for ch in name.lower().replace(" ", "-") if ch.isalnum() or ch == "-") or "group"
+        d = _call("POST", "/groups", json={"displayName": name, "mailEnabled": False, "mailNickname": nick, "securityEnabled": True,
+                                           "description": "Created by Muse ServiceDesk"})
+        return d["id"]
+
+
 def add_to_group(employee_no: str, group: str) -> list[str]:
     uid = _uid(employee_no)
     try:

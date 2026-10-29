@@ -83,6 +83,8 @@ def start_background(interval_sec: int = 30, proactive_every_sec: int = 6 * 3600
                 from app.channels import poll_email
                 poll_email()
                 _vulnwatch_tick()
+                from app import enrol
+                enrol.tick()
                 if time.time() - last_proactive >= proactive_every_sec:
                     run_proactive_checks()
                     last_proactive = time.time()

@@ -847,6 +847,25 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
             from app.tools import verification_config
             vc = verification_config()
             link = f"{auth_settings.public_url.rstrip('/')}/support-agent"
+            from app import enrol
+            ec, accts = enrol.config(), enrol.accounts()
+            acct_rows = "".join(f"<tr><td>{_esc(x['name'])}</td><td>{_esc(x['upn'])}</td><td>{_esc(x.get('phone') or x.get('email') or '')}</td>"
+                                f"<td>{'licensed' if x.get('license') else 'no mailbox'}</td><td>{x['created'][:16].replace('T', ' ')}</td>"
+                                f"<td>{'disabled' if x.get('disabled') else 'active'}</td></tr>" for x in accts)
+            enrol_html = f"""<h3>Self-enrolment (evaluators &amp; pilots)</h3>
+<p class="muted">Someone the desk does not know can open their own account by chatting with it (WhatsApp or the support page) and giving an <b>invitation code</b>: the desk verifies their phone or e-mail, asks their name, creates the directory account (Entra when connected), adds it to the group, and sends the username and first password to them. Off by default; the code lives only here, never in the repository. Five wrong codes lock a contact for an hour.</p>
+<form method="post" action="/settings/enrol">
+<div class="srow"><div><b>Enabled</b></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if ec["enabled"] else ""} {dis}> on</label></div></div>
+<div class="srow"><div><b>Invitation code</b><small>Share it only with the people who may enrol; change it to revoke</small></div><div class="min"><input name="code" value="{_esc(ec["code"])}" style="width:220px" {dis}></div></div>
+<div class="srow"><div><b>Maximum accounts</b><small>Active enrolled accounts; beyond it the code is refused</small></div><div class="min"><input name="max_accounts" type="number" min="0" max="1000" value="{int(ec["max_accounts"])}" style="width:90px" {dis}></div></div>
+<div class="srow"><div><b>Accounts expire on</b><small>YYYY-MM-DD; the day after, every enrolled account is disabled (empty = never)</small></div><div class="min"><input name="expires_on" value="{_esc(ec["expires_on"])}" placeholder="2026-11-16" style="width:140px" {dis}></div></div>
+<div class="srow"><div><b>Department</b></div><div class="min"><input name="department" value="{_esc(ec["department"])}" style="width:200px" {dis}></div></div>
+<div class="srow"><div><b>Directory group</b><small>The accounts join it (empty = none); never an admin group</small></div><div class="min"><input name="group" value="{_esc(ec["group"])}" style="width:200px" {dis}></div></div>
+<div class="srow"><div><b>Licence</b><small>SKU for a mailbox: a name from the catalog, <code>auto</code> for the first available, or empty for none</small></div><div class="min"><input name="license" value="{_esc(ec["license"])}" style="width:200px" {dis}></div></div>
+<div class="srow"><div><b>Licensed accounts at most</b><small>After this many, new accounts get no mailbox (codes still reach WhatsApp)</small></div><div class="min"><input name="max_licensed" type="number" min="0" max="1000" value="{int(ec["max_licensed"])}" style="width:90px" {dis}></div></div>
+<div class="srow"><div><b>Manager (employee no)</b><small>Approvals for enrolled people go to this manager; empty = none</small></div><div class="min"><input name="manager_employee_no" value="{_esc(ec["manager_employee_no"])}" style="width:140px" {dis}></div></div>
+{('<div class="row end"><button class="btn primary slim" type="submit">Save self-enrolment</button></div>' if admin else '')}</form>
+{('<div class="scroll"><table><thead><tr><th>Name</th><th>Username</th><th>Contact</th><th>Mailbox</th><th>Created</th><th>Status</th></tr></thead><tbody>' + acct_rows + '</tbody></table></div>') if accts else ''}"""
             body = f"""<p class="muted">Employees can reach the desk over WhatsApp, the web chat and e-mail; every channel lands on the same tickets and agents.</p>
 <h3>WhatsApp &amp; integrations</h3>
 <form method="post" action="/settings/secrets?tab=channels">{rows}{_alert('', info)}{('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>{('<form method="post" action="/settings/whatsapp/connect" class="row end" style="gap:8px;margin-top:6px"><small class="muted">After saving the account ID and token: subscribes the desk to the account, takes its number and creates the update template used outside the 24-hour window.</small><input name="phone" placeholder="number to use, e.g. +905052352703" style="width:230px"><button class="btn" type="submit">Connect WhatsApp</button></form>' if admin else '')}
@@ -857,6 +876,7 @@ async function delConn(id){{if(!confirm('Remove this connector?'))return;await f
 <div class="srow"><div><b>Spoken phrase</b><small>Also require the phrase in a voice note</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="voice_phrase" value="1" {"checked" if vc["voice_phrase"] else ""} {dis}> on</label></div></div>
 {('<div class="row end"><button class="btn primary slim" type="submit">Save</button></div>' if admin else '')}</form>
 {people_html}
+{enrol_html}
 <h3>Support page</h3><p class="muted">Outside the console, for employees the desk knows (directory or <a href="/clients">Clients</a>): a chat that opens tickets like WhatsApp, and a one-time-code sign-in to follow their own tickets: <a href="/support-agent" target="_blank">{_esc(link)}</a></p>
 <form method="post" action="/settings/portal">
 <div class="srow"><div><b>Enabled</b><small>Switch the page off to take the channel down</small></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if pc["enabled"] else ""} {dis}> on</label></div></div>
@@ -964,6 +984,37 @@ async def settings_graph(request: Request, admin: User = Depends(admin_user)):
             msg = "Microsoft 365 failed: " + str(e)[:160]
         return RedirectResponse(f"/settings?tab=connectors&info={quote(msg)}", 303)
     return RedirectResponse("/settings?tab=connectors&info=Microsoft+365+saved", 303)
+
+
+@router.post("/settings/enrol")
+async def settings_enrol(request: Request, admin: User = Depends(admin_user)):
+    from app.enrol import DEFAULT
+    from app.sla import get_setting, put_setting
+    check_origin(request)
+    form = await request.form()
+    cfg = {**DEFAULT, **get_setting("enrol", {})}
+    cfg["enabled"] = form.get("enabled") == "1"
+    for k in ("code", "department", "group", "license", "manager_employee_no"):
+        cfg[k] = str(form.get(k, cfg[k])).strip()
+    for k in ("max_accounts", "max_licensed"):
+        try:
+            cfg[k] = max(0, int(form.get(k, cfg[k])))
+        except ValueError:
+            pass
+    exp = str(form.get("expires_on", "")).strip()
+    if exp:
+        from datetime import date
+        try:
+            date.fromisoformat(exp)
+        except ValueError:
+            return RedirectResponse("/settings?tab=channels&info=Expiry+must+be+YYYY-MM-DD", 303)
+    cfg["expires_on"] = exp
+    if cfg["group"].lower() in ("admin", "admins", "administrators", "global administrator", "global administrators"):
+        return RedirectResponse("/settings?tab=channels&info=Enrolled+accounts+may+not+join+an+admin+group", 303)
+    put_setting("enrol", cfg)
+    with session() as db:
+        audit(db, admin.email, "settings.enrol", detail=f"enabled={cfg['enabled']} max={cfg['max_accounts']} expires={cfg['expires_on'] or '-'}", ip=_ip(request))
+    return RedirectResponse("/settings?tab=channels&info=Saved", 303)
 
 
 @router.post("/settings/people")
