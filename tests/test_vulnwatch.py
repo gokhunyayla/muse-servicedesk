@@ -26,7 +26,7 @@ def fresh(tmp_path, monkeypatch):
     monkeypatch.setattr(vault, "KEY_FILE", tmp_path / "k")
     monkeypatch.setattr(vulnwatch, "fetch_kev", lambda: KEV)
     monkeypatch.setattr(vulnwatch, "nvd", lambda cve: NVD if cve == "CVE-2024-4577" else {})
-    put_setting("reports", {"whatsapp_recipients": "+905064974432", "recipients": ""})
+    put_setting("reports", {"whatsapp_recipients": "+905064974432", "recipients": "", "language": "tr"})
     from app import security
     security._hits.clear()
 

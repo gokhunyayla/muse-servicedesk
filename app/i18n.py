@@ -69,6 +69,16 @@ T = {
                   "en": "I could not get further here; your ticket was passed to a support engineer who will contact you."},
     "filtered": {"tr": "Mesajınızı bu haliyle işleyemedim. Sorunu bir cümleyle, başka kelimelerle yazar mısınız? (Örn. 'X sunucusunda Y hatası alıyorum')",
                  "en": "I could not process that message as written. Could you describe the problem in one sentence, in other words? (e.g. 'I get error Y on server X')"},
+    "vuln_fixed": {"tr": "🔒 {cve} ({name}, CVSS {score}, CISA'nın aktif istismar listesinde{ransom}) {host} üzerinde {app} {version} sürümünü etkiliyordu. Fark ettim ve giderdim: {app} {change}. Sürüm tekrar okunup doğrulandı; yedek {backup}. Geri almak gerekirse bilet #{id} üzerinden 'geri al' yazmanız yeterli.",
+                   "en": "🔒 {cve} ({name}, CVSS {score}, on CISA's known-exploited list{ransom}) affected {app} {version} on {host}. I noticed and fixed it: {app} {change}. The version was read back and verified; backup {backup}. To undo, reply 'roll back' on ticket #{id}."},
+    "vuln_open": {"tr": "⚠️ {cve} ({name}, CVSS {score}, CISA KEV) {host} üzerindeki {app} {version} sürümünü etkiliyor; düzeltme {fixed}. Otomatik düzeltmedim: {why}. Bilet #{id} L3'te.",
+                  "en": "⚠️ {cve} ({name}, CVSS {score}, CISA KEV) affects {app} {version} on {host}; fixed in {fixed}. I did not fix it automatically: {why}. Ticket #{id} is with L3."},
+    "ransomware": {"tr": ", fidye yazılımlarında kullanılıyor", "en": ", used in ransomware"},
+    "malware_fixed": {"tr": "🦠 {host} üzerinde Microsoft Defender {names} tespit etti ({files}; Defender: {defender}). Fark ettim ve giderdim: tehdit kaldırıldı, imzalar güncellendi, hızlı tarama temiz çıktı. Bilet #{id} kapatıldı.",
+                      "en": "🦠 Microsoft Defender detected {names} on {host} ({files}; Defender: {defender}). I noticed and fixed it: the threat was removed, signatures updated and a quick scan came back clean. Ticket #{id} is closed."},
+    "malware_open": {"tr": "⚠️ {host} üzerinde Microsoft Defender {names} tespit etti ({files}). Otomatik temizleyemedim: {why}. Bilet #{id} L3'te; cihazı izole etmeyi düşünün.",
+                     "en": "⚠️ Microsoft Defender detected {names} on {host} ({files}). I could not clean it automatically: {why}. Ticket #{id} is with L3; consider isolating the device."},
+    "auto_off": {"tr": "otomatik düzeltme kapalı", "en": "automatic remediation is off"},
     "voice_failed": {"tr": "Sesli mesajı anlayamadım, yazar mısınız?", "en": "I could not understand the voice note; could you type it?"},
 }
 

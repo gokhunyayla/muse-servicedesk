@@ -209,6 +209,8 @@ def _already(db, f: dict) -> bool:
 def remediate(f: dict) -> dict:
     """Open the ticket, patch through the agent when allowed, verify, tell the admins. Returns what happened."""
     from app import endpoints, systems
+    from app.i18n import t as tr
+    from app.reports import config as report_config
     from app.agents import AGENTS  # noqa: F401  (agents module wires the tools the trail refers to)
     with session() as db:
         if _already(db, f):
@@ -235,20 +237,19 @@ def remediate(f: dict) -> dict:
     with session() as db:
         t = db.get(Ticket, tid)
         r = result.get("patch")
+        lang = (report_config().get("language") or "en")
+        common = dict(cve=f["cve"], name=f["name"], score=f["score"], host=f["hostname"], app=f["app"], version=f["version"], id=tid)
         if r and r.get("ok") and r.get("output") and "updated" in r["output"]:
             backup = (re.search(r"Backup: (\S+)", r["output"]) or [None, ""])[1]
-            text = (f"🔒 {f['cve']} ({f['name']}, CVSS {f['score']}, CISA'nın aktif istismar listesinde"
-                    f"{', fidye yazılımlarında kullanılıyor' if f['ransomware'] else ''}) {f['hostname']} üzerinde "
-                    f"{f['app']} {f['version']} sürümünü etkiliyordu. Fark ettim ve giderdim: {r['output'].split(' from ')[0]}. "
-                    f"Sürüm tekrar okunup doğrulandı; yedek {backup}. Geri almak gerekirse bilet #{tid} üzerinden 'geri al' yazmanız yeterli.")
+            change = (re.search(r"(\S+ -> \S+)", r["output"]) or [None, ""])[1].replace("->", "→")
+            text = tr("vuln_fixed", lang, **common, ransom=tr("ransomware", lang) if f["ransomware"] else "", change=change, backup=backup)
             t.resolution = f"{f['cve']} remediated on {f['hostname']}: {r['output'][:200]}"
             resolve(t)
             status = "remediated"
         else:
-            why = (r or {}).get("error") or (r or {}).get("output") or ("automatic patching is off" if not config()["auto_remediate"]
+            why = (r or {}).get("error") or (r or {}).get("output") or (tr("auto_off", lang) if not config()["auto_remediate"]
                                                                        else f"no automatic updater for {f['app']}")
-            text = (f"⚠️ {f['cve']} ({f['name']}, CVSS {f['score']}, CISA KEV) {f['hostname']} üzerindeki {f['app']} {f['version']} "
-                    f"sürümünü etkiliyor; düzeltme {f['fixed_in'] or 'yeni sürümde'}. Otomatik düzeltmedim: {why}. Bilet #{tid} L3'te.")
+            text = tr("vuln_open", lang, **common, fixed=f["fixed_in"] or "-", why=why)
             status = "needs attention"
         log(db, tid, "system", "note", text)
         for to in _admins():

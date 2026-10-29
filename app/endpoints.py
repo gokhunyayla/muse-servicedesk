@@ -76,6 +76,8 @@ def heartbeat(db, d: Device, payload: dict) -> None:
         after = str(d.metrics.get("updates_run", ""))
         if after != before and after.startswith(("finished", "failed")):
             _background_finished(db, d, "install-updates", after)
+        from app import malwatch
+        malwatch.on_heartbeat(d.hostname, d.metrics)
 
 
 def take_jobs(db, d: Device) -> list[dict]:

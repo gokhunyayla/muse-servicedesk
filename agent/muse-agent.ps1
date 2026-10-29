@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.3.1"
+$Version = "1.4.0"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -101,6 +101,30 @@ function Get-Software {
   return @($list | Select-Object -First 300)
 }
 
+function Get-Threats {
+  # Microsoft Defender detections of the last 7 days, with what Defender did about them
+  try {
+    $names = @{}
+    Get-MpThreat -ErrorAction Stop | ForEach-Object { $names[[string]$_.ThreatID] = $_ }
+    $status = @{ 0 = "unknown"; 1 = "detected"; 2 = "cleaned"; 3 = "quarantined"; 4 = "removed"; 5 = "allowed"; 6 = "blocked"; 102 = "quarantine failed"; 103 = "remove failed"; 104 = "allow failed"; 105 = "abandoned"; 107 = "blocked failed" }
+    $since = (Get-Date).AddDays(-7)
+    return @(Get-MpThreatDetection -ErrorAction Stop | Where-Object { $_.InitialDetectionTime -ge $since } |
+      Sort-Object InitialDetectionTime -Descending | Select-Object -First 20 | ForEach-Object {
+        $t = $names[[string]$_.ThreatID]
+        @{ id = [string]$_.ThreatID; name = $(if ($t) { [string]$t.ThreatName } else { "" }); severity = $(if ($t) { [int]$t.SeverityID } else { 0 })
+           detected = $_.InitialDetectionTime.ToUniversalTime().ToString("s") + "Z"; action_success = [bool]$_.ActionSuccess
+           status = $(if ($status.ContainsKey([int]$_.ThreatStatusID)) { $status[[int]$_.ThreatStatusID] } else { [string]$_.ThreatStatusID })
+           active = [bool]($t -and $t.IsActive); resources = @($_.Resources | Select-Object -First 3 | ForEach-Object { [string]$_ }) } })
+  } catch { return @() }
+}
+
+function Get-Defender {
+  try {
+    $s = Get-MpComputerStatus -ErrorAction Stop
+    return @{ realtime = [bool]$s.RealTimeProtectionEnabled; signature_age_days = [int]$s.AntivirusSignatureAge }
+  } catch { return @{ realtime = $false; signature_age_days = -1 } }
+}
+
 function Get-Metrics {
   $os = Get-CimInstance Win32_OperatingSystem
   $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
@@ -128,6 +152,8 @@ function Get-Metrics {
     ip                 = $ip
     updates_run        = $updatesRun
     software           = $software
+    threats            = @(Get-Threats)
+    defender           = Get-Defender
   }
 }
 
@@ -183,6 +209,18 @@ function Invoke-Allowed($script, $jobArgs) {
       Copy-Item (Join-Path $pick.FullName "*") $root -Recurse -Force
       $back = (& (Join-Path $root "php.exe") -r "echo PHP_VERSION;")
       return "PHP rolled back $now -> $back from backup $($pick.Name)"
+    }
+    "malware-clean" {
+      # Defender only: remove what it detected, refresh signatures, quick scan, then report what is left
+      $found = @(Get-MpThreat -ErrorAction Stop)
+      $active = @($found | Where-Object { $_.IsActive })
+      Remove-MpThreat -ErrorAction SilentlyContinue
+      try { Update-MpSignature -ErrorAction Stop } catch {}
+      Start-MpScan -ScanType QuickScan -ErrorAction Stop
+      $left = @(Get-MpThreat -ErrorAction SilentlyContinue | Where-Object { $_.IsActive })
+      $names = (@($found | ForEach-Object { $_.ThreatName }) | Select-Object -Unique) -join ", "
+      $verdict = if ($left.Count -eq 0) { "Result: clean" } else { "Result: threats remain: " + (($left | ForEach-Object { $_.ThreatName }) -join ", ") }
+      return "Defender threats on record: $(if ($names) { $names } else { 'none' }); active before: $($active.Count); removed and quick scan finished. $verdict"
     }
     "dns-reset" {
       Clear-DnsClientCache

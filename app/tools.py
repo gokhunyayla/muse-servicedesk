@@ -539,6 +539,9 @@ def collect_evidence(ctx: Ctx, hostname: str) -> dict:
 
 @tool("Run a full malware scan; findings are quarantined automatically.", ("L2", "L3"), hostname=STR)
 def run_malware_scan(ctx: Ctx, hostname: str) -> dict:
+    from app import endpoints
+    if endpoints.get(hostname) is not None:            # a real machine: Defender through the endpoint agent
+        return endpoints.run(hostname, "malware-clean", ctx.ticket.id, ctx.agent, wait=600, db=ctx.db)
     return systems.malware_scan(hostname)
 
 
