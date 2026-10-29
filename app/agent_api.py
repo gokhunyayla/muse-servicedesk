@@ -109,6 +109,22 @@ def toggle_device(device_id: int, request: Request, admin: User = Depends(admin_
     return RedirectResponse("/settings?tab=connectors", 303)
 
 
+@router.post("/devices/{device_id}/run")
+async def run_on_device(device_id: int, request: Request, admin: User = Depends(admin_user)) -> dict:
+    """An admin runs one of the agent's allow-listed scripts (the same list the agents use), e.g. app-rollback."""
+    from fastapi.concurrency import run_in_threadpool
+    check_origin(request)
+    body = await request.json()
+    with session() as db:
+        d = db.get(Device, device_id)
+        if d is None:
+            raise HTTPException(404)
+        host = d.hostname
+        audit(db, admin.email, "device.run", target=host, detail=str(body)[:200], ip=_ip(request))
+    return await run_in_threadpool(endpoints.run, host, str(body.get("script", "")), None, f"desk:{admin.name}",
+                                   wait=min(int(body.get("wait", 120)), 600), args=body.get("args") or None)
+
+
 @router.post("/people/{process_id}/cancel")
 def cancel_people_process(process_id: int, request: Request, admin: User = Depends(admin_user)) -> dict:
     """Stop an onboarding/offboarding (a duplicate, a hire that fell through): its tickets close without messages."""

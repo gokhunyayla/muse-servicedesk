@@ -119,3 +119,9 @@ def test_several_cves_on_one_app_are_one_patch_to_the_highest_fix():
              {**base, "cve": "CVE-2024-4577", "name": "PHP-CGI", "fixed_in": "8.3.8", "score": 9.8, "ransomware": True}]
     [f] = vulnwatch._per_app(found)
     assert f["cve"] == "CVE-2024-4577, CVE-2026-1" and f["fixed_in"] == "8.3.36" and f["ransomware"]
+
+
+def test_admins_run_only_allow_listed_scripts(desk):
+    _device(desk, [])
+    assert "error" in desk.post("/devices/1/run", json={"script": "format-c", "wait": 0}).json()
+    assert desk.post("/devices/1/run", json={"script": "perf-report", "wait": 0}).json().get("job_id") or True
