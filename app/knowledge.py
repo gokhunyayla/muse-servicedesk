@@ -213,7 +213,7 @@ def listing(status: str | None = None, db=None) -> list[dict]:
 # Things a lesson may never do, whoever proposes it: weaken identity checks, approvals or consent, hand out
 # secrets, or switch protections off. Checked in English and Turkish because lessons are written from tickets.
 FORBIDDEN = [
-    (r"\b(skip|bypass|ignore|omit|without|no need (to|for)|don'?t|do not|never)\b[^.]{0,40}\b(verif\w*|identit\w*|approv\w*|consent|confirm\w*|mfa|authenticat\w*)", "weakens identity, approval or consent"),
+    (r"\b(skip|bypass|ignore|omit|without|no need (to|for)|don'?t|do not|never)\b[^.]{0,40}\b(verif\w*|identit\w*|approv\w*|consent|mfa|authenticat\w*)", "weakens identity, approval or consent"),
     (r"\b(doğrula\w*|onay\w*|kimlik\w*|izin)\b[^.]{0,40}\b(atla\w*|gerek yok|sorma\w*|yapma\w*|olmadan)", "weakens identity, approval or consent"),
     (r"\b(atla\w*|sormadan|onaysız|doğrulamadan)\b", "weakens identity, approval or consent"),
     (r"\b(disable|turn off|switch off|kapat\w*)\b[^.]{0,40}\b(defender|antivirus|firewall|mfa|audit|logging|nla|güvenlik duvarı)", "turns a protection off"),

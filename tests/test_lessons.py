@@ -76,3 +76,8 @@ def test_supervisor_tools_and_review_page(desk):
     assert "Lessons learned" in page and "Awaiting review (1)" in page and "safety check passed" in page
     assert desk.post(f"/lessons/{r['lesson_id']}/status", json={"status": "approved"}).json()["status"] == "approved"
     assert "1 active" in desk.get("/knowledge").text
+
+
+def test_an_ordinary_correction_is_not_mistaken_for_weakening():
+    r = knowledge.check_lesson(SOP, "Do not ask the employee to confirm the sender address shown in the forwarded mail; read it from the forward.")
+    assert r["ok"], r
