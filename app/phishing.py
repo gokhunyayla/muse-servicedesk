@@ -55,9 +55,19 @@ def _host(url: str) -> str:
 
 
 def _lookalike(domain: str, ours: list[str]) -> str:
-    """Our domain this one imitates (cloudriurn.com → cloudrium.com), or ''."""
+    """Our domain this one imitates, or '': cloudriurn.com, cloudrium-billing.com, cloudriurn-pay.net and
+    login.cloudrium.secure-site.com all lean on the brand "cloudrium" without being ours."""
+    domain = domain.lower().strip(".")
+    if not domain or any(domain == d or domain.endswith("." + d) for d in ours):
+        return ""
+    words = [w for w in re.split(r"[.\-_]", domain) if len(w) >= 4]
     for d in ours:
-        if domain != d and not domain.endswith("." + d) and difflib.SequenceMatcher(None, domain, d).ratio() >= 0.8:
+        brand = d.split(".")[0]
+        if len(brand) < 4:
+            continue
+        if difflib.SequenceMatcher(None, domain, d).ratio() >= 0.8:
+            return d
+        if any(w == brand or difflib.SequenceMatcher(None, w, brand).ratio() >= 0.8 for w in words):
             return d
     return ""
 

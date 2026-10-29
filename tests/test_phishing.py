@@ -66,3 +66,15 @@ def test_a_blocked_sender_no_longer_reaches_the_desk():
     phishing.block("@cloudriurn.com")
     assert not channels.sender_allowed("billing@cloudriurn.com") and channels.sender_allowed("emma@cloudrium.com")
     assert phishing.verdict([]) == "safe"
+
+
+def test_look_alike_domains():
+    ours = ["cloudrium.com", "gokhunyaylagmail.onmicrosoft.com"]
+    for fake in ("cloudriurn.com", "cloudriurn-billing.com", "cloudrium-pay.net", "login.cloudrium.secure-site.com"):
+        assert phishing._lookalike(fake, ours) == "cloudrium.com", fake
+    for fine in ("cloudrium.com", "mail.cloudrium.com", "gmail.com", "microsoft.com", "example.org"):
+        assert phishing._lookalike(fine, ours) == "", fine
+    info = {"from": "gokhun.yayla@gmail.com", "auth": {"spf": "pass"}, "subject": "Invoice overdue",
+            "links": [{"href": "http://cloudriurn-billing.com/login", "shown": "http://cloudriurn-billing.com/login"}],
+            "text": "Pay within 24 hours or your account will be suspended. Login"}
+    assert phishing.verdict(phishing.signals(info, ours)) == "phishing"
