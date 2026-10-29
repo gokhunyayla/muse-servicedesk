@@ -175,6 +175,8 @@ def state(hostname: str) -> dict | None:
 def _vpn_state(v) -> str:
     if not isinstance(v, dict) or v.get("profile") in (None, "none", "unknown"):
         return "no managed VPN client"
+    if v.get("login_needed"):
+        return "needs VPN sign-in (IT must re-authorise the device)"
     if v.get("connected"):
         return "connected" + ("" if v.get("target_ok") in (None, True) else "; internal network not answering")
     return f"disconnected ({v.get('status') or 'down'})"

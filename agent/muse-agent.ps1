@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "1.6.0"
+$Version = "1.6.1"
 $Home_ = Join-Path $env:ProgramData "MuseAgent"
 $ConfigFile = Join-Path $Home_ "config.json"
 $LogFile = Join-Path $Home_ "agent.log"
@@ -143,22 +143,34 @@ function Get-Crashes($days = 7) {
   } catch { return @() }
 }
 
+$Tailscale = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
+
+function Test-Target($default) {
+  # an address only reachable through the VPN (vpn-check.txt, host:port), so "connected" also means "works"
+  $cfg = Join-Path $Home_ "vpn-check.txt"
+  $target = if (Test-Path $cfg) { (Get-Content $cfg -Raw).Trim() } else { $default }
+  if ($target -notmatch '^([\w.-]+):(\d+)$') { return @{ target = ""; ok = $null } }
+  $tcp = New-Object Net.Sockets.TcpClient
+  try { $ok = $tcp.ConnectAsync($Matches[1], [int]$Matches[2]).Wait(3000) -and $tcp.Connected } catch { $ok = $false } finally { $tcp.Close() }
+  return @{ target = $target; ok = $ok }
+}
+
 function Get-Vpn {
-  # the company VPN as Windows sees it (built-in client, all-user profile), and whether the internal check target answers
+  # the company VPN: Tailscale (mesh VPN) or the built-in Windows client (all-user profile)
   try {
+    if (Test-Path $Tailscale) {
+      $st = (& $Tailscale status --json 2>$null | Out-String | ConvertFrom-Json)
+      $t = Test-Target "100.100.100.100:53"
+      $state = [string]$st.BackendState
+      return @{ profile = "Tailscale"; status = $state; connected = ($state -eq "Running"); server = [string]$st.CurrentTailnet.Name
+                tunnel = "WireGuard"; ip = [string](@($st.Self.TailscaleIPs) | Select-Object -First 1); target = $t.target; target_ok = $t.ok
+                login_needed = ($state -eq "NeedsLogin"); auth_url = [string]$st.AuthURL }
+    }
     $c = @(Get-VpnConnection -AllUserConnection -ErrorAction Stop) | Select-Object -First 1
     if (-not $c) { return @{ profile = "none" } }
-    $target = ""; $reach = $null
-    $cfg = Join-Path $Home_ "vpn-check.txt"
-    if (Test-Path $cfg) {
-      $target = (Get-Content $cfg -Raw).Trim()
-      if ($target -match '^([\w.-]+):(\d+)$') {
-        $tcp = New-Object Net.Sockets.TcpClient
-        try { $reach = $tcp.ConnectAsync($Matches[1], [int]$Matches[2]).Wait(3000) -and $tcp.Connected } catch { $reach = $false } finally { $tcp.Close() }
-      }
-    }
+    $t = Test-Target ""
     return @{ profile = [string]$c.Name; status = [string]$c.ConnectionStatus; connected = ($c.ConnectionStatus -eq "Connected")
-              server = [string]$c.ServerAddress; tunnel = [string]$c.TunnelType; target = $target; target_ok = $reach }
+              server = [string]$c.ServerAddress; tunnel = [string]$c.TunnelType; target = $t.target; target_ok = $t.ok }
   } catch { return @{ profile = "unknown"; error = $_.Exception.Message } }
 }
 
@@ -299,9 +311,21 @@ function Invoke-Allowed($script, $jobArgs) {
       return "DNS cache cleared and registration renewed. Test lookup www.microsoft.com -> $r"
     }
     "vpn-reset" {
-      # the Windows VPN profile: drop the tunnel, restart the remote-access services, clear DNS, dial again, test inside
-      $c = @(Get-VpnConnection -AllUserConnection -ErrorAction SilentlyContinue) | Select-Object -First 1
+      # drop the tunnel, restart the VPN service, clear DNS, connect again, test an address only the VPN reaches
       Clear-DnsClientCache
+      if (Test-Path $Tailscale) {
+        $before = (Get-Vpn).status
+        & $Tailscale down 2>&1 | Out-Null
+        Restart-Service -Name Tailscale -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 4
+        $up = (& $Tailscale up --unattended --timeout 30s 2>&1 | Out-String).Trim()
+        Start-Sleep -Seconds 3
+        $v = Get-Vpn
+        $inside = if ($v.target) { if ($v.target_ok) { "internal check $($v.target) answers" } else { "internal check $($v.target) does NOT answer" } } else { "no internal check" }
+        $login = if ($v.login_needed) { " The device needs its VPN sign-in renewed by IT: $($v.auth_url)" } else { "" }
+        return "VPN (Tailscale, $($v.server)) was $before; reset the tunnel, restarted the Tailscale service, cleared DNS and connected again: now $($v.status), address $($v.ip); $inside.$login $(if ($up) { 'tailscale: ' + ($up -replace '\s+', ' ') })"
+      }
+      $c = @(Get-VpnConnection -AllUserConnection -ErrorAction SilentlyContinue) | Select-Object -First 1
       if (-not $c) {
         $svc = Get-Service | Where-Object { $_.Name -match "wireguard|openvpn|forti|anyconnect|globalprotect|tailscale" -and $_.Status -ne "Disabled" }
         if (-not $svc) { return "No VPN profile or client on this device. DNS cache cleared; nothing else to reset." }
@@ -319,6 +343,10 @@ function Invoke-Allowed($script, $jobArgs) {
     }
     "vpn-drill" {
       # admin drill: drop the company VPN so the desk can be shown fixing it
+      if (Test-Path $Tailscale) {
+        & $Tailscale down 2>&1 | Out-Null
+        return "VPN (Tailscale) disconnected for the drill; it stays down until someone reconnects it."
+      }
       $c = @(Get-VpnConnection -AllUserConnection -ErrorAction Stop) | Select-Object -First 1
       if (-not $c) { throw "no VPN profile on this device" }
       & rasdial.exe "$($c.Name)" /disconnect 2>&1 | Out-Null
