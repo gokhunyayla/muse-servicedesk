@@ -48,7 +48,7 @@ def test_enrolment_heartbeat_and_auth(desk):
     assert c.post("/agent/heartbeat", json={}, headers={"Authorization": "Bearer nope"}).status_code == 401
     r = c.post("/agent/heartbeat", json={"version": "1.0.0", "os": "Windows Server 2022", "metrics": METRICS},
                headers={"Authorization": f"Bearer {token}"})
-    assert r.json()["hostname"] == "LT-101" and r.json()["agent_version"] == "1.3.0"     # agents update themselves to this
+    assert r.json()["hostname"] == "LT-101" and r.json()["agent_version"] == "1.3.1"     # agents update themselves to this
     st = systems.device("LT-101")
     assert st["real"] and st["online"] and st["disk_used_pct"] == 41 and st["os_patch_days"] == 4
     assert systems.device_owner("LT-101")[0] == "E1001"
