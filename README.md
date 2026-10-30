@@ -48,6 +48,9 @@ The model does the reasoning; checks that do not trust the model decide whether 
 
 ## The 17 cases — what is real
 
+Demo video (3 min): https://youtu.be/rMqozO4E0ng · One slide per case, with the live tickets as proof:
+[docs/muse-servicedesk-17-cases.pptx](docs/muse-servicedesk-17-cases.pptx) ([PDF](docs/muse-servicedesk-17-cases.pdf)).
+
 Everything below ran end to end on the live installation (Microsoft 365 tenant, Azure VM `LT-101` with the endpoint
 agent, Tailscale VPN, a WhatsApp Business number).
 
