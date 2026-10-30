@@ -279,6 +279,12 @@ class Agent:
             owners = systems.employees_by_contact(ticket.requester)
         except Exception:  # noqa: BLE001   (directory unreachable: the agent asks as before)
             owners = []
+        if not owners and db is not None:          # a support-page client (self-enrolled or added by an admin) writes from a contact the directory does not list
+            from app.db import Client
+            col = Client.email if "@" in (ticket.requester or "") else Client.phone
+            c = db.query(Client).filter(col == ticket.requester, Client.enabled.is_(True)).first()
+            if c is not None and c.employee_no:
+                owners = [c.employee_no]
         if len(owners) == 1:
             rec = systems.get_user(owners[0]) or {}
             if rec.get("device"):

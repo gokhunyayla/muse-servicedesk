@@ -124,3 +124,17 @@ def test_support_page_proves_the_contact_then_enrols(monkeypatch):
     codes.clear()
     reply, who2 = support.identify({"mode": "anon"}, "+1 555 111 0001")
     assert who2["stage"] == "ask_code" and not who2.get("enrol") and codes
+
+
+def test_the_agent_knows_an_enrolled_client_by_their_contact(monkeypatch):
+    """A self-enrolled evaluator writes from a Gmail address the directory does not list: the ticket context still
+    names their employee number, so L1 never asks a stranger for a number they were never told."""
+    from app.agents import AGENTS
+    from app.db import Client, Ticket
+    on()
+    with session() as db:
+        db.add(Client(name="Grace Hopper", phone="", email="grace@example.com", employee_no="E1001", enabled=True))
+        t = Ticket(title="x", requester="grace@example.com", status="open", owner="L1")
+        db.add(t); db.flush()
+        prompt = AGENTS["L1"].system_prompt(t, db=db)
+    assert "belongs to Emma Johnson (E1001)" in prompt
