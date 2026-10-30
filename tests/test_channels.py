@@ -278,3 +278,16 @@ def test_ticket_list_filters_needs_action_and_unresolved(desk):
     assert sorted(t["status"] for t in desk.get("/tickets?status=unresolved", headers=hdr).json()) == ["escalated", "open", "waiting_approval", "waiting_user"]
     assert [t["status"] for t in desk.get("/tickets?status=waiting_user", headers=hdr).json()] == ["waiting_user"]
     assert "Needs our action" in desk.get("/tickets", headers={"accept": "text/html"}).text
+
+
+def test_console_admin_may_post_voice_camera_and_image_without_the_api_key(desk, monkeypatch):
+    from app import security
+    monkeypatch.setattr(security, "API_KEY", "k-123")
+    monkeypatch.setattr(security, "_local_install", lambda: False)
+    # anonymous: the key is still required
+    assert TestClient(app).post("/camera/CAM-SALES-01", files={"image": ("f.jpg", b"x", "image/jpeg")}).status_code == 401
+    # a signed-in console admin passes without the key; the frame itself finds nothing with the scripted model
+    from app import camera
+    monkeypatch.setattr(camera, "inspect_frame", lambda image, mime="image/jpeg": [])
+    assert desk.post("/camera/CAM-SALES-01", files={"image": ("f.jpg", b"x", "image/jpeg")}).json() == {"findings": []}
+    assert desk.post("/camera/CAM-NOPE", files={"image": ("f.jpg", b"x", "image/jpeg")}).status_code == 404

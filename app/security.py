@@ -69,3 +69,19 @@ def api_key(request: Request) -> None:
     given = request.headers.get("x-api-key", "")
     if not hmac.compare_digest(given, key):
         raise HTTPException(401, "invalid API key")
+
+
+def admin_or_api_key(request: Request) -> None:
+    """Machine endpoints that a console admin may also call from the browser (camera frames, voice notes, images):
+    a signed-in admin passes with the origin check, anyone else needs `X-API-Key` as in `api_key`."""
+    from app.auth import current_user
+    try:
+        user = current_user(request)
+    except HTTPException:
+        user = None
+    if user is not None:
+        if user.role != "admin":
+            raise HTTPException(403, "admins only")
+        check_origin(request)
+        return
+    api_key(request)

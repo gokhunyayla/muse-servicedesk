@@ -10,7 +10,7 @@ from app.voice import transcribe
 app = FastAPI(title="Muse ServiceDesk")
 
 from app.auth import current_user, needs_setup  # noqa: E402
-from app.security import api_key, check_origin  # noqa: E402
+from app.security import admin_or_api_key, api_key, check_origin  # noqa: E402
 from app.db import audit  # noqa: E402
 from app.sla import timing  # noqa: E402
 from app.dashboard import router as dashboard_router  # noqa: E402
@@ -79,7 +79,7 @@ def post_message(msg: Incoming) -> dict:
         return {"ticket_id": ticket.id if ticket else None, "reply": answer}
 
 
-@app.post("/voice", dependencies=[Depends(api_key)])
+@app.post("/voice", dependencies=[Depends(admin_or_api_key)])
 async def post_voice(requester: str = Form(...), audio: UploadFile = File(...)) -> dict:
     """A voice note: transcribe it, then handle it like a text message."""
     from starlette.concurrency import run_in_threadpool
@@ -98,7 +98,7 @@ def _voice_sync(requester: str, raw: bytes, mime: str) -> dict:
         return {"ticket_id": ticket.id if ticket else None, "transcript": text, "reply": answer}
 
 
-@app.post("/image", dependencies=[Depends(api_key)])
+@app.post("/image", dependencies=[Depends(admin_or_api_key)])
 async def post_image(requester: str = Form(...), text: str = Form(""), image: UploadFile = File(...)) -> dict:
     """A photo or screenshot with an optional caption."""
     from starlette.concurrency import run_in_threadpool
@@ -766,7 +766,7 @@ def _video_sync(requester: str, text: str, raw: bytes) -> dict:
         return {"ticket_id": ticket.id if ticket else None, "frames": len(frames), "reply": answer}
 
 
-@app.post("/camera/{camera_id}", dependencies=[Depends(api_key)])
+@app.post("/camera/{camera_id}", dependencies=[Depends(admin_or_api_key)])
 async def post_camera_frame(camera_id: str, image: UploadFile = File(...)) -> dict:
     from starlette.concurrency import run_in_threadpool
     from app.camera import process_frame
