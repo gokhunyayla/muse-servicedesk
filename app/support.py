@@ -137,12 +137,19 @@ def page(request: Request):
 
 
 def _render(cfg: dict, who: dict) -> str:
-    hello = HELLO["client"].format(name=_esc(who.get("name", ""))) if who["mode"] == "client" else HELLO["anon"]
+    hello = HELLO["client"].format(name=_esc(who.get("name", ""))) if who["mode"] == "client" else _anon_hello()
     return _shell(cfg, APP.replace("{NAME}", _esc(who.get("name") or "guest")).replace("{MODE}", who["mode"]).replace("{HELLO}", hello), app=True)
 
 
+def _anon_hello() -> str:
+    """The guest greeting in both languages: the desk's default language first, the other one small."""
+    first, second = ("anon_tr", "anon_en") if DEFAULT_LANG == "tr" else ("anon_en", "anon_tr")
+    return f"{HELLO[first]}<br><small>{HELLO[second]}</small>"
+
+
 HELLO = {
-    "anon": "Merhaba! Ben IT servis masası asistanıyım. Sizi tanıyabilmem için <b>telefon numaranızı</b> ya da <b>iş e-postanızı</b> yazın; oraya tek kullanımlık bir kod göndereceğim, kodu buraya yazmanız yeterli.<br><small>Hello! I am the IT service desk assistant. To recognise you, type your <b>mobile number</b> or <b>work e-mail</b>; I will send a one-time code there and you type it back here.</small>",
+    "anon_tr": "Merhaba! Ben IT servis masası asistanıyım. Sizi tanıyabilmem için <b>telefon numaranızı</b> ya da <b>iş e-postanızı</b> yazın; oraya tek kullanımlık bir kod göndereceğim, kodu buraya yazmanız yeterli.",
+    "anon_en": "Hello! I am the IT service desk assistant. To recognise you, type your <b>mobile number</b> or <b>work e-mail</b>; I will send a one-time code there and you type it back here.",
     "client": "Tekrar hoş geldiniz, <b>{name}</b>. Sorununuzu veya talebinizi yazın; taleplerinizi sağ üstteki <b>My requests</b> düğmesinden takip edebilirsiniz.",
 }
 
