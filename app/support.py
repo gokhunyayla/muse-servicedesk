@@ -521,7 +521,7 @@ const AG={L1:'AI agent L1 · first contact',L2:'AI agent L2 · devices & network
 function holder(t){if(AG[t.owner])return AG[t.owner];if(t.assignee)return 'Engineer · '+t.assignee;if(t.owner==='human'||t.owner==='desk')return 'Engineer · being assigned';return t.owner||'';}
 let pendingImg=null,cur=null,tickets=[];
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function fmt(at){return at?at.replace('T',' '):new Date().toISOString().slice(0,16).replace('T',' ')}
+function fmt(at){const d=at?new Date(/Z|[+-]\d\d:?\d\d$/.test(at)?at:at+':00Z'):new Date();const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())}
 function add(who,text,at,img,ticket){const d=document.createElement('div');d.className='m '+who;if(img){const i=document.createElement('img');i.src=img;d.appendChild(i);}
  d.appendChild(document.createTextNode(text||''));const s=document.createElement('small');s.textContent=fmt(at)+(ticket&&cur===null?' · #'+ticket:'');d.appendChild(s);log.appendChild(d);log.scrollTop=log.scrollHeight;}
 function preview(){const f=IMG.files[0];if(!f)return;pendingImg=URL.createObjectURL(f);TY.textContent='Photo attached: '+f.name;}
