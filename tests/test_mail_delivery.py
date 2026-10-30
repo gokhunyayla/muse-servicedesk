@@ -49,3 +49,24 @@ def test_support_page_says_when_the_code_could_not_be_sent(monkeypatch):
     with session() as db:
         a = db.query(Audit).filter(Audit.action == "support.code_failed").one()
         assert a.target == "+15551110001" and "WhatsApp" in a.detail
+
+
+def test_outgoing_can_stay_on_smtp_while_intake_reads_the_microsoft_mailbox(monkeypatch):
+    import smtplib
+    from app import graph, reports
+    from app.sla import put_setting
+    put_setting("email", {**channels.email_config(), "provider": "graph", "outgoing": "smtp"})
+    calls = []
+    monkeypatch.setattr(graph, "send_mail", lambda to, subject, text: calls.append("graph"))
+
+    class Smtp:
+        def __init__(self, host, port, timeout=0): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, u, p): pass
+        def send_message(self, msg): calls.append(("smtp", msg["To"]))
+    monkeypatch.setattr(smtplib, "SMTP", Smtp)
+    monkeypatch.setattr(reports, "smtp_config", lambda: {"host": "smtp.test", "port": 587, "user": "desk@test", "password": "x", "from": "desk@test", "tls": True})
+    ok, err = channels.send_email("grace@example.com", "Your sign-in code", "123456")
+    assert ok and calls == [("smtp", "grace@example.com")]

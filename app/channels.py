@@ -22,6 +22,7 @@ from app.sla import get_setting
 logger = logging.getLogger("channels")
 
 DEFAULT_EMAIL = {"enabled": False, "provider": "imap",   # "imap" = own mailbox (IMAP/SMTP); "graph" = Microsoft 365 mailbox
+                 "outgoing": "",     # how the desk sends: "" = same as provider, "smtp" = SMTP above even when intake is Graph
                  "imap_host": "", "imap_port": 993, "user": "", "folder": "INBOX", "poll_minutes": 2,
                  "allowed": "",      # optional: comma-separated sender domains/addresses; empty = anyone
                  "last_uid": 0}      # mailbox position: only mail that arrives after the channel is enabled is read
@@ -68,7 +69,8 @@ def send_email(to: str, subject: str, text: str) -> tuple[bool, str]:
     from app.reports import smtp_config
     c = smtp_config()
     graph_err = ""
-    if email_config().get("provider") == "graph":
+    ec = email_config()
+    if ec.get("provider") == "graph" and ec.get("outgoing") != "smtp":
         from app import graph
         try:
             graph.send_mail(to, subject, text)

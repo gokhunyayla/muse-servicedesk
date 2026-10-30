@@ -697,6 +697,7 @@ agents fail, researches the gap on the web and drafts a SOP with Muse Wonder, or
 <form method="post" action="/settings/email">
 <div class="srow"><div><b>Enabled</b></div><div class="min"><label class="check" style="margin:0"><input type="checkbox" name="enabled" value="1" {"checked" if ec["enabled"] else ""} {dis}> on</label></div></div>
 <div class="srow"><div><b>Mailbox</b><small>Own mailbox over IMAP/SMTP (settings above), or the Microsoft 365 mailbox configured under <a href="/settings?tab=connectors">Connectors</a> (Graph; also used for sending)</small></div><div class="min"><select name="provider" {dis}><option value="imap" {"selected" if ec.get("provider", "imap") != "graph" else ""}>IMAP / SMTP</option><option value="graph" {"selected" if ec.get("provider") == "graph" else ""}>Microsoft 365 (Graph)</option></select></div></div>
+<div class="srow"><div><b>Sending</b><small>Replies, sign-in codes, invitations and reports go out this way. A tenant that cannot send to outside addresses (trial restrictions) keeps reading over Graph and sends over SMTP.</small></div><div class="min"><select name="outgoing" {dis}><option value="" {"selected" if ec.get("outgoing") != "smtp" else ""}>same as mailbox</option><option value="smtp" {"selected" if ec.get("outgoing") == "smtp" else ""}>SMTP (settings above)</option></select></div></div>
 <div class="srow"><div><b>IMAP host</b><small>e.g. imap.gmail.com, outlook.office365.com</small></div><div class="min"><input name="imap_host" value="{_esc(ec["imap_host"])}" style="width:260px" {dis}></div></div>
 <div class="srow"><div><b>Port</b><small>SSL</small></div><div class="min"><input name="imap_port" type="number" value="{ec["imap_port"]}" style="width:100px" {dis}></div></div>
 <div class="srow"><div><b>Mailbox user</b><small>the desk's address</small></div><div class="min"><input name="user" value="{_esc(ec["user"])}" style="width:260px" {dis}></div></div>
@@ -935,6 +936,7 @@ async def settings_email(request: Request, admin: User = Depends(admin_user)):
     for k in ("imap_host", "user", "folder", "allowed"):
         value[k] = str(form.get(k, "")).strip()
     value["provider"] = "graph" if form.get("provider") == "graph" else "imap"
+    value["outgoing"] = "smtp" if form.get("outgoing") == "smtp" else ""
     value["last_uid"] = int(get_setting("email", {}).get("last_uid") or 0)
     for k in ("imap_port", "poll_minutes"):
         try:
