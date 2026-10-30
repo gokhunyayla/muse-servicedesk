@@ -110,7 +110,7 @@ def test_support_page_proves_the_contact_then_enrols(monkeypatch):
     from app import support
     on()
     codes = []
-    monkeypatch.setattr(support, "_deliver", lambda contact, code: codes.append(code))
+    monkeypatch.setattr(support, "_deliver", lambda contact, code: codes.append(code) or True)
     who = {"mode": "anon"}
     reply, who = support.identify(who, "+1 555 999 0001")
     assert "invitation code" in reply and who["stage"] == "ask_code" and who["enrol"] and codes

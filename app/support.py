@@ -158,14 +158,27 @@ def _hash(contact: str, code: str) -> str:
     return hashlib.sha256(f"{contact}:{code}".encode()).hexdigest()
 
 
-def _deliver(contact: str, code: str) -> None:
+def _deliver(contact: str, code: str) -> bool:
+    """Send the one-time code to the contact; a failure is written to the audit log and returned, never swallowed."""
     text = f"Muse ServiceDesk sign-in code: {code} (valid {CODE_MINUTES} minutes). If you did not ask for it, ignore this message."
     if "@" in contact:
         from app.channels import send_email
-        send_email(contact, "Your sign-in code", text)
+        ok, err = send_email(contact, "Your sign-in code", text)
     else:
         from app.whatsapp import try_send
-        try_send(contact, text)
+        ok, err = bool(try_send(contact, text)), "WhatsApp send failed"
+    if not ok:
+        from app.db import audit
+        with session() as db:
+            audit(db, "support-page", "support.code_failed", target=contact, detail=err)
+    return ok
+
+
+def _not_sent(contact: str, tr: bool) -> str:
+    other = "telefon numaranızı" if "@" in contact else "iş e-postanızı"
+    other_en = "your mobile number" if "@" in contact else "your work e-mail"
+    return (f"{contact} adresine kodu gönderemedim; servis masası bu kanalda bir sorun yaşıyor. {other.capitalize()} yazın, kodu oraya göndereyim." if tr else
+            f"I could not send the code to {contact}; the desk has a problem on that channel. Type {other_en} instead and I will send the code there.")
 
 
 @router.post(BASE + "/leave")
@@ -326,7 +339,8 @@ def identify(who: dict, text: str) -> tuple[str, dict]:
             code = f"{secrets.randbelow(1_000_000):06d}"
             db.query(ClientCode).filter(ClientCode.contact == contact, ClientCode.used.is_(False)).update({"used": True})
             db.add(ClientCode(contact=contact, code_hash=_hash(contact, code), expires_at=_now() + timedelta(minutes=CODE_MINUTES)))
-            _deliver(contact, code)
+            if not _deliver(contact, code):
+                return _not_sent(contact, tr), who
             who.update(stage="ask_code", contact=contact, tries=0, enrol=True, name="", phone="", email="", employee_no="", client_id=None)
             where = ("WhatsApp" if "@" not in contact else "e-posta") if tr else ("WhatsApp" if "@" not in contact else "e-mail")
             return (f"{contact} dizinde kayıtlı değil. Bir davet kodunuz varsa hesabınızı açabilirim: önce {where} ile gönderdiğim 6 haneli kodu yazın ({CODE_MINUTES} dk geçerli)." if tr else
@@ -338,7 +352,8 @@ def identify(who: dict, text: str) -> tuple[str, dict]:
         code = f"{secrets.randbelow(1_000_000):06d}"
         db.query(ClientCode).filter(ClientCode.contact == contact, ClientCode.used.is_(False)).update({"used": True})
         db.add(ClientCode(contact=contact, code_hash=_hash(contact, code), expires_at=_now() + timedelta(minutes=CODE_MINUTES)))
-    _deliver(contact, code)
+    if not _deliver(contact, code):
+        return _not_sent(contact, tr), who
     who.update(stage="ask_code", contact=contact, tries=0, **{k: known[k] for k in ("name", "phone", "email", "employee_no", "client_id")})
     where = ("WhatsApp" if "@" not in contact else "e-posta") if tr else ("WhatsApp" if "@" not in contact else "e-mail")
     return (f"Teşekkürler. {contact} adresine {where} ile 6 haneli bir kod gönderdim ({CODE_MINUTES} dk geçerli). Kodu buraya yazın." if tr else

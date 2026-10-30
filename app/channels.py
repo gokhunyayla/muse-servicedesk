@@ -62,15 +62,22 @@ def portal_config() -> dict:
 
 
 def send_email(to: str, subject: str, text: str) -> tuple[bool, str]:
+    """Outgoing mail: the Microsoft 365 mailbox (Graph) when the e-mail channel uses it, otherwise SMTP. A Graph
+    failure is logged and, when SMTP is configured, the message still goes out over SMTP — a sign-in code or an
+    invitation must not be lost to a tenant restriction; the error stays visible in the log and the audit trail."""
+    from app.reports import smtp_config
+    c = smtp_config()
+    graph_err = ""
     if email_config().get("provider") == "graph":
         from app import graph
         try:
             graph.send_mail(to, subject, text)
             return True, ""
         except Exception as e:  # noqa: BLE001
-            return False, f"Microsoft 365: {str(e)[:220]}"
-    from app.reports import smtp_config
-    c = smtp_config()
+            graph_err = f"Microsoft 365: {str(e)[:220]}"
+            logger.warning("Graph sendMail to %s failed: %s%s", to, graph_err, " — falling back to SMTP" if c["host"] else "")
+            if not c["host"]:
+                return False, graph_err
     if not c["host"]:
         return False, "SMTP not configured (Settings → E-mail)"
     msg = EmailMessage()
@@ -85,7 +92,7 @@ def send_email(to: str, subject: str, text: str) -> tuple[bool, str]:
             s.send_message(msg)
         return True, ""
     except Exception as e:  # noqa: BLE001
-        return False, str(e)[:255]
+        return False, (f"{graph_err}; SMTP: " if graph_err else "") + str(e)[:255]
 
 
 def _subject(ticket: Ticket, incoming: str = "") -> str:

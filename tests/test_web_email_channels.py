@@ -250,3 +250,4 @@ def test_clients_sync_from_the_directory(desk):
     desk.post("/clients/sync", follow_redirects=False)                     # running it again adds nobody twice
     with session() as db:
         assert db.query(Client).count() == n
+
