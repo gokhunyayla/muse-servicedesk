@@ -460,6 +460,26 @@ def set_role(request: Request, user_id: int, role: str = Form(...), admin: User 
     return RedirectResponse("/users", 303)
 
 
+@router.post("/users/{user_id}/email")
+def set_email(request: Request, user_id: int, email: str = Form(...), admin: User = Depends(admin_user)):
+    """An admin changes a console user's sign-in e-mail (their own included); password and sessions are untouched."""
+    check_origin(request)
+    email = email.lower().strip()
+    if "@" not in email or " " in email or len(email) > 255:
+        raise HTTPException(422, "not an e-mail address")
+    with session() as db:
+        u = db.get(User, user_id)
+        if u is None:
+            raise HTTPException(404)
+        other = db.query(User).filter(User.email == email, User.id != u.id).first()
+        if other is not None:
+            return RedirectResponse("/users?error=That+e-mail+already+exists", 303)
+        old = u.email
+        u.email = email
+        audit(db, admin.email, "user.email", target=email, detail=f"was {old}", ip=_ip(request))
+    return RedirectResponse("/profile?info=E-mail+changed" if user_id == admin.id else "/users?info=E-mail+changed", 303)
+
+
 @router.post("/users/{user_id}/toggle")
 def toggle_user(request: Request, user_id: int, admin: User = Depends(admin_user)):
     check_origin(request)
@@ -503,9 +523,12 @@ def profile_page(user: User = Depends(current_user), info: str = "", error: str 
 <p class="muted">{_esc(u.email)} · {u.role} · member since {u.created_at:%d %b %Y} · {sessions} active session{'s' if sessions != 1 else ''}</p>
 <form method="post" action="/profile">
 <label for="name">Display name</label><input id="name" name="name" value="{_esc(u.name)}" required>
-<label>E-mail</label><input value="{_esc(u.email)}" disabled><small class="muted">Changing the e-mail is done by an admin.</small>
+{'' if u.role == "admin" else f'<label>E-mail</label><input value="{_esc(u.email)}" disabled><small class="muted">Changing the e-mail is done by an admin.</small>'}
 {_alert('', info) if info and not info.startswith('Password') else ''}
 <button class="btn" type="submit">Save</button></form>
+{f"""<form method="post" action="/users/{u.id}/email" style="margin-top:18px">
+<label for="mail">Sign-in e-mail</label><input id="mail" name="email" type="email" value="{_esc(u.email)}" required><small class="muted">Where the console's test mails and invitations for you go. Your password and sessions stay as they are.</small>
+<button class="btn" type="submit">Change e-mail</button></form>""" if u.role == "admin" else ''}
 </section>
 <aside class="side">
 <h3>Change password</h3>

@@ -291,3 +291,15 @@ def test_console_admin_may_post_voice_camera_and_image_without_the_api_key(desk,
     monkeypatch.setattr(camera, "inspect_frame", lambda image, mime="image/jpeg": [])
     assert desk.post("/camera/CAM-SALES-01", files={"image": ("f.jpg", b"x", "image/jpeg")}).json() == {"findings": []}
     assert desk.post("/camera/CAM-NOPE", files={"image": ("f.jpg", b"x", "image/jpeg")}).status_code == 404
+
+
+def test_admin_can_change_a_sign_in_email_including_their_own(desk):
+    me = desk.get("/me").json()["id"]
+    r = desk.post(f"/users/{me}/email", data={"email": "Boss@Test.example"}, follow_redirects=False)
+    assert r.status_code == 303 and "changed" in r.headers["location"]
+    assert desk.get("/me").json()["email"] == "boss@test.example"          # same session, new address
+    assert desk.post(f"/users/{me}/email", data={"email": "nonsense"}).status_code == 422
+    desk.post("/users", data={"name": "Ali", "email": "a@test", "role": "agent"}, follow_redirects=False)
+    r = desk.post(f"/users/{me}/email", data={"email": "a@test"}, follow_redirects=False)
+    assert "already+exists" in r.headers["location"]
+    assert 'name="email" type="email" value="boss@test.example"' in desk.get("/profile").text
