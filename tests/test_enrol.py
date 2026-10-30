@@ -138,3 +138,18 @@ def test_the_agent_knows_an_enrolled_client_by_their_contact(monkeypatch):
         db.add(t); db.flush()
         prompt = AGENTS["L1"].system_prompt(t, db=db)
     assert "belongs to Emma Johnson (E1001)" in prompt
+
+
+def test_an_enrolled_client_passes_identity_without_a_birth_year(monkeypatch):
+    from app import tools
+    from app.db import Client, Ticket
+    from app.tools import Ctx
+    on()
+    monkeypatch.setitem(systems.USERS["E1001"], "birth_year", None)      # like Entra: no birth year on file
+    with session() as db:
+        db.add(Client(name="Grace Hopper", phone="", email="grace@example.com", employee_no="E1001", enabled=True))
+        t = Ticket(title="x", requester="grace@example.com", status="open", owner="L1")
+        db.add(t); db.flush()
+        ctx = Ctx(db=db, ticket=t, agent="L1")
+        assert tools.verify_identity(ctx, "E1001", 0)["ok"] is True and t.verified
+        assert tools.verify_identity(ctx, "E1002", 0)["ok"] is False      # only themselves

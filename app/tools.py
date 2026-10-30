@@ -114,6 +114,12 @@ def verify_identity(ctx: Ctx, employee_no: str, birth_year: int) -> dict:
     from app.db import Setting, _now
     u = systems.get_user(employee_no)
     owners = systems.employees_by_contact(ctx.ticket.requester)
+    if not owners:                                   # a support-page client (self-enrolled or added by an admin): the desk bound this contact itself
+        from app.db import Client
+        col = Client.email if "@" in (ctx.ticket.requester or "") else Client.phone
+        c = ctx.db.query(Client).filter(col == ctx.ticket.requester, Client.enabled.is_(True)).first()
+        if c is not None and c.employee_no:
+            owners = [c.employee_no]
     if owners and employee_no not in owners:
         other = systems.get_user(owners[0]) or {}
         return {"ok": False, "error": f"this number/address belongs to {other.get('name', owners[0])} ({owners[0]}); requests are only for "
