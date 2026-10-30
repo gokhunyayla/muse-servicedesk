@@ -111,10 +111,10 @@ T = {
     "ask_email_again": {"tr": "Geçerli bir e-posta adresi yazın ya da \"geç\" deyin.",
                         "en": "Type a valid e-mail address or say \"skip\"."},
     "working": {"tr": "Hesabınızı açıyorum, birkaç saniye…", "en": "Creating your account, a few seconds…"},
-    "done": {"tr": "Hesabınız hazır, {name}.\nKullanıcı adı: {upn}\nİlk şifre: {pw} (ilk girişte değiştirilecek)\n{mailbox}\n"
+    "done": {"tr": "Hesabınız hazır, {name}.\nKullanıcı adı: {upn}\nİlk şifre: {pw} (ilk girişte değiştirilecek)\nSicil numaranız: {emp} (masa hesabınıza dokunmadan önce bunu sorar)\n{mailbox}\n"
                    "Artık buradan ya da {support} adresinden yazabilirsiniz; şifre sıfırlama, yazıcı, VPN, lisans, oltalama… ne isterseniz. "
                    "Örnek: \"şifremi unuttum\". Hesap {until} tarihine kadar geçerli.",
-             "en": "Your account is ready, {name}.\nUsername: {upn}\nFirst password: {pw} (you will change it at the first sign-in)\n{mailbox}\n"
+             "en": "Your account is ready, {name}.\nUsername: {upn}\nFirst password: {pw} (you will change it at the first sign-in)\nYour employee number: {emp} (the desk asks for it before touching your account)\n{mailbox}\n"
                    "You can write here or at {support}: password reset, printer, VPN, licences, a suspicious e-mail… whatever you like. "
                    "Try: \"I forgot my password\". The account is valid until {until}."},
     "mailbox_yes": {"tr": "Posta kutunuz: https://outlook.office.com (aynı kullanıcı adı).", "en": "Your mailbox: https://outlook.office.com (same username)."},
@@ -272,7 +272,7 @@ def create(db, name: str, phone: str, email: str, lang: str) -> str:
                            "license": sku, "created": _now().isoformat(), "disabled": False})
     db.flush()
     until = cfg.get("expires_on") or _t("never", lang)
-    reply = _t("done", lang, name=name.split()[0], upn=upn, pw=pw, support=support, until=until,
+    reply = _t("done", lang, name=name.split()[0], upn=upn, pw=pw, emp=emp, support=support, until=until,
                mailbox=_t("mailbox_yes" if sku else "mailbox_no", lang))
     if email and "@" in email:
         try:
