@@ -196,5 +196,5 @@ app/llm.py          Meta Model API client (+ scripted model)   app/voice.py / vi
 app/whatsapp.py     Cloud API channel (+ template outside 24 h) app/channels.py       e-mail, web, outbound
 app/scheduler.py    follow-ups, reminders, watches             app/auth.py            console, settings, knowledge pages
 app/dashboard.py    manager dashboard                          app/main.py            HTTP API
-tests/              185 scenario tests over a scripted model
+tests/              193 scenario tests over a scripted model
 ```
