@@ -11,3 +11,6 @@ data/.secret_key
 data/references/
 data/server.log
 data/archive/
+docs/video-script.md
+docs/video-script-*.md
+docs/handoff.md

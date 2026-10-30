@@ -16,7 +16,7 @@ MAX_DEPTH = 3
 MAX_REFUSALS = 3     # the same tool refused this many times on one ticket: stop and hand off to a person
 
 RULES = """Rules:
-- Reply in the employee's language, short and plain.
+- Reply in this ticket's language (stated below), short and plain — not the language of the employee's earlier tickets.
 - When the employee's device is known and a safe check or fix fits the symptom (network_diagnostics, or the
   non-disruptive scripts dns-reset, perf-report, patch-status, printer-fix), run it FIRST and tell them what it
   found; ask only what the result does not answer. Don't ask an employee for facts the device can report.
@@ -306,6 +306,8 @@ class Agent:
             state += (f"\nThis ticket is already resolved (\"{ticket.resolution}\") and the employee was asked for "
                       f"a 1-5 rating. If their message is a number, record_rating and thank them in one line. "
                       f"If it is just thanks, reply in one line. Do not ask what they need help with.")
+        lang = ticket_lang(ticket)
+        state += f"\nLanguage of this ticket: {'Turkish' if lang == 'tr' else 'English'}. Write every message to the employee in it."
         history = requester_history(db, ticket) if db is not None else ""
         return (f"You are the {self.tier} agent of an autonomous IT service desk. {self.role}\n\n{RULES}\n\n"
                 f"SOPs in your knowledge pool (search_knowledge to read one):\n{sops}\n\n"
