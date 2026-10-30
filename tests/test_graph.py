@@ -207,3 +207,11 @@ def test_attribute_mapping_and_tenant_country_for_new_accounts(fake, desk):
     emp, upn, pw = graph.create_user("Noah Smith", "Sales", "", "")
     assert upn == "noah.smith@cloudrium.com" and emp == upn and "employeeId" not in created
     assert created["usageLocation"] == "GB"                       # the tenant's own country, not a fixed one
+
+
+def test_admin_can_read_the_latest_bounces(fake, desk):
+    fake.inbox.append({"id": "ndr-1", "subject": "Undeliverable: Your sign-in code", "receivedDateTime": "2026-10-30T19:05:00Z",
+                       "from": {"emailAddress": {"address": "postmaster@cloudrium.com"}},
+                       "body": {"contentType": "html", "content": "<p>Remote server returned '550 5.7.750 Service unavailable. Client blocked from sending from unregistered domain'</p>"}})
+    r = desk.get("/settings/email/bounces")
+    assert r.status_code == 200 and "5.7.750" in r.json()[0]["text"]

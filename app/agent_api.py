@@ -145,6 +145,16 @@ def cancel_people_process(process_id: int, request: Request, admin: User = Depen
     return {"ok": True, "status": "cancelled"}
 
 
+@router.get("/settings/email/bounces")
+def email_bounces(request: Request, admin: User = Depends(admin_user)) -> list[dict]:
+    """Why outside mail from the Microsoft 365 mailbox fails: the latest non-delivery reports, read over Graph."""
+    from app import graph
+    try:
+        return graph.recent_bounces()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Microsoft 365: {str(e)[:200]}")
+
+
 @router.post("/vulnwatch/run")
 def vulnwatch_run(request: Request) -> dict:
     """Run the vulnerability watch now (console admins, or an integration with the API key). It runs in the background:

@@ -363,6 +363,28 @@ def send_mail(to: str, subject: str, text: str) -> None:
     _call("POST", f"/users/{_mailbox()}/sendMail", json=body)
 
 
+def recent_bounces(limit: int = 5) -> list[dict]:
+    """The latest non-delivery reports in the desk mailbox (postmaster mail), with the diagnostic text: this is where
+    Exchange Online says *why* an outside address could not be reached (an admin reads it from Settings → E-mail)."""
+    import re
+    params = {"$orderby": "receivedDateTime desc", "$top": 25, "$select": "subject,from,receivedDateTime,body"}
+    d = _call("GET", f"/users/{_mailbox()}/mailFolders/inbox/messages", params=params)
+    out = []
+    for m in d.get("value", []):
+        addr = ((m.get("from") or {}).get("emailAddress") or {}).get("address", "").lower()
+        subject = m.get("subject") or ""
+        if not (addr.startswith("postmaster") or addr.startswith("mailer-daemon") or subject.lower().startswith(("undeliverable", "teslim edilemedi"))):
+            continue
+        text = m.get("body", {}).get("content", "") or ""
+        text = re.sub(r"<style.*?</style>|<script.*?</script>", " ", text, flags=re.S | re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        out.append({"received": m.get("receivedDateTime", ""), "subject": subject, "text": text[:1500]})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def new_messages(since_iso: str, limit: int = 20) -> list[dict]:
     """Inbox mail received after ``since_iso``, oldest first, in the e-mail channel's parsed shape."""
     import re
